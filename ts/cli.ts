@@ -77,6 +77,17 @@ function fixturePayloads(path: string): any[] {
   return Array.isArray(payloads) ? payloads : [payloads];
 }
 
+/** Build a connector client with a clean one-line error when env is missing —
+ * validated BEFORE any output, mirroring the original guard semantics. */
+function liveClient<T>(build: () => T, requiredEnv: string): T {
+  try {
+    return build();
+  } catch (err: any) {
+    console.log(`live sync needs ${requiredEnv} set (personal credentials); ${err.message}`);
+    process.exit(1);
+  }
+}
+
 const ingest = program.command("ingest").description("Ingest sources into the catalog");
 
 ingest
@@ -95,11 +106,14 @@ ingest
     }
     const { ConfluenceClient } = await import("./connectors/confluence.js");
     const { getCursor } = await import("./store.js");
+    const conf = liveClient(
+      () => new ConfluenceClient(),
+      "EIL_CONFLUENCE_URL and EIL_CONFLUENCE_TOKEN",
+    );
     const client = await connect();
     const cursor = await getCursor(client, "confluence");
     await client.end();
     console.log(`live sync from cursor: ${cursor ?? "(beginning)"}`);
-    const conf = new ConfluenceClient();
     const docs = (async function* () {
       for await (const page of conf.updatedSince(cursor)) yield normalize(page, opts.tenant);
     })();
@@ -122,11 +136,11 @@ ingest
     }
     const { JiraClient } = await import("./connectors/jira.js");
     const { getCursor } = await import("./store.js");
+    const jira = liveClient(() => new JiraClient(), "EIL_JIRA_URL and EIL_JIRA_TOKEN");
     const client = await connect();
     const cursor = await getCursor(client, "jira");
     await client.end();
     console.log(`live sync from cursor: ${cursor ?? "(beginning)"}`);
-    const jira = new JiraClient();
     const docs = (async function* () {
       for await (const issue of jira.updatedSince(cursor)) yield normalize(issue, opts.tenant);
     })();

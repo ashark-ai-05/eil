@@ -44,3 +44,5 @@ jobs:
           pnpm -s eil search "payment retries" | grep -q "confluence:page:12345"
           pnpm -s eil eval --min-recall 1.0
           pnpm -s eil tools | grep -q '"search_docs"'
+          (env -u EIL_JIRA_URL pnpm -s eil ingest jira 2>&1 || true) | grep -q "live sync needs"
+          (env -u EIL_JIRA_URL pnpm -s eil ingest jira 2>&1 || true) | grep -vq "at required"
