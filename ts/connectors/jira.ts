@@ -18,9 +18,12 @@ export class JiraClient {
     this.client = makeClient("JIRA", baseUrl, token, fetcher);
   }
 
-  async *updatedSince(cursor: string | null): AsyncGenerator<JiraIssue> {
-    let jql = "order by updated asc";
-    if (cursor) jql = `updated >= "${cqlTs(cursor)}" order by updated asc`;
+  async *updatedSince(cursor: string | null, scope?: string): AsyncGenerator<JiraIssue> {
+    const clauses: string[] = [];
+    if (scope) clauses.push(scope);
+    if (cursor) clauses.push(`updated >= "${cqlTs(cursor)}"`);
+    const where = clauses.length > 0 ? `${clauses.join(" and ")} ` : "";
+    const jql = `${where}order by updated asc`;
     let start = 0;
     for (;;) {
       const data = await getJson(this.client, "/rest/api/2/search", {
@@ -45,12 +48,14 @@ export class JiraClient {
   }
 
   /** Complete id listing for reconcile (flow K1 deletions) — keys only, paged. */
-  async listIds(): Promise<string[]> {
+  async listIds(scope?: string): Promise<string[]> {
+    const where = scope ? `${scope} ` : "";
+    const jql = `${where}order by key asc`;
     const ids: string[] = [];
     let start = 0;
     for (;;) {
       const data = await getJson(this.client, "/rest/api/2/search", {
-        jql: "order by key asc",
+        jql,
         fields: "key",
         maxResults: PAGE_SIZE,
         startAt: start,

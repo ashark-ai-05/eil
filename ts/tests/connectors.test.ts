@@ -145,6 +145,49 @@ describe("jira", () => {
   });
 });
 
+describe("jira scoped", () => {
+  it("with no scope builds the exact legacy JQL (regression)", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("jql") ?? "";
+      return jsonResponse({ issues: [], total: 0 });
+    };
+    const c = new JiraClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null)) {
+      /* drain */
+    }
+    expect(seen).toBe("order by updated asc");
+  });
+
+  it("injects a project predicate and composes with the cursor", async () => {
+    const seen: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      seen.push(new URL(String(url)).searchParams.get("jql") ?? "");
+      return jsonResponse({ issues: [], total: 0 });
+    };
+    const c = new JiraClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null, 'project = "PAY"')) {
+      /* drain */
+    }
+    for await (const _ of c.updatedSince("2026-06-01T00:00:00+00:00", 'project = "PAY"')) {
+      /* drain */
+    }
+    expect(seen[0]).toBe('project = "PAY" order by updated asc');
+    expect(seen[1]).toBe('project = "PAY" and updated >= "2026-06-01 00:00" order by updated asc');
+  });
+
+  it("scoped listIds carries the predicate", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("jql") ?? "";
+      return jsonResponse({ issues: [], total: 0 });
+    };
+    const c = new JiraClient("https://x", "t", fetcher);
+    await c.listIds('project = "PAY"');
+    expect(seen).toBe('project = "PAY" order by key asc');
+  });
+});
+
 describe("reconcile listings and single-item fetchers", () => {
   it("confluence listIds pages through ids only", async () => {
     const calls: number[] = [];
