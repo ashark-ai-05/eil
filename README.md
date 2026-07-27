@@ -81,16 +81,24 @@ pnpm eil search "PAY-981"                      # everything works identically
 
 Because PGlite *is* Postgres, migrations, FTS, the jsonb ACL predicate, and
 the metrics views run unchanged — `ts/tests/pglite.test.ts` proves the full
-pipeline on this backend in CI. One constraint: a single process at a time
-(the data dir is exclusively locked), so stop the MCP server before running
-CLI ingest against the same dir. It's a local single-user mode; the kube
-promotion still targets server Postgres via a normal DSN.
+pipeline on this backend in CI.
 
-Two heavier fallbacks if you outgrow it locally: `pnpm add -D
-embedded-postgres@17 && pnpm eil db embedded` runs native PG binaries from
-node_modules (beta upstream; darwin-arm64 binaries currently broken — treat
-as Linux/WSL2 only), or point `EIL_DATABASE_URL` at any org PG server —
-a schema on a shared dev instance costs nothing to ask for.
+**Concurrency decision rule.** PGlite locks its data dir exclusively — one
+process at a time. Fine for bootstrap and sequential use (migrate, ingest,
+then serve). The moment two things must run at once (MCP server answering
+while an ingest runs), switch tiers — it's only an env-var change, no code:
+
+| Tier | Concurrent processes | Install rights |
+|---|---|---|
+| `pglite://<dir>` | no (exclusive lock) | none — pnpm only |
+| `pnpm eil db embedded` (embedded-postgres, Linux/WSL2) | **yes** — real PG server as your user | none |
+| apt-in-WSL2 / brew | yes | sudo in your distro / brew |
+| org dev PG server (`EIL_DATABASE_URL=...`) | yes | none — ask for a schema |
+
+Note the darwin-arm64 embedded binaries are broken upstream (missing ICU
+dylib) — on macOS use brew; embedded is the Linux/WSL2 no-admin concurrency
+tier, which is exactly the work-machine case. Kube promotion targets server
+Postgres via a normal DSN either way.
 
 ## Integrating with existing MCP setups
 
