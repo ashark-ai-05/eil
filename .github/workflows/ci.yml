@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: eil
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      EIL_DATABASE_URL: postgresql://postgres@localhost:5432/eil
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - name: migrations + fixture ingest + search smoke test
+        run: |
+          uv run eil db migrate
+          uv run eil ingest confluence --fixture tests/fixtures/confluence_page.json
+          uv run eil ingest jira --fixture tests/fixtures/jira_issue.json
+          uv run eil search "PAY-981" | grep -q "jira:issue:PAY-981"
+          uv run eil search "payment retries" | grep -q "confluence:page:12345"
