@@ -35,3 +35,4 @@ jobs:
           uv run eil ingest jira --fixture tests/fixtures/jira_issue.json
           uv run eil search "PAY-981" | grep -q "jira:issue:PAY-981"
           uv run eil search "payment retries" | grep -q "confluence:page:12345"
+          uv run eil eval --min-recall 1.0

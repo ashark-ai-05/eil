@@ -62,6 +62,24 @@ def search_code(query: str, limit: int = 10) -> str:
 
 
 @mcp.tool()
+def fetch_logs(query: str, minutes: int = 60, limit: int = 20, index: str = "") -> str:
+    """Query production logs live from the logging ELK (never indexed here).
+    Lucene query_string syntax; results are recency-sorted and hard-capped.
+    Use for incident context: error messages, service names, correlation ids."""
+    import os
+
+    if not (os.environ.get("EIL_ELK_URL") and os.environ.get("EIL_ELK_TOKEN")):
+        return json.dumps({"error": "EIL_ELK_URL / EIL_ELK_TOKEN not configured"})
+    from eil.connectors.elk import ElkClient
+
+    client = ElkClient()
+    return _run(
+        "fetch_logs", {"query": query, "minutes": minutes},
+        lambda c: client.fetch_logs(query, index or None, minutes, limit),
+    )
+
+
+@mcp.tool()
 def expand(id: str) -> str:
     """Link-graph neighborhood of a document: tickets, pages, and notes that
     reference or are referenced by it. Zero-cost way to gather related context."""

@@ -129,6 +129,31 @@ def ingest_obsidian(
     _ingest("obsidian", lambda d, tenant: d, walk_vault(vault, tenant), tenant)
 
 
+@app.command("eval")
+def eval_cmd(
+    k: int = 10,
+    min_recall: Annotated[float, typer.Option(help="Exit non-zero below this mean recall")] = 0.0,
+    golden: Path = Path("docs/golden-queries.md"),
+) -> None:
+    """Run the golden-query eval: recall@k through the real retrieval path."""
+    from eil import db, evalrun
+    from eil.search import Viewer
+
+    entries = evalrun.parse_golden(golden)
+    if not entries:
+        typer.echo(f"no golden entries found in {golden}")
+        raise typer.Exit(1)
+    with db.connect() as conn:
+        report = evalrun.run(conn, Viewer.local(), entries, k)
+    for q in report["queries"]:
+        marker = "ok " if q["recall"] == 1.0 else "MISS"
+        typer.echo(f"  {marker} recall={q['recall']:.2f}  `{q['query']}`"
+                   + (f"  missing: {q['missing']}" if q["missing"] else ""))
+    typer.echo(f"mean recall@{k}: {report['mean_recall']} over {len(entries)} queries")
+    if report["mean_recall"] < min_recall:
+        raise typer.Exit(2)
+
+
 @app.command()
 def serve() -> None:
     """Run the MCP server on stdio (wire this into Amp / Claude Code)."""

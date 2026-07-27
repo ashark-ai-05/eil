@@ -14,6 +14,7 @@ from typing import Any
 
 import psycopg
 
+from eil import ranking
 from eil.fusion import rrf
 from eil.router import Route, classify
 
@@ -58,7 +59,7 @@ def search_docs(
     # rrf() already fuses however many arms exist.
     rows = conn.execute(
         f"""
-        SELECT c.doc_id, d.title, d.url, d.quality_tier,
+        SELECT c.doc_id, d.title, d.url, d.quality_tier, d.updated_at,
                ts_rank(c.tsv, websearch_to_tsquery('english', %(q)s)) AS rank,
                ts_headline('english', c.text,
                            websearch_to_tsquery('english', %(q)s), %(opts)s) AS snippet
@@ -71,12 +72,25 @@ def search_docs(
     ).fetchall()
 
     by_doc: dict[str, dict[str, Any]] = {}
-    for doc_id, title, url, tier, _rank, snippet in rows:
+    for doc_id, title, url, tier, updated_at, _rank, snippet in rows:
         by_doc.setdefault(
-            doc_id, {"id": doc_id, "title": title, "url": url, "tier": tier, "snippet": snippet}
+            doc_id,
+            {"id": doc_id, "title": title, "url": url, "tier": tier,
+             "snippet": snippet, "_updated": updated_at},
         )
     fused = rrf({"fts": list(by_doc)})
-    results = [by_doc[doc_id] for doc_id, _score in fused[:limit]]
+    scored = sorted(
+        (
+            (score * ranking.modifier(by_doc[doc_id]["tier"], by_doc[doc_id]["_updated"]), doc_id)
+            for doc_id, score in fused
+        ),
+        key=lambda pair: (-pair[0], pair[1]),
+    )
+    results = []
+    for score, doc_id in scored[:limit]:
+        entry = {k: v for k, v in by_doc[doc_id].items() if k != "_updated"}
+        entry["score"] = round(score, 6)
+        results.append(entry)
     return {"route": decision.route.value, "results": results}
 
 
