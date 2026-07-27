@@ -121,6 +121,38 @@ describe("pglite zero-install backend", () => {
     expect(orphanLinks.rows[0].n).toBe(0); // cascade followed
   });
 
+  it("integrity audit passes on a healthy catalog and flags planted damage", async () => {
+    const { integrity } = await import("../quality.js");
+    const healthy = await integrity(client);
+    expect(healthy.ok).toBe(true);
+    expect(healthy.docs_without_chunks).toBe(0);
+    expect(healthy.chunks_null_tsv).toBe(0);
+    expect(healthy.links_dangling_dst).toBeGreaterThanOrEqual(1); // PAY-990 marker, by design
+
+    // plant damage: a doc with no chunks and no owner
+    await client.query(
+      "INSERT INTO documents (id, source, title, content_hash, body, ingested_by)" +
+        " VALUES ('confluence:page:broken', 'confluence', 'Broken', 'x', 'tiny', '')",
+    );
+    const damaged = await integrity(client);
+    expect(damaged.ok).toBe(false);
+    expect(damaged.docs_without_chunks).toBe(1);
+    expect(damaged.docs_unowned).toBe(1);
+    expect(damaged.docs_empty_body).toBeGreaterThanOrEqual(1);
+    await client.query("DELETE FROM documents WHERE id = 'confluence:page:broken'");
+    expect((await integrity(client)).ok).toBe(true);
+  });
+
+  it("drift sampling skips cleanly when source env is absent", async () => {
+    const { drift } = await import("../quality.js");
+    delete process.env.EIL_CONFLUENCE_URL;
+    delete process.env.EIL_JIRA_URL;
+    const report = await drift(client, 5);
+    expect(report.sampled).toBe(0);
+    expect(report.drifted).toEqual([]);
+    expect(report.skipped.length).toBeGreaterThanOrEqual(2); // both fixture docs skipped
+  });
+
   it("tenant-scoped viewer sees only its tenant; unscoped viewer sees all", async () => {
     const other = normalizePage({ ...fixture("confluence_page.json"), id: "55555" }, "team-b");
     await upsertDocument(client, other);

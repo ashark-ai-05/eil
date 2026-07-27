@@ -46,3 +46,4 @@ jobs:
           pnpm -s eil tools | grep -q '"search_docs"'
           (env -u EIL_JIRA_URL pnpm -s eil ingest jira 2>&1 || true) | grep -q "live sync needs"
           (env -u EIL_JIRA_URL pnpm -s eil ingest jira 2>&1 || true) | grep -vq "at required"
+          pnpm -s eil audit --strict | grep -q '"ok": true'

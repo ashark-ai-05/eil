@@ -268,6 +268,25 @@ program
   });
 
 program
+  .command("audit")
+  .description("Data-trust audit: catalog integrity invariants + optional live drift sampling")
+  .option("--drift <n>", "sample N docs and compare against live source fetches", "0")
+  .option("--strict", "exit non-zero if integrity invariants fail")
+  .action(async (opts) => {
+    const { drift, integrity } = await import("./quality.js");
+    const client = await connect();
+    try {
+      const report: Record<string, unknown> = { integrity: await integrity(client) };
+      const sample = Number(opts.drift);
+      if (sample > 0) report.drift = await drift(client, sample);
+      console.log(JSON.stringify(report, null, 2));
+      if (opts.strict && !(report.integrity as { ok: boolean }).ok) process.exit(2);
+    } finally {
+      await client.end();
+    }
+  });
+
+program
   .command("report")
   .description("Generate the self-contained HTML metrics report from the metrics views")
   .option("--out <path>", "output file", "docs/metrics-report.html")
