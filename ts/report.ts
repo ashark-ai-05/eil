@@ -25,8 +25,19 @@ svg text{font-family:ui-monospace,Menlo,monospace;font-size:9px;fill:#46534F}
 const ACCENT = "#0E7C6B";
 const CAUTION = "#A85E14";
 
+const fmt = (v: unknown): string => {
+  if (v instanceof Date) {
+    // date-typed columns come back as local-midnight Dates; render dates as dates
+    const iso = v.toISOString();
+    return iso.endsWith("T00:00:00.000Z") || v.getHours() === 0
+      ? new Date(v.getTime() - v.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+      : iso.slice(0, 16).replace("T", " ");
+  }
+  return String(v);
+};
+
 const esc = (s: unknown) =>
-  String(s)
+  fmt(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

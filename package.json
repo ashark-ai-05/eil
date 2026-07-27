@@ -19,6 +19,11 @@
     "zod": "^3.24.0",
     "zod-to-json-schema": "^3.24.0"
   },
+  "pnpm": {
+    "overrides": {
+      "@hono/node-server": ">=2.0.5"
+    }
+  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
     "@types/node": "^22.0.0",

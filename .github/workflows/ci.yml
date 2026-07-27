@@ -24,15 +24,23 @@ jobs:
       EIL_DATABASE_URL: postgresql://postgres@localhost:5432/eil
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run pytest -q
-      - name: migrations + fixture ingest + search smoke test
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: migrations + fixture ingest + search + eval smoke
         run: |
-          uv run eil db migrate
-          uv run eil ingest confluence --fixture tests/fixtures/confluence_page.json
-          uv run eil ingest jira --fixture tests/fixtures/jira_issue.json
-          uv run eil search "PAY-981" | grep -q "jira:issue:PAY-981"
-          uv run eil search "payment retries" | grep -q "confluence:page:12345"
-          uv run eil eval --min-recall 1.0
+          pnpm -s eil db migrate
+          pnpm -s eil ingest confluence --fixture tests/fixtures/confluence_page.json
+          pnpm -s eil ingest jira --fixture tests/fixtures/jira_issue.json
+          pnpm -s eil search "PAY-981" | grep -q "jira:issue:PAY-981"
+          pnpm -s eil search "payment retries" | grep -q "confluence:page:12345"
+          pnpm -s eil eval --min-recall 1.0
+          pnpm -s eil tools | grep -q '"search_docs"'
