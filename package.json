@@ -1,0 +1,30 @@
+{
+  "name": "eil",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Enterprise Intelligence Layer — knowledge plane (TypeScript)",
+  "scripts": {
+    "eil": "tsx ts/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ts",
+    "lint:fix": "biome check --write ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "commander": "^13.0.0",
+    "htmlparser2": "^10.0.0",
+    "pg": "^8.13.0",
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.24.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
