@@ -1,0 +1,80 @@
+{
+  "title": "EIL Overview",
+  "uid": "eil-overview",
+  "schemaVersion": 39,
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+    {
+      "title": "MCP calls by tool (north star)",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "eil-pg" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT tool, sum(calls) AS calls FROM metrics.vw_tool_calls WHERE day >= now()::date - 30 GROUP BY tool ORDER BY calls DESC"
+        }
+      ]
+    },
+    {
+      "title": "Eval recall trend",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "eil-pg" },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, mean_recall FROM metrics.vw_eval_trend ORDER BY at"
+        }
+      ]
+    },
+    {
+      "title": "Zero-result rate (search tools)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "eil-pg" },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day::timestamptz AS time, tool AS metric, zero_rate FROM metrics.vw_zero_results ORDER BY day"
+        }
+      ]
+    },
+    {
+      "title": "Connector health — cursor age (hours)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "eil-pg" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT source, cursor, age_hours FROM metrics.vw_connector_health ORDER BY age_hours DESC"
+        }
+      ]
+    },
+    {
+      "title": "LLM calls by provider/model",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "eil-pg" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT day, provider, model, calls, prompt_tokens, completion_tokens, avg_latency_ms, failures FROM metrics.vw_llm_calls ORDER BY day DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "title": "Spend by tool (vendor-native units)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "eil-pg" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT day, tool, unit, quantity, cost_usd FROM metrics.vw_spend_daily ORDER BY day DESC LIMIT 60"
+        }
+      ]
+    }
+  ]
+}

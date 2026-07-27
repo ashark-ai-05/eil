@@ -1,0 +1,11 @@
+apiVersion: 1
+datasources:
+  - name: EIL Postgres
+    type: postgres
+    uid: eil-pg
+    url: ${EIL_PG_HOST:-localhost:5432}
+    database: eil
+    user: ${EIL_PG_USER:-$USER}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1700

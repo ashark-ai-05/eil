@@ -145,6 +145,7 @@ def eval_cmd(
         raise typer.Exit(1)
     with db.connect() as conn:
         report = evalrun.run(conn, Viewer.local(), entries, k)
+        evalrun.record(conn, report)
     for q in report["queries"]:
         marker = "ok " if q["recall"] == 1.0 else "MISS"
         typer.echo(f"  {marker} recall={q['recall']:.2f}  `{q['query']}`"
@@ -152,6 +153,19 @@ def eval_cmd(
     typer.echo(f"mean recall@{k}: {report['mean_recall']} over {len(entries)} queries")
     if report["mean_recall"] < min_recall:
         raise typer.Exit(2)
+
+
+@app.command()
+def report(out: Path = Path("docs/metrics-report.html")) -> None:
+    """Generate the self-contained HTML metrics report from the metrics views."""
+    from eil import db
+    from eil import report as r
+
+    with db.connect() as conn:
+        html_text = r.render(r.collect(conn))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html_text, encoding="utf-8")
+    typer.echo(f"wrote {out}")
 
 
 @app.command()
@@ -164,15 +178,11 @@ def serve() -> None:
 
 @app.command()
 def search(query: str, limit: int = 8) -> None:
-    """Debug: run search_docs directly and print the result."""
-    from eil import db
-    from eil import search as s
+    """Debug: run search_docs through the tool registry (audited, like MCP)."""
+    from eil import tools
 
-    viewer = s.Viewer.local()
-    with db.connect() as conn:
-        typer.echo(
-            json.dumps(s.search_docs(conn, viewer, query, limit), indent=2, ensure_ascii=False)
-        )
+    result = tools.call_tool("search_docs", {"query": query, "limit": limit})
+    typer.echo(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

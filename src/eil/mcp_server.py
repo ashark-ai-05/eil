@@ -1,8 +1,8 @@
-"""MCP server (stdio) — the knowledge plane's only door for agents.
-
-Local mode: identity is the OS user, transport is stdio; after promotion to
-kube this same server runs over HTTP with per-user tokens from the
-token-issuer. Tool contracts do not change across that move.
+"""MCP server (stdio) — a thin FastMCP mount over the framework-agnostic
+tool registry (eil.tools). All logic, env gating, ACLs, and audit logging
+live in tools.call_tool(); this file only adapts specs to FastMCP's typed
+signature style. A different host (work-side MCP connector, HTTP transport
+on kube) mounts the same registry instead of this file.
 """
 
 from __future__ import annotations
@@ -11,79 +11,43 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
-from eil import db, search
+from eil import tools
 from eil.search import Viewer
 
 mcp = FastMCP("eil-knowledge")
 _VIEWER = Viewer.local()
 
-
-def _run(tool: str, args: dict, fn) -> str:
-    with db.connect() as conn:
-        result = fn(conn)
-        count = len(result.get("results", result.get("edges", []))) if isinstance(result, dict) else 0
-        search.audit(conn, _VIEWER.principal, tool, args, count)
-    return json.dumps(result, ensure_ascii=False)
+_D = {name: spec.description for name, spec in tools.REGISTRY.items()}
 
 
-@mcp.tool()
+@mcp.tool(description=_D["search_docs"])
 def search_docs(query: str, limit: int = 8) -> str:
-    """Search indexed org knowledge (Confluence, Jira, notes). Returns compact
-    results: ids, titles, snippets. Use get_doc(id) to read a full document.
-    Ticket keys (e.g. PAY-981) are resolved directly with their linked context."""
-    return _run(
-        "search_docs", {"query": query}, lambda c: search.search_docs(c, _VIEWER, query, limit)
-    )
+    return json.dumps(tools.call_tool("search_docs", {"query": query, "limit": limit}, _VIEWER))
 
 
-@mcp.tool()
+@mcp.tool(description=_D["get_doc"])
 def get_doc(id: str, section: int = 0) -> str:
-    """Fetch one document's content by canonical id (from search_docs/expand
-    results). Large documents are windowed; pass section=1,2,... for more."""
-    return _run(
-        "get_doc", {"id": id, "section": section},
-        lambda c: search.get_doc(c, _VIEWER, id, section) or {"error": f"not found: {id}"},
-    )
+    return json.dumps(tools.call_tool("get_doc", {"id": id, "section": section}, _VIEWER))
 
 
-@mcp.tool()
-def search_code(query: str, limit: int = 10) -> str:
-    """Search source code across Bitbucket repositories. Exact terms work best
-    (no regex). Returns repo, path, and matching lines. v0: Bitbucket built-in
-    search — your repo permissions apply natively."""
-    import os
-
-    if not (os.environ.get("EIL_BITBUCKET_URL") and os.environ.get("EIL_BITBUCKET_TOKEN")):
-        return json.dumps({"error": "EIL_BITBUCKET_URL / EIL_BITBUCKET_TOKEN not configured"})
-    from eil.connectors.bitbucket import BitbucketSearchClient
-
-    client = BitbucketSearchClient()
-    return _run("search_code", {"query": query}, lambda c: client.search_code(query, limit))
-
-
-@mcp.tool()
-def fetch_logs(query: str, minutes: int = 60, limit: int = 20, index: str = "") -> str:
-    """Query production logs live from the logging ELK (never indexed here).
-    Lucene query_string syntax; results are recency-sorted and hard-capped.
-    Use for incident context: error messages, service names, correlation ids."""
-    import os
-
-    if not (os.environ.get("EIL_ELK_URL") and os.environ.get("EIL_ELK_TOKEN")):
-        return json.dumps({"error": "EIL_ELK_URL / EIL_ELK_TOKEN not configured"})
-    from eil.connectors.elk import ElkClient
-
-    client = ElkClient()
-    return _run(
-        "fetch_logs", {"query": query, "minutes": minutes},
-        lambda c: client.fetch_logs(query, index or None, minutes, limit),
-    )
-
-
-@mcp.tool()
+@mcp.tool(description=_D["expand"])
 def expand(id: str) -> str:
-    """Link-graph neighborhood of a document: tickets, pages, and notes that
-    reference or are referenced by it. Zero-cost way to gather related context."""
-    return _run("expand", {"id": id}, lambda c: search.expand(c, _VIEWER, id))
+    return json.dumps(tools.call_tool("expand", {"id": id}, _VIEWER))
+
+
+@mcp.tool(description=_D["search_code"])
+def search_code(query: str, limit: int = 10) -> str:
+    return json.dumps(tools.call_tool("search_code", {"query": query, "limit": limit}, _VIEWER))
+
+
+@mcp.tool(description=_D["fetch_logs"])
+def fetch_logs(query: str, minutes: int = 60, limit: int = 20, index: str = "") -> str:
+    return json.dumps(
+        tools.call_tool(
+            "fetch_logs", {"query": query, "minutes": minutes, "limit": limit, "index": index},
+            _VIEWER,
+        )
+    )
 
 
 def main() -> None:

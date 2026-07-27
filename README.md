@@ -45,9 +45,29 @@ Amp / Claude Code MCP config:
 }
 ```
 
-Tools exposed: `search_docs` (compact ids + snippets), `get_doc` (windowed full
-text), `expand` (link-graph neighborhood). Two-phase by design — search cheap,
-fetch only what matters.
+Tools exposed: `search_docs`, `get_doc`, `expand`, `search_code`, `fetch_logs`.
+Two-phase by design — search cheap, fetch only what matters.
+
+### Porting to another MCP host (e.g. a tool-discovery connector)
+
+The tool surface is defined once, framework-free, in `src/eil/tools.py`:
+`REGISTRY` maps name → `ToolSpec(name, description, parameters JSON-schema,
+handler, requires_env)`, and `tools.call_tool(name, args, viewer)` is the
+single dispatch point (env gating, ACL viewer, audit logging). `mcp_server.py`
+is just a thin FastMCP mount over it. To host these tools from a different
+connector: read `REGISTRY` for discovery metadata, dispatch through
+`call_tool` — no FastMCP dependency, no logic changes. Config is entirely
+env-vars (12-factor), so the same code runs wherever the env points it.
+
+## Observability
+
+Metrics live where the facts already are: `migrations/0005_metrics.sql`
+creates the `metrics` schema (usage_facts, eval_runs, identity_map) and the
+`vw_*` views that ARE the metric definitions — versioned, tested
+(tests/test_metrics.py recomputes every aggregate independently). `eil eval`
+records each run for the recall trend; `eil report` writes a self-contained
+HTML report (docs/metrics-report.html) from the views; Grafana provisioning
+for the same views lives in `observability/grafana/`.
 
 ## Development
 

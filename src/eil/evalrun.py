@@ -8,7 +8,9 @@ chunker/ranking/router change answers for its retrieval impact.
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,3 +61,27 @@ def run(
         )
     mean = sum(q["recall"] for q in per_query) / len(per_query) if per_query else 0.0
     return {"k": k, "mean_recall": round(mean, 4), "queries": per_query}
+
+
+def git_sha() -> str:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        return out.stdout.strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def record(conn: psycopg.Connection, report: dict) -> None:
+    """Persist a run into metrics.eval_runs — trend, not snapshot."""
+    misses = [
+        {"query": q["query"], "missing": q["missing"]}
+        for q in report["queries"] if q["missing"]
+    ]
+    conn.execute(
+        "INSERT INTO metrics.eval_runs (git_sha, k, mean_recall, queries, misses)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (git_sha(), report["k"], report["mean_recall"], len(report["queries"]), json.dumps(misses)),
+    )
