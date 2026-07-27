@@ -61,9 +61,7 @@ function acquirePgliteLock(lockPath: string): void {
     }
     if (alive) {
       throw new Error(
-        `pglite data dir is in use by pid ${holder} (${lockPath}). ` +
-          "PGlite supports one process at a time — stop the other process, " +
-          "or switch to a server tier (see README concurrency decision rule).",
+        `pglite data dir is in use by pid ${holder} (${lockPath}). PGlite supports one process at a time — stop the other process, or switch to a server tier (see README concurrency decision rule).`,
       );
     }
     rmSync(lockPath, { force: true }); // stale lock from a dead process
