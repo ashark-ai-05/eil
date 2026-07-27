@@ -45,6 +45,21 @@ def get_doc(id: str, section: int = 0) -> str:
 
 
 @mcp.tool()
+def search_code(query: str, limit: int = 10) -> str:
+    """Search source code across Bitbucket repositories. Exact terms work best
+    (no regex). Returns repo, path, and matching lines. v0: Bitbucket built-in
+    search — your repo permissions apply natively."""
+    import os
+
+    if not os.environ.get("EIL_BITBUCKET_URL"):
+        return json.dumps({"error": "EIL_BITBUCKET_URL / EIL_BITBUCKET_TOKEN not configured"})
+    from eil.connectors.bitbucket import BitbucketSearchClient
+
+    client = BitbucketSearchClient()
+    return _run("search_code", {"query": query}, lambda c: client.search_code(query, limit))
+
+
+@mcp.tool()
 def expand(id: str) -> str:
     """Link-graph neighborhood of a document: tickets, pages, and notes that
     reference or are referenced by it. Zero-cost way to gather related context."""

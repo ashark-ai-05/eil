@@ -14,6 +14,19 @@ from eil.chunker import chunk
 from eil.models import CanonicalDoc
 
 
+def get_cursor(conn: psycopg.Connection, source: str) -> str | None:
+    row = conn.execute("SELECT cursor FROM sync_cursors WHERE source = %s", (source,)).fetchone()
+    return row[0] if row else None
+
+
+def set_cursor(conn: psycopg.Connection, source: str, cursor: str) -> None:
+    conn.execute(
+        "INSERT INTO sync_cursors (source, cursor) VALUES (%s, %s)"
+        " ON CONFLICT (source) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()",
+        (source, cursor),
+    )
+
+
 def upsert_document(conn: psycopg.Connection, doc: CanonicalDoc) -> bool:
     """Insert or update a document and its chunks/links. Returns True if content changed."""
     row = conn.execute(

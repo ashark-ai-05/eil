@@ -66,9 +66,15 @@ same chunks, byte for byte, on every platform (hence `eol=lf` in .gitattributes)
 - [x] Postgres schema: documents, chunks (FTS), links, cursors, audit
 - [x] Fixture ingest for Confluence + Jira with hash gate + link extraction
 - [x] MCP stdio server: search_docs / get_doc / expand, audit-logged
-- [ ] Live connectors with personal credentials (phase 1)
-- [ ] `search_code` v0 proxying Bitbucket DC search (phase 1)
-- [ ] Golden-query log → recall baseline (phase 1)
+- [x] Live connectors (cursor-based CQL/JQL sync, personal PATs, storage-format→md)
+- [x] `search_code` v0 proxying Bitbucket DC search (native repo ACLs)
+- [x] LLM provider layer: maas | amp | copilot, usage logged to `llm_calls`
+- [ ] Golden-query log → recall baseline (`docs/golden-queries.md`, needs real usage)
+- [ ] ACL gate + per-user tokens + red-team suite (phase 2 — the rollout gate)
+
+Live sync env (personal credentials only): `EIL_CONFLUENCE_URL/TOKEN`,
+`EIL_JIRA_URL/TOKEN`, `EIL_BITBUCKET_URL/TOKEN`. Then `uv run eil ingest
+confluence` (no --fixture) syncs incrementally from the stored cursor.
 
 Local mode ingests with **your personal credentials only** — you can only index
 what you can already read. Service accounts exist only on kube, after the ACL
