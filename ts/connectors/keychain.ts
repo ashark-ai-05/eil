@@ -120,13 +120,102 @@ function noneKeychain(): Keychain {
   return { name: "none", available: () => false, get: () => null, set: fail, delete: fail };
 }
 
-// wincred is added in Task 3; until then it falls through to noneKeychain.
+const CRED_TYPE_GENERIC = 1;
+const CRED_PERSIST_LOCAL_MACHINE = 2;
+
+const PS_PREAMBLE = `$ErrorActionPreference='Stop'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class EilCred {
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  public struct CREDENTIAL {
+    public UInt32 Flags; public UInt32 Type; public string TargetName; public string Comment;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+    public UInt32 CredentialBlobSize; public IntPtr CredentialBlob; public UInt32 Persist;
+    public UInt32 AttributeCount; public IntPtr Attributes; public string TargetAlias; public string UserName;
+  }
+  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern bool CredWrite(ref CREDENTIAL c, UInt32 f);
+  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern bool CredRead(string t, UInt32 ty, UInt32 f, out IntPtr c);
+  [DllImport("advapi32.dll", SetLastError=true)]
+  public static extern bool CredDelete(string t, UInt32 ty, UInt32 f);
+  [DllImport("advapi32.dll")] public static extern void CredFree(IntPtr c);
+}
+"@`;
+
+/** account is validated to [A-Z0-9_] before reaching here, so it is safe to
+ *  interpolate into the PowerShell string literal for the target name. */
+function psScript(op: "get" | "set" | "delete", account: string): string {
+  const target = `${SERVICE}:${account}`;
+  if (op === "set") {
+    return `${PS_PREAMBLE}
+$secret=[Console]::In.ReadToEnd()
+$bytes=[Text.Encoding]::Unicode.GetBytes($secret)
+$blob=[Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length)
+[Runtime.InteropServices.Marshal]::Copy($bytes,0,$blob,$bytes.Length)
+$c=New-Object EilCred+CREDENTIAL
+$c.Type=${CRED_TYPE_GENERIC}; $c.TargetName="${target}"; $c.UserName="${account}"
+$c.CredentialBlobSize=$bytes.Length; $c.CredentialBlob=$blob; $c.Persist=${CRED_PERSIST_LOCAL_MACHINE}
+$ok=[EilCred]::CredWrite([ref]$c,0)
+[Runtime.InteropServices.Marshal]::FreeHGlobal($blob)
+if(-not $ok){ exit 1 }`;
+  }
+  if (op === "get") {
+    return `${PS_PREAMBLE}
+$p=[IntPtr]::Zero
+if(-not [EilCred]::CredRead("${target}",${CRED_TYPE_GENERIC},0,[ref]$p)){ exit 1 }
+$c=[Runtime.InteropServices.Marshal]::PtrToStructure($p,[Type][EilCred+CREDENTIAL])
+$bytes=New-Object byte[] $c.CredentialBlobSize
+[Runtime.InteropServices.Marshal]::Copy($c.CredentialBlob,$bytes,0,$c.CredentialBlobSize)
+[EilCred]::CredFree($p)
+[Console]::Out.Write([Text.Encoding]::Unicode.GetString($bytes))`;
+  }
+  return `${PS_PREAMBLE}
+if(-not [EilCred]::CredDelete("${target}",${CRED_TYPE_GENERIC},0)){ exit 1 }`;
+}
+
+function encodePs(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+function ps(run: Runner, op: "get" | "set" | "delete", account: string, input?: string): RunResult {
+  return run(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePs(psScript(op, account))],
+    input,
+  );
+}
+
+export function wincredKeychain(run: Runner): Keychain {
+  return {
+    name: "wincred",
+    available: () =>
+      run("powershell.exe", ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.Major"])
+        .status === 0,
+    get: (a) => {
+      const r = ps(run, "get", a);
+      return r.status === 0 && r.stdout !== "" ? r.stdout : null;
+    },
+    set: (a, s) => {
+      const r = ps(run, "set", a, s);
+      if (r.status !== 0) throw new Error(`keychain write failed for ${a}`);
+    },
+    delete: (a) => {
+      ps(run, "delete", a);
+    },
+  };
+}
+
 export function keychain(runner: Runner = defaultRunner): Keychain {
   switch (selectBackend()) {
     case "security":
       return securityKeychain(runner);
     case "secret-tool":
       return secretToolKeychain(runner);
+    case "wincred":
+      return wincredKeychain(runner);
     case "memory":
       return memoryKeychain();
     default:

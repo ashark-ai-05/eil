@@ -124,3 +124,31 @@ describe("memory backend + top-level API", () => {
     expect(getSecret("EIL_JIRA_TOKEN")).toBeNull();
   });
 });
+
+import { wincredKeychain } from "../connectors/keychain.js";
+
+describe("Windows/WSL wincred backend", () => {
+  it("invokes powershell.exe with an EncodedCommand and secret on stdin", () => {
+    const { calls, runner } = recorder();
+    const kc = wincredKeychain(runner);
+    kc.set("EIL_JIRA_TOKEN", "pat-1");
+    expect(calls[0]!.cmd).toBe("powershell.exe");
+    expect(calls[0]!.args.slice(0, 3)).toEqual([
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+    ]);
+    // secret travels on stdin, never argv
+    expect(calls[0]!.input).toBe("pat-1");
+    expect(calls[0]!.args.join(" ")).not.toContain("pat-1");
+    // the encoded script targets eil:EIL_JIRA_TOKEN
+    const script = Buffer.from(calls[0]!.args[3]!, "base64").toString("utf16le");
+    expect(script).toContain("eil:EIL_JIRA_TOKEN");
+    expect(script).toContain("CredWrite");
+  });
+
+  it("get returns null when CredRead exits nonzero", () => {
+    const kc = wincredKeychain(() => ({ status: 1, stdout: "" }));
+    expect(kc.get("EIL_JIRA_TOKEN")).toBeNull();
+  });
+});
