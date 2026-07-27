@@ -401,6 +401,31 @@ pnpm eil audit --drift 20       # also re-fetch 20 sampled docs live and compare
 
 Output is a single JSON report — pipe it into monitoring or read it by eye.
 
+## Semantic search (vector arm)
+
+Search fuses lexical FTS with a **semantic (vector) arm** via reciprocal-rank
+fusion — so "login is broken" can find "authentication failure." It's
+**off until you embed**, then automatic; nothing changes for pure-FTS setups.
+
+```sh
+# point at any OpenAI-compatible embeddings endpoint (internal gateway keeps
+# data in-org); falls back to EIL_MAAS_BASE_URL if EIL_EMBED_BASE_URL is unset
+export EIL_EMBED_BASE_URL=https://your-gateway/v1
+export EIL_EMBED_MODEL=nomic-embed-text
+pnpm eil embed backfill        # embed existing chunks (embed-once)
+pnpm eil search "why do payments get stuck"   # now fuses FTS + vector
+```
+
+- **Extension-free**: embeddings are packed float32 in a `bytea` column, cosine
+  runs in-process — works on every Postgres tier (incl. zero-install PGlite)
+  with no `CREATE EXTENSION` and no admin. Brute-force is fine at personal scale;
+  pgvector/HNSW is a drop-in upgrade later.
+- **Pluggable embedder** via `EIL_EMBED_PROVIDER` (`http` default | `fake` for
+  offline trials). Re-run `embed backfill` after ingesting more; `--reembed`
+  after changing the model.
+- **Degrades safely**: if the endpoint is down or nothing is embedded yet,
+  search silently stays lexical-only.
+
 ## Observability
 
 Metrics live where the facts already are: `migrations/0005_metrics.sql`
@@ -434,5 +459,6 @@ which is how the TS port was verified.
 - [x] Data-trust audit: integrity invariants (CI-gated) + live drift sampling
 - [x] Zero-install PGlite backend + embedded-postgres no-admin concurrency tier
 - [x] OS keychain auth: keychain-first token resolution (macOS/Windows/WSL2/libsecret) + `eil auth`
+- [x] Semantic search: extension-free vector arm (bytea float32 + cosine) fused with FTS via rrf; `eil embed backfill`, pluggable embedder
 - [ ] Golden-query log growth from real usage (`docs/golden-queries.md`)
 - [ ] Per-user tokens + HTTP MCP transport (phase 2 — the kube rollout gate)
