@@ -2,28 +2,13 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createInterface } from "node:readline";
 import { Command } from "commander";
 import type pg from "pg";
 import type { CanonicalDoc } from "./contracts/models.js";
 import { connect, migrate } from "./db.js";
+import { promptHidden } from "./prompt.js";
 
 const program = new Command("eil").description("Enterprise Intelligence Layer CLI");
-
-function promptHidden(label: string): Promise<string> {
-  return new Promise((resolve) => {
-    process.stdout.write(`${label}: `);
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    // Unconditionally suppress ALL echo while the secret is typed — no redraw,
-    // backspace, or arrow-key path can leak it to the terminal.
-    (rl as any)._writeToOutput = () => {};
-    rl.question("", (answer) => {
-      rl.close();
-      process.stdout.write("\n");
-      resolve(answer.trim());
-    });
-  });
-}
 
 const db = program.command("db").description("Database management");
 db.command("migrate")
