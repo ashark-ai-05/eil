@@ -48,16 +48,25 @@ Amp / Claude Code MCP config:
 Tools exposed: `search_docs`, `get_doc`, `expand`, `search_code`, `fetch_logs`.
 Two-phase by design — search cheap, fetch only what matters.
 
-### Porting to another MCP host (e.g. a tool-discovery connector)
+### Hosting from a TypeScript tool-discovery connector (work setup)
 
-The tool surface is defined once, framework-free, in `src/eil/tools.py`:
-`REGISTRY` maps name → `ToolSpec(name, description, parameters JSON-schema,
-handler, requires_env)`, and `tools.call_tool(name, args, viewer)` is the
-single dispatch point (env gating, ACL viewer, audit logging). `mcp_server.py`
-is just a thin FastMCP mount over it. To host these tools from a different
-connector: read `REGISTRY` for discovery metadata, dispatch through
-`call_tool` — no FastMCP dependency, no logic changes. Config is entirely
-env-vars (12-factor), so the same code runs wherever the env points it.
+The language boundary is the MCP wire protocol — nothing imports Python:
+
+1. **Runtime**: the TS connector spawns `uv run eil serve` as a child MCP
+   server over stdio and proxies `tools/list` + `tools/call`. FastMCP answers
+   discovery from the same registry, so names/descriptions/schemas arrive
+   over the wire automatically.
+2. **Static discovery** (token-lean routing without spawning anything):
+   `uv run eil tools` dumps the manifest as JSON — `{name, description,
+   inputSchema, requiresEnv}` per tool. Index it in the connector's router;
+   only spawn the server when a call actually routes here.
+3. **Python hosts** (same-process): import `eil.tools.REGISTRY` and dispatch
+   via `call_tool()` — used by the CLI itself.
+
+All three paths share `tools.call_tool()`, so env gating, ACL viewer, and
+audit logging behave identically regardless of host. Config is env-vars only
+(12-factor): the work machine sets its own `EIL_*` vars and nothing else
+changes.
 
 ## Observability
 

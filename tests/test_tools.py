@@ -21,6 +21,21 @@ def test_unknown_tool_returns_error_and_catalog():
     assert "search_docs" in result["tools"]
 
 
+def test_manifest_command_emits_valid_json():
+    import json
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", "eil.cli", "tools"], capture_output=True, text=True, check=True
+    )
+    manifest = json.loads(out.stdout)
+    assert manifest["server"] == "eil-knowledge"
+    assert {t["name"] for t in manifest["tools"]} == set(REGISTRY)
+    for tool in manifest["tools"]:
+        assert tool["inputSchema"]["type"] == "object"
+
+
 def test_env_gated_tools_fail_closed_without_db(monkeypatch):
     for var in ("EIL_BITBUCKET_URL", "EIL_BITBUCKET_TOKEN", "EIL_ELK_URL", "EIL_ELK_TOKEN"):
         monkeypatch.delenv(var, raising=False)

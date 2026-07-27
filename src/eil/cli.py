@@ -155,6 +155,24 @@ def eval_cmd(
         raise typer.Exit(2)
 
 
+@app.command("tools")
+def tools_cmd() -> None:
+    """Dump the tool manifest as JSON — for external hosts (e.g. a TypeScript
+    tool-discovery connector) to index EIL's tools without spawning the server."""
+    from eil.tools import REGISTRY
+
+    manifest = [
+        {
+            "name": spec.name,
+            "description": spec.description,
+            "inputSchema": spec.parameters,
+            "requiresEnv": list(spec.requires_env),
+        }
+        for spec in REGISTRY.values()
+    ]
+    typer.echo(json.dumps({"server": "eil-knowledge", "tools": manifest}, indent=2))
+
+
 @app.command()
 def report(out: Path = Path("docs/metrics-report.html")) -> None:
     """Generate the self-contained HTML metrics report from the metrics views."""
