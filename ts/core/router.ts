@@ -27,11 +27,14 @@ function identifierShaped(q: string): boolean {
 
 export function classify(query: string): Decision {
   const q = query.trim();
-  let m: RegExpExecArray | null;
-  if ((m = TICKET_RE.exec(q))) return { route: "entity", match: m[1]! };
-  if ((m = PATH_RE.exec(q))) return { route: "path", match: m[1]! };
-  if ((m = QUOTED_RE.exec(q))) return { route: "exact", match: m[1]! };
-  if ((m = ERRORISH_RE.exec(q))) return { route: "exact", match: m[0] };
+  const ticket = TICKET_RE.exec(q);
+  if (ticket) return { route: "entity", match: ticket[1]! };
+  const path = PATH_RE.exec(q);
+  if (path) return { route: "path", match: path[1]! };
+  const quoted = QUOTED_RE.exec(q);
+  if (quoted) return { route: "exact", match: quoted[1]! };
+  const errorish = ERRORISH_RE.exec(q);
+  if (errorish) return { route: "exact", match: errorish[0] };
   if (!q.includes(" ") && identifierShaped(q)) return { route: "symbol", match: q };
   return { route: "docs" };
 }

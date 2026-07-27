@@ -28,9 +28,7 @@ export function normalize(issue: JiraIssue, tenant = "default"): CanonicalDoc {
   const docId = `jira:issue:${key}`;
   const f = issue.fields;
 
-  const parts = [
-    `**Status:** ${f.status ?? "Unknown"} · **Type:** ${f.issuetype ?? "Unknown"}`,
-  ];
+  const parts = [`**Status:** ${f.status ?? "Unknown"} · **Type:** ${f.issuetype ?? "Unknown"}`];
   if (f.description) parts.push(`## Description\n\n${f.description}`);
   for (const c of f.comments ?? []) {
     parts.push(`## Comment — ${c.author ?? "unknown"}\n\n${c.body}`);

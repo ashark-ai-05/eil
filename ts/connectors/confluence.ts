@@ -1,0 +1,62 @@
+/**
+ * Live Confluence DC connector: cursor-based CQL incremental sync.
+ * Personal-credential rule: EIL_CONFLUENCE_TOKEN is YOUR PAT — ACL by
+ * construction locally. Output feeds ingest/confluence.normalize unchanged.
+ */
+
+import type { ConfluencePage } from "../ingest/confluence.js";
+import { type DcClient, type Fetcher, getJson, makeClient } from "./auth.js";
+import { htmlToMarkdown } from "./htmlmd.js";
+
+export const PAGE_SIZE = 50;
+
+/** ISO timestamp -> the 'yyyy-MM-dd HH:mm' form CQL/JQL accept. */
+export function cqlTs(isoCursor: string): string {
+  return isoCursor.slice(0, 16).replace("T", " ");
+}
+
+export class ConfluenceClient {
+  readonly client: DcClient;
+
+  constructor(baseUrl?: string, token?: string, fetcher?: Fetcher) {
+    this.client = makeClient("CONFLUENCE", baseUrl, token, fetcher);
+  }
+
+  async *updatedSince(cursor: string | null): AsyncGenerator<ConfluencePage> {
+    let cql = "type=page order by lastmodified asc";
+    if (cursor) {
+      cql = `type=page and lastmodified >= "${cqlTs(cursor)}" order by lastmodified asc`;
+    }
+    let start = 0;
+    for (;;) {
+      const data = await getJson(this.client, "/rest/api/content/search", {
+        cql,
+        expand: "body.storage,ancestors,version,space",
+        limit: PAGE_SIZE,
+        start,
+      });
+      for (const page of data.results ?? []) yield this.toPageDict(page);
+      if ((data.size ?? 0) < PAGE_SIZE) return;
+      start += PAGE_SIZE;
+    }
+  }
+
+  /** Map a Confluence API response item to the normalizer's page shape. */
+  toPageDict(apiPage: any): ConfluencePage {
+    const version = apiPage.version ?? {};
+    const space = apiPage.space?.name;
+    const ancestors = (apiPage.ancestors ?? []).map((a: any) => a.title ?? "");
+    const webui = apiPage._links?.webui ?? "";
+    return {
+      id: apiPage.id,
+      title: apiPage.title,
+      url: webui ? `${this.client.baseUrl}${webui}` : null,
+      author: version.by?.displayName ?? null,
+      updated: version.when ?? null,
+      created: null,
+      ancestors: [...(space ? [space] : []), ...ancestors],
+      acl_groups: [], // stamped by the phase-2 ACL syncer; empty = fail-closed
+      body: htmlToMarkdown(apiPage.body?.storage?.value ?? ""),
+    };
+  }
+}

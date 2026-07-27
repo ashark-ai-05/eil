@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { rrf } from "../core/fusion.js";
-import {
-  RECENCY_FLOOR,
-  TIER_PRIOR,
-  modifier,
-} from "../core/ranking.js";
+import { RECENCY_FLOOR, TIER_PRIOR, modifier } from "../core/ranking.js";
 import { classify } from "../core/router.js";
 
 describe("router", () => {
   it("routes ticket keys to entity", () => {
-    expect(classify("what is the status of PAY-981?")).toEqual({ route: "entity", match: "PAY-981" });
+    expect(classify("what is the status of PAY-981?")).toEqual({
+      route: "entity",
+      match: "PAY-981",
+    });
   });
   it("routes paths to code", () => {
     expect(classify("where is src/retry/scheduler.py used")).toEqual({
