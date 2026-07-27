@@ -7,7 +7,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type pg from "pg";
+import type { Db } from "../db.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -119,7 +119,7 @@ export function getProvider(name?: string): Provider {
 
 /** Local usage record — the only telemetry for CLI backends. */
 export async function logCall(
-  client: pg.Client,
+  client: Db,
   caller: string,
   result: LLMResult,
   ok = true,

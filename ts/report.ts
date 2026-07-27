@@ -4,7 +4,7 @@
  * deterministic for a given database state, no JavaScript, no external assets.
  */
 
-import type pg from "pg";
+import type { Db } from "./db.js";
 
 const CSS = `
 body{font-family:"Avenir Next",Avenir,"Helvetica Neue",Arial,sans-serif;color:#16211F;
@@ -46,11 +46,11 @@ const esc = (s: unknown) =>
 
 type Rows = Array<Record<string, unknown>>;
 
-async function rows(client: pg.Client, sql: string): Promise<Rows> {
+async function rows(client: Db, sql: string): Promise<Rows> {
   return (await client.query(sql)).rows;
 }
 
-export async function collect(client: pg.Client): Promise<Record<string, Rows>> {
+export async function collect(client: Db): Promise<Record<string, Rows>> {
   return {
     tool_calls: await rows(
       client,

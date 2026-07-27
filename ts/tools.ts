@@ -7,10 +7,9 @@
  * DB session, ACL viewer, audit logging.
  */
 
-import type pg from "pg";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { connect } from "./db.js";
+import { type Db, connect } from "./db.js";
 import { type Viewer, audit, expand, getDoc, localViewer, searchDocs } from "./search.js";
 
 export interface ToolSpec<S extends z.ZodRawShape = z.ZodRawShape> {
@@ -19,7 +18,7 @@ export interface ToolSpec<S extends z.ZodRawShape = z.ZodRawShape> {
   schema: z.ZodObject<S>;
   requiresEnv: string[];
   handler: (
-    client: pg.Client,
+    client: Db,
     viewer: Viewer,
     args: Record<string, any>,
   ) => Promise<Record<string, unknown> | null>;
@@ -120,7 +119,7 @@ export async function callTool(
   name: string,
   args: Record<string, any>,
   viewer?: Viewer,
-  client?: pg.Client,
+  client?: Db,
 ): Promise<Record<string, unknown>> {
   const spec = REGISTRY[name];
   if (!spec) return { error: `unknown tool: ${name}`, tools: Object.keys(REGISTRY).sort() };

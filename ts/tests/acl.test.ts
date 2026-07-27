@@ -5,10 +5,9 @@
  */
 
 import { userInfo } from "node:os";
-import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CanonicalDoc } from "../contracts/models.js";
-import { connect, migrationFiles } from "../db.js";
+import { type Db, connect, migrationFiles } from "../db.js";
 import { type Viewer, expand, getDoc, searchDocs } from "../search.js";
 import { upsertDocument } from "../store.js";
 
@@ -19,7 +18,7 @@ const INSIDER: Viewer = { principal: ME, groups: ["grp-secret"] };
 const doc = (id: string, title: string, body: string, acl: string[], links: string[] = []) =>
   CanonicalDoc.parse({ id, source: "confluence", title, body, aclGroups: acl, links });
 
-let client: pg.Client;
+let client: Db;
 let available = true;
 try {
   const probe = await connect("postgres");

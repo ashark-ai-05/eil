@@ -66,21 +66,31 @@ env), e.g. `postgresql://user:pass@host:5432/eil`. Anything that speaks real
 Postgres is a drop-in: another local version, WSL2 apt, an org PG server, or
 managed offerings (RDS, Neon, Supabase, ...).
 
-### No admin rights? Embedded Postgres (experimental, Linux/WSL2)
+### Can't install Postgres at all? Zero-install mode (PGlite)
 
-If you can't install Postgres at all, `eil db embedded` runs real PG binaries
-from `node_modules` as your user — no system install, no elevation:
+**Postgres installation is not a blocker.** Set one env var and the stack
+runs real Postgres (compiled to WASM, in-process, from `node_modules`) — no
+server, no binaries, no admin rights, nothing beyond `pnpm install`:
 
 ```sh
-pnpm add -D embedded-postgres@17     # beta-only upstream; not a default dep
-pnpm eil db embedded                 # boots PG in the foreground, prints the
-                                     # EIL_DATABASE_URL export to use
+export EIL_DATABASE_URL=pglite://.eil-pglite   # data dir, gitignored
+pnpm eil db migrate
+pnpm eil ingest confluence --fixture tests/fixtures/confluence_page.json
+pnpm eil search "PAY-981"                      # everything works identically
 ```
 
-Caveats: the upstream package has no stable release, and its **darwin-arm64
-binaries are currently broken** (missing ICU dylib) — treat this as a
-Linux/WSL2 fallback only. On macOS use brew; on WSL2 prefer apt when
-permitted. Data persists in `.eil-pg/` (gitignored).
+Because PGlite *is* Postgres, migrations, FTS, the jsonb ACL predicate, and
+the metrics views run unchanged — `ts/tests/pglite.test.ts` proves the full
+pipeline on this backend in CI. One constraint: a single process at a time
+(the data dir is exclusively locked), so stop the MCP server before running
+CLI ingest against the same dir. It's a local single-user mode; the kube
+promotion still targets server Postgres via a normal DSN.
+
+Two heavier fallbacks if you outgrow it locally: `pnpm add -D
+embedded-postgres@17 && pnpm eil db embedded` runs native PG binaries from
+node_modules (beta upstream; darwin-arm64 binaries currently broken — treat
+as Linux/WSL2 only), or point `EIL_DATABASE_URL` at any org PG server —
+a schema on a shared dev instance costs nothing to ask for.
 
 ## Integrating with existing MCP setups
 

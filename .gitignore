@@ -8,3 +8,4 @@ dist/
 .remember/
 node_modules/
 .eil-pg/
+.eil-pglite/

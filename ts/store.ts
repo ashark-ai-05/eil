@@ -4,16 +4,16 @@
  */
 
 import { userInfo } from "node:os";
-import type pg from "pg";
 import { type CanonicalDoc, chunkHash, contentHash } from "./contracts/models.js";
 import { chunk } from "./core/chunker.js";
+import type { Db } from "./db.js";
 
-export async function getCursor(client: pg.Client, source: string): Promise<string | null> {
+export async function getCursor(client: Db, source: string): Promise<string | null> {
   const res = await client.query("SELECT cursor FROM sync_cursors WHERE source = $1", [source]);
   return res.rows[0]?.cursor ?? null;
 }
 
-export async function setCursor(client: pg.Client, source: string, cursor: string): Promise<void> {
+export async function setCursor(client: Db, source: string, cursor: string): Promise<void> {
   await client.query(
     "INSERT INTO sync_cursors (source, cursor) VALUES ($1, $2)" +
       " ON CONFLICT (source) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()",
@@ -27,7 +27,7 @@ export async function setCursor(client: pg.Client, source: string, cursor: strin
  * upserts if the lock survives past the SELECT, so the BEGIN/COMMIT lives
  * here rather than being an invisible caller obligation.
  */
-export async function upsertDocument(client: pg.Client, doc: CanonicalDoc): Promise<boolean> {
+export async function upsertDocument(client: Db, doc: CanonicalDoc): Promise<boolean> {
   await client.query("BEGIN");
   try {
     const changed = await upsertInTx(client, doc);
@@ -39,7 +39,7 @@ export async function upsertDocument(client: pg.Client, doc: CanonicalDoc): Prom
   }
 }
 
-async function upsertInTx(client: pg.Client, doc: CanonicalDoc): Promise<boolean> {
+async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
   const hash = contentHash(doc);
   const existing = await client.query(
     "SELECT content_hash, ingested_by FROM documents WHERE id = $1 FOR UPDATE",

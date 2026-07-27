@@ -3,9 +3,8 @@
  * every expected aggregate independently, assert the SQL views agree.
  */
 
-import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { connect, migrationFiles } from "../db.js";
+import { type Db, connect, migrationFiles } from "../db.js";
 import { record } from "../evalrun.js";
 
 const AUDIT_PLAN: Array<[string, string, number, number]> = [
@@ -26,7 +25,7 @@ const LLM_PLAN: Array<
   ["amp", null, "incident-triage", null, null, 30_000, true, 2],
 ];
 
-let client: pg.Client;
+let client: Db;
 let available = true;
 try {
   const probe = await connect("postgres");

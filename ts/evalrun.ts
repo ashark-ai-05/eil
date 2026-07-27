@@ -5,7 +5,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import type pg from "pg";
+import type { Db } from "./db.js";
 import { type Viewer, searchDocs } from "./search.js";
 
 const ENTRY_RE = /^- `(.+?)` → ([^—\n]+)/;
@@ -46,7 +46,7 @@ export interface EvalReport {
 }
 
 export async function run(
-  client: pg.Client,
+  client: Db,
   viewer: Viewer,
   entries: GoldenEntry[],
   k = 10,
@@ -84,7 +84,7 @@ export function gitSha(): string {
 }
 
 /** Persist a run into metrics.eval_runs — trend, not snapshot. */
-export async function record(client: pg.Client, report: EvalReport): Promise<void> {
+export async function record(client: Db, report: EvalReport): Promise<void> {
   const misses = report.queries
     .filter((q) => q.missing.length > 0)
     .map((q) => ({ query: q.query, missing: q.missing }));

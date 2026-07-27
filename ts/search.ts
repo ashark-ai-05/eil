@@ -5,10 +5,10 @@
  */
 
 import { userInfo } from "node:os";
-import type pg from "pg";
 import { rrf } from "./core/fusion.js";
 import { modifier } from "./core/ranking.js";
 import { classify } from "./core/router.js";
+import type { Db } from "./db.js";
 
 export const SNIPPET_OPTS = "StartSel=**, StopSel=**, MaxWords=40, MinWords=10";
 export const GET_DOC_MAX_CHARS = 8_000;
@@ -55,7 +55,7 @@ export interface Edge {
 }
 
 export async function searchDocs(
-  client: pg.Client,
+  client: Db,
   viewer: Viewer,
   query: string,
   limit = 8,
@@ -115,7 +115,7 @@ export async function searchDocs(
 }
 
 export async function getDoc(
-  client: pg.Client,
+  client: Db,
   viewer: Viewer,
   docId: string,
   section = 0,
@@ -145,7 +145,7 @@ export async function getDoc(
 }
 
 export async function expand(
-  client: pg.Client,
+  client: Db,
   viewer: Viewer,
   docId: string,
   limit: number = EXPAND_MAX_EDGES,
@@ -189,7 +189,7 @@ export async function expand(
 }
 
 export async function audit(
-  client: pg.Client,
+  client: Db,
   principal: string,
   tool: string,
   args: Record<string, unknown>,
