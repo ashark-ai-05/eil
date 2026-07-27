@@ -6,6 +6,7 @@ import { Command } from "commander";
 import type pg from "pg";
 import type { CanonicalDoc } from "./contracts/models.js";
 import { connect, migrate } from "./db.js";
+import { promptHidden } from "./prompt.js";
 
 const program = new Command("eil").description("Enterprise Intelligence Layer CLI");
 
@@ -319,6 +320,80 @@ program
   .action(async () => {
     const { serve } = await import("./mcp-server.js");
     await serve();
+  });
+
+const auth = program.command("auth").description("Manage connector tokens in the OS keychain");
+
+// Resolves `source` to its keychain account name, or prints the error and exits(1)
+// if `source` isn't recognized. Shared by `login` and `logout`.
+async function requireAccount(source: string): Promise<string> {
+  const { SOURCES } = await import("./connectors/keychain.js");
+  const account = SOURCES[source];
+  if (!account) {
+    console.log(`unknown source '${source}'. valid: ${Object.keys(SOURCES).join(", ")}`);
+    process.exit(1);
+  }
+  return account;
+}
+
+auth
+  .command("login <source>")
+  .description("Store a connector token in the OS keychain (jira|confluence|bitbucket|elk)")
+  .option("--stdin", "read the token from stdin instead of an interactive prompt")
+  .action(async (source, opts) => {
+    const account = await requireAccount(source);
+    const { keychainBackend, setSecret } = await import("./connectors/keychain.js");
+    const backend = keychainBackend();
+    if (!backend.available) {
+      console.log(
+        `no keychain backend available (${backend.name}) — install libsecret-tools (Linux) or set ${account} directly`,
+      );
+      process.exit(1);
+    }
+    const token = opts.stdin
+      ? readFileSync(0, "utf-8").trim()
+      : await promptHidden(`${source} token`);
+    if (!token) {
+      console.log("no token provided");
+      process.exit(1);
+    }
+    try {
+      setSecret(account, token);
+    } catch (err: any) {
+      console.log(`could not store ${account}: ${err.message}`);
+      process.exit(1);
+    }
+    console.log(`stored ${account} in the ${backend.name} keychain`);
+  });
+
+auth
+  .command("status")
+  .description("Show where each connector token resolves from (never prints secrets)")
+  .action(async () => {
+    const { SOURCES, getSecret, keychainBackend, resolvedSource } = await import(
+      "./connectors/keychain.js"
+    );
+    const backend = keychainBackend();
+    console.log(`keychain backend: ${backend.name} (available: ${backend.available})`);
+    for (const [source, account] of Object.entries(SOURCES)) {
+      const from = resolvedSource(account, process.env, getSecret);
+      console.log(`  ${source.padEnd(11)} ${account.padEnd(22)} <- ${from}`);
+    }
+  });
+
+auth
+  .command("logout <source>")
+  .description("Remove a connector token from the OS keychain")
+  .action(async (source) => {
+    const account = await requireAccount(source);
+    const { deleteSecret } = await import("./connectors/keychain.js");
+    try {
+      deleteSecret(account);
+    } catch (err: any) {
+      console.log(`could not remove ${account}: ${err.message}`);
+      process.exit(1);
+    }
+    console.log(`removed ${account} from the keychain`);
   });
 
 program.parseAsync(process.argv);
