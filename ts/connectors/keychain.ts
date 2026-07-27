@@ -52,3 +52,109 @@ export function selectBackend(
   if (platform === "linux") return isWsl ? "wincred" : "secret-tool";
   return "none";
 }
+
+export interface Keychain {
+  name: BackendName;
+  available(): boolean;
+  get(account: string): string | null;
+  set(account: string, secret: string): void;
+  delete(account: string): void;
+}
+
+export function securityKeychain(run: Runner): Keychain {
+  return {
+    name: "security",
+    available: () => run("security", ["help"]).status === 0,
+    get: (a) => {
+      const r = run("security", ["find-generic-password", "-a", a, "-s", SERVICE, "-w"]);
+      return r.status === 0 ? r.stdout.replace(/\n$/, "") : null;
+    },
+    set: (a, s) => {
+      run("security", ["add-generic-password", "-a", a, "-s", SERVICE, "-U", "-w", s]);
+    },
+    delete: (a) => {
+      run("security", ["delete-generic-password", "-a", a, "-s", SERVICE]);
+    },
+  };
+}
+
+export function secretToolKeychain(run: Runner): Keychain {
+  return {
+    name: "secret-tool",
+    available: () => run("secret-tool", ["--help"]).status === 0,
+    get: (a) => {
+      const r = run("secret-tool", ["lookup", "service", SERVICE, "account", a]);
+      return r.status === 0 && r.stdout !== "" ? r.stdout.replace(/\n$/, "") : null;
+    },
+    set: (a, s) => {
+      run("secret-tool", ["store", `--label=${SERVICE} ${a}`, "service", SERVICE, "account", a], s);
+    },
+    delete: (a) => {
+      run("secret-tool", ["clear", "service", SERVICE, "account", a]);
+    },
+  };
+}
+
+const memoryStore = new Map<string, string>();
+
+export function memoryKeychain(): Keychain {
+  return {
+    name: "memory",
+    available: () => true,
+    get: (a) => memoryStore.get(a) ?? null,
+    set: (a, s) => {
+      memoryStore.set(a, s);
+    },
+    delete: (a) => {
+      memoryStore.delete(a);
+    },
+  };
+}
+
+function noneKeychain(): Keychain {
+  const fail = (): never => {
+    throw new Error(
+      "no OS keychain backend available — install libsecret-tools (Linux) or set the token env var directly",
+    );
+  };
+  return { name: "none", available: () => false, get: () => null, set: fail, delete: fail };
+}
+
+// wincred is added in Task 3; until then it falls through to noneKeychain.
+export function keychain(runner: Runner = defaultRunner): Keychain {
+  switch (selectBackend()) {
+    case "security":
+      return securityKeychain(runner);
+    case "secret-tool":
+      return secretToolKeychain(runner);
+    case "memory":
+      return memoryKeychain();
+    default:
+      return noneKeychain();
+  }
+}
+
+export function getSecret(account: string): string | null {
+  try {
+    return keychain().get(account);
+  } catch {
+    return null;
+  }
+}
+
+export function setSecret(account: string, secret: string): void {
+  keychain().set(account, secret);
+}
+
+export function deleteSecret(account: string): void {
+  keychain().delete(account);
+}
+
+export function keychainBackend(): { name: BackendName; available: boolean } {
+  const kc = keychain();
+  try {
+    return { name: kc.name, available: kc.available() };
+  } catch {
+    return { name: kc.name, available: false };
+  }
+}

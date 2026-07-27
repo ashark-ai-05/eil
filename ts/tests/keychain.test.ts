@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { detectWsl, selectBackend } from "../connectors/keychain.js";
+import {
+  getSecret,
+  memoryKeychain,
+  secretToolKeychain,
+  securityKeychain,
+  setSecret,
+} from "../connectors/keychain.js";
 
 afterEach(() => {
   delete process.env.EIL_KEYCHAIN_BACKEND;
@@ -28,5 +35,92 @@ describe("backend selection", () => {
         throw new Error("no file");
       }),
     ).toBe(false);
+  });
+});
+
+function recorder() {
+  const calls: Array<{ cmd: string; args: string[]; input?: string }> = [];
+  const runner = (cmd: string, args: string[], input?: string) => {
+    calls.push({ cmd, args, ...(input !== undefined ? { input } : {}) });
+    return { status: 0, stdout: "secret-value\n" };
+  };
+  return { calls, runner };
+}
+
+describe("macOS security backend", () => {
+  it("builds add/find/delete commands with service=eil", () => {
+    const { calls, runner } = recorder();
+    const kc = securityKeychain(runner);
+    kc.set("EIL_JIRA_TOKEN", "pat-1");
+    kc.get("EIL_JIRA_TOKEN");
+    kc.delete("EIL_JIRA_TOKEN");
+    expect(calls[0]?.args).toEqual([
+      "add-generic-password",
+      "-a",
+      "EIL_JIRA_TOKEN",
+      "-s",
+      "eil",
+      "-U",
+      "-w",
+      "pat-1",
+    ]);
+    expect(calls[1]?.args).toEqual([
+      "find-generic-password",
+      "-a",
+      "EIL_JIRA_TOKEN",
+      "-s",
+      "eil",
+      "-w",
+    ]);
+    expect(calls[2]?.args).toEqual([
+      "delete-generic-password",
+      "-a",
+      "EIL_JIRA_TOKEN",
+      "-s",
+      "eil",
+    ]);
+  });
+
+  it("trims the trailing newline from a found secret", () => {
+    const kc = securityKeychain(() => ({ status: 0, stdout: "pat-1\n" }));
+    expect(kc.get("EIL_JIRA_TOKEN")).toBe("pat-1");
+  });
+
+  it("returns null when the entry is absent", () => {
+    const kc = securityKeychain(() => ({ status: 44, stdout: "" }));
+    expect(kc.get("EIL_JIRA_TOKEN")).toBeNull();
+  });
+});
+
+describe("Linux secret-tool backend", () => {
+  it("passes the secret on stdin, never argv", () => {
+    const { calls, runner } = recorder();
+    const kc = secretToolKeychain(runner);
+    kc.set("EIL_JIRA_TOKEN", "pat-1");
+    expect(calls[0]?.args).toEqual([
+      "store",
+      "--label=eil EIL_JIRA_TOKEN",
+      "service",
+      "eil",
+      "account",
+      "EIL_JIRA_TOKEN",
+    ]);
+    expect(calls[0]?.input).toBe("pat-1");
+    expect(calls[0]?.args).not.toContain("pat-1");
+  });
+
+  it("returns null on empty stdout even with status 0", () => {
+    const kc = secretToolKeychain(() => ({ status: 0, stdout: "" }));
+    expect(kc.get("EIL_JIRA_TOKEN")).toBeNull();
+  });
+});
+
+describe("memory backend + top-level API", () => {
+  it("round-trips through setSecret/getSecret via the override", () => {
+    process.env.EIL_KEYCHAIN_BACKEND = "memory";
+    setSecret("EIL_JIRA_TOKEN", "kc-token");
+    expect(getSecret("EIL_JIRA_TOKEN")).toBe("kc-token");
+    memoryKeychain().delete("EIL_JIRA_TOKEN");
+    expect(getSecret("EIL_JIRA_TOKEN")).toBeNull();
   });
 });
