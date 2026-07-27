@@ -53,7 +53,7 @@ def search_code(query: str, limit: int = 10) -> str:
     search — your repo permissions apply natively."""
     import os
 
-    if not os.environ.get("EIL_BITBUCKET_URL"):
+    if not (os.environ.get("EIL_BITBUCKET_URL") and os.environ.get("EIL_BITBUCKET_TOKEN")):
         return json.dumps({"error": "EIL_BITBUCKET_URL / EIL_BITBUCKET_TOKEN not configured"})
     from eil.connectors.bitbucket import BitbucketSearchClient
 

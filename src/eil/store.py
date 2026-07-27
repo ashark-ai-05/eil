@@ -30,8 +30,11 @@ def set_cursor(conn: psycopg.Connection, source: str, cursor: str) -> None:
 
 def upsert_document(conn: psycopg.Connection, doc: CanonicalDoc) -> bool:
     """Insert or update a document and its chunks/links. Returns True if content changed."""
+    # FOR UPDATE serializes concurrent upserts of the same doc for the whole
+    # transaction — without it, two workers can interleave the chunk
+    # delete+insert below.
     row = conn.execute(
-        "SELECT content_hash, ingested_by FROM documents WHERE id = %s", (doc.id,)
+        "SELECT content_hash, ingested_by FROM documents WHERE id = %s FOR UPDATE", (doc.id,)
     ).fetchone()
     if row and row[0] == doc.content_hash and row[1]:
         return False  # hash gate: nothing to do

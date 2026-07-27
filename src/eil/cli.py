@@ -31,20 +31,40 @@ def db_migrate() -> None:
 def _ingest(source: str, normalize, payloads, tenant: str, cursor_of=None) -> None:
     from eil import db, store
 
-    seen = changed = 0
+    seen = changed = failed = 0
     latest: str | None = None
+    retry_from: str | None = None  # earliest failed timestamp — cursor never passes it
     with db.connect() as conn:
         for payload in payloads:
             seen += 1
-            doc = normalize(payload, tenant=tenant)
-            if store.upsert_document(conn, doc):
-                changed += 1
-                typer.echo(f"  ~ {doc.id}")
-            if cursor_of and (value := cursor_of(payload)):
+            value = cursor_of(payload) if cursor_of else None
+            try:
+                doc = normalize(payload, tenant=tenant)
+                if store.upsert_document(conn, doc):
+                    changed += 1
+                    typer.echo(f"  ~ {doc.id}")
+                conn.commit()  # per-doc commit: one bad record can't starve the batch
+            except Exception as exc:  # noqa: BLE001 — keep syncing; re-fetch failures next run
+                conn.rollback()
+                failed += 1
+                typer.echo(f"  ! failed ({exc.__class__.__name__}): {exc}")
+                if value and (retry_from is None or value < retry_from):
+                    retry_from = value
+                continue
+            if value:
                 latest = max(latest or value, value)
-        if latest:
-            store.set_cursor(conn, source, latest)
-    typer.echo(f"{seen} seen, {changed} changed" + (f", cursor -> {latest}" if latest else ""))
+        # Advance to the newest success, but never beyond the earliest failure:
+        # the next run re-fetches from there and the hash gate makes redone
+        # work free.
+        target = retry_from or latest
+        if target:
+            store.set_cursor(conn, source, target)
+    summary = f"{seen} seen, {changed} changed"
+    if failed:
+        summary += f", {failed} FAILED (cursor held at {target})"
+    elif latest:
+        summary += f", cursor -> {latest}"
+    typer.echo(summary)
 
 
 def _client(cls, required_env: str):

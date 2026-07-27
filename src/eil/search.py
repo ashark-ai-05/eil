@@ -114,20 +114,33 @@ def get_doc(
 def expand(
     conn: psycopg.Connection, viewer: Viewer, doc_id: str, limit: int = EXPAND_MAX_EDGES
 ) -> dict[str, Any]:
-    # Edge visibility is fail-closed too: edges to ingested-but-unreadable docs
-    # are dropped entirely. Dangling edges (doc not ingested) survive — the id
-    # was extracted from content the viewer can read.
+    # Fail-closed on the FOCAL document first: expanding a restricted doc must
+    # leak nothing — not even the ids its body references (dangling out-edges
+    # would otherwise slip past the destination-side ACL check below).
+    restricted = conn.execute(
+        f"SELECT 1 FROM documents d WHERE d.id = %(id)s AND NOT {ACL_SQL}",
+        {"id": doc_id, **viewer.params()},
+    ).fetchone()
+    if restricted:
+        return {"id": doc_id, "edges": [], "truncated": False}
+
+    # Destination-side visibility is fail-closed too: edges to ingested-but-
+    # unreadable docs are dropped. Dangling edges (doc not ingested) survive —
+    # the focal doc is readable, so its extracted ids are fair game.
+    # Per-arm LIMITs: a single trailing LIMIT after UNION ALL would let a hub
+    # doc's in-edges starve out its out-edges ('in' sorts before 'out').
     rows = conn.execute(
         f"""
-        SELECT l.dst_id AS other, l.rel, 'out' AS direction, d.title
-        FROM links l LEFT JOIN documents d ON d.id = l.dst_id
-        WHERE l.src_id = %(id)s AND (d.id IS NULL OR {ACL_SQL})
+        (SELECT l.dst_id AS other, l.rel, 'out' AS direction, d.title
+         FROM links l LEFT JOIN documents d ON d.id = l.dst_id
+         WHERE l.src_id = %(id)s AND (d.id IS NULL OR {ACL_SQL})
+         ORDER BY other LIMIT %(limit)s)
         UNION ALL
-        SELECT l.src_id AS other, l.rel, 'in' AS direction, d.title
-        FROM links l LEFT JOIN documents d ON d.id = l.src_id
-        WHERE l.dst_id = %(id)s AND (d.id IS NULL OR {ACL_SQL})
+        (SELECT l.src_id AS other, l.rel, 'in' AS direction, d.title
+         FROM links l LEFT JOIN documents d ON d.id = l.src_id
+         WHERE l.dst_id = %(id)s AND (d.id IS NULL OR {ACL_SQL})
+         ORDER BY other LIMIT %(limit)s)
         ORDER BY direction, other
-        LIMIT %(limit)s
         """,
         {"id": doc_id, "limit": limit, **viewer.params()},
     ).fetchall()
@@ -135,7 +148,8 @@ def expand(
         {"id": other, "rel": rel, "direction": direction, "title": title, "ingested": title is not None}
         for other, rel, direction, title in rows
     ]
-    return {"id": doc_id, "edges": edges}
+    per_arm = {d: sum(1 for e in edges if e["direction"] == d) for d in ("in", "out")}
+    return {"id": doc_id, "edges": edges, "truncated": max(per_arm.values()) >= limit}
 
 
 def audit(conn: psycopg.Connection, principal: str, tool: str, args: dict, count: int) -> None:

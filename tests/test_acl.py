@@ -108,6 +108,48 @@ def test_empty_acl_is_fail_closed_for_others(conn):
     assert get_doc(conn, stranger, "confluence:page:open") is None
 
 
+def test_expanding_restricted_doc_leaks_nothing_not_even_dangling_edges(conn):
+    """The reviewer-found leak: a restricted doc's body references dangling ids;
+    those ids must not surface for an outsider expanding the restricted doc."""
+    doc = _doc("confluence:page:secret-linky", "Secret Linky",
+               "restricted content", ["grp-secret"])
+    doc = doc.model_copy(update={"links": ["jira:issue:HID-9"]})  # dangling target
+    upsert_document(conn, doc)
+    conn.execute(
+        "UPDATE documents SET ingested_by = 'mallory-ingester'"
+        " WHERE id = 'confluence:page:secret-linky'"
+    )
+    result = expand(conn, OUTSIDER, "confluence:page:secret-linky")
+    assert result["edges"] == []  # not even jira:issue:HID-9
+    insider = expand(conn, INSIDER, "confluence:page:secret-linky")
+    assert any(e["id"] == "jira:issue:HID-9" for e in insider["edges"])
+
+
+def test_entity_route_linked_is_empty_for_restricted_entity(conn):
+    result = search_docs(conn, OUTSIDER, "SEC-1")
+    assert result["entity"] is None
+    assert result["linked"] == []
+
+
+def test_expand_out_edges_not_starved_by_in_edges(conn):
+    """'in' sorts before 'out'; per-arm limits must keep out-edges visible on
+    hub documents, and truncation must be reported."""
+    hub = _doc("confluence:page:hub", "Hub", "the hub", [])
+    hub = hub.model_copy(update={"links": ["jira:issue:OUT-1"]})
+    upsert_document(conn, hub)
+    for n in range(3):
+        spoke = _doc(f"confluence:page:spoke{n}", f"Spoke {n}", "spoke", [])
+        spoke = spoke.model_copy(update={"links": ["confluence:page:hub"]})
+        upsert_document(conn, spoke)
+    result = expand(conn, Viewer(ME), "confluence:page:hub", limit=2)
+    directions = {e["direction"] for e in result["edges"]}
+    assert "out" in directions  # the out-edge survives despite 3 in-edges and limit=2
+    assert result["truncated"] is True  # in-arm hit its limit
+    full = expand(conn, Viewer(ME), "confluence:page:hub", limit=50)
+    assert full["truncated"] is False
+    assert sum(1 for e in full["edges"] if e["direction"] == "in") == 3
+
+
 def test_reingest_heals_empty_ingested_by(conn):
     """Pre-0003 rows (ingested_by='') are invisible but repairable: the hash
     gate must not block re-ingest of unchanged content in that state."""
