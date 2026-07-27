@@ -1,0 +1,536 @@
+<title>Knowledge Plane — Detailed Design</title>
+<style>
+  :root {
+    --ground: #F6F7F5;
+    --ink: #16211F;
+    --ink-soft: #46534F;
+    --accent: #0E7C6B;
+    --accent-wash: #E3EEEA;
+    --caution: #A85E14;
+    --caution-wash: #F6EDE2;
+    --danger: #9B3324;
+    --danger-wash: #F7E8E4;
+    --line: #D5DBD8;
+    --card: #FFFFFF;
+    --display: "Avenir Next", Avenir, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --body: Charter, "Iowan Old Style", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html { background: var(--ground); }
+  body {
+    font-family: var(--body); color: var(--ink); line-height: 1.6; font-size: 17px;
+    margin: 0; padding: 3.5rem 1.5rem 6rem;
+  }
+  .col { max-width: 44rem; margin: 0 auto; }
+  .wide { max-width: 68rem; margin: 0 auto; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 .75rem;
+  }
+  h1 {
+    font-family: var(--display); font-weight: 700; font-size: clamp(1.9rem, 4.5vw, 2.7rem);
+    line-height: 1.12; letter-spacing: -.015em; margin: 0 0 .6rem; text-wrap: balance;
+  }
+  .standfirst { font-size: 1.12rem; color: var(--ink-soft); margin: 0 0 .4rem; max-width: 40rem; }
+  .meta { font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); letter-spacing: .06em; }
+  h2 {
+    font-family: var(--display); font-weight: 700; font-size: 1.35rem;
+    letter-spacing: -.01em; margin: 3.2rem 0 .8rem; text-wrap: balance;
+  }
+  h2 .num { color: var(--accent); font-family: var(--mono); font-size: .85rem; font-weight: 400; margin-right: .6rem; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 1.02rem; margin: 1.8rem 0 .4rem; }
+  p { margin: 0 0 1rem; }
+  ul { padding-left: 1.2rem; margin: 0 0 1rem; }
+  li { margin-bottom: .45rem; }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code {
+    font-family: var(--mono); font-size: .82em; background: #ECEFED;
+    padding: .1em .35em; border-radius: 3px; white-space: nowrap;
+  }
+  pre {
+    background: var(--card); border: 1px solid var(--line); padding: 1rem 1.1rem;
+    overflow-x: auto; font-family: var(--mono); font-size: .78rem; line-height: 1.65; margin: 1rem 0 1.4rem;
+  }
+  pre code { background: none; padding: 0; white-space: pre; }
+
+  .thesis { border: 2px solid var(--ink); background: var(--card); padding: 1.2rem 1.4rem; margin: 2.2rem 0 0; }
+  .thesis p { margin: 0; font-size: 1.05rem; }
+  .thesis .label { font-family: var(--mono); font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: .5rem; }
+
+  .callout { background: var(--caution-wash); border-left: 3px solid var(--caution); padding: .9rem 1.1rem; margin: 1.2rem 0; }
+  .callout p { margin: 0; font-size: .95rem; }
+  .callout .label { font-family: var(--mono); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--caution); display: block; margin-bottom: .35rem; }
+
+  /* diagram */
+  .diagram-scroll { overflow-x: auto; margin: 1.6rem 0 0; padding-bottom: .5rem; }
+  .diagram { min-width: 700px; display: flex; flex-direction: column; }
+  .lane { display: grid; gap: .7rem; }
+  .lane.c5 { grid-template-columns: repeat(5, 1fr); }
+  .lane.c6 { grid-template-columns: repeat(6, 1fr); }
+  .node { background: var(--card); border: 1.5px solid var(--ink); padding: .65rem .8rem; }
+  .node .name { font-family: var(--display); font-weight: 700; font-size: .88rem; display: block; }
+  .node .sub { font-family: var(--mono); font-size: .64rem; color: var(--ink-soft); line-height: 1.5; display: block; margin-top: .3rem; }
+  .vflow { font-family: var(--mono); font-size: .7rem; color: var(--ink-soft); text-align: center; padding: .55rem 0; line-height: 1.5; }
+  .vflow .arrow { color: var(--accent); }
+  .plane { background: var(--card); border: 1.5px solid var(--line); border-top: 3px solid var(--accent); padding: 1rem 1.1rem 1.1rem; }
+  .plane-title { display: flex; align-items: baseline; gap: .7rem; margin-bottom: .8rem; flex-wrap: wrap; }
+  .plane-title .name { font-family: var(--display); font-weight: 700; font-size: 1rem; }
+  .plane-title .role { font-family: var(--mono); font-size: .66rem; color: var(--ink-soft); }
+  .cells { display: grid; gap: .6rem; }
+  .cells.c5 { grid-template-columns: repeat(5, 1fr); }
+  .cells.c4 { grid-template-columns: repeat(4, 1fr); }
+  .cell { background: var(--ground); border: 1px solid var(--line); padding: .5rem .6rem; }
+  .cell b { font-family: var(--display); font-size: .78rem; font-weight: 600; display: block; }
+  .cell span { font-family: var(--mono); font-size: .62rem; color: var(--ink-soft); line-height: 1.5; display: block; margin-top: .25rem; }
+  .cell.hot { border-color: var(--caution); }
+  .cell.hot b { color: var(--caution); }
+
+  /* tables */
+  .table-scroll { overflow-x: auto; margin: 1rem 0 1.4rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .88rem; }
+  th {
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    text-align: left; color: var(--ink-soft); border-bottom: 2px solid var(--ink); padding: .5rem .7rem .4rem;
+  }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .7rem; vertical-align: top; line-height: 1.5; }
+  td:first-child { font-family: var(--display); font-weight: 600; font-size: .84rem; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* critique cards */
+  .risk { background: var(--card); border: 1px solid var(--line); padding: 1rem 1.15rem; margin-bottom: .9rem; }
+  .risk-head { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; margin-bottom: .4rem; }
+  .risk-head h3 { margin: 0; font-size: .98rem; }
+  .chip {
+    font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+    padding: .12rem .5rem; border-radius: 999px;
+  }
+  .chip.high { background: var(--danger-wash); color: var(--danger); }
+  .chip.med { background: var(--caution-wash); color: var(--caution); }
+  .flow {
+    font-family: var(--mono); font-size: .62rem; letter-spacing: .06em; color: var(--card);
+    background: var(--accent); padding: .1rem .45rem; border-radius: 999px; display: inline-block;
+  }
+  td .fnum { font-family: var(--mono); font-size: .7rem; color: var(--accent); }
+  .risk p { margin: 0 0 .5rem; font-size: .93rem; }
+  .risk .fix { font-size: .88rem; color: var(--ink-soft); margin: 0; }
+  .risk .fix b { font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); font-weight: 400; margin-right: .4rem; }
+
+  .wl { font-family: var(--mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent-wash); background: var(--accent-wash); padding: .06rem .35rem; display: inline-block; margin-left: .3rem; vertical-align: middle; }
+  .wl.v1 { color: var(--caution); background: var(--caution-wash); border-color: var(--caution-wash); }
+  .phase { display: grid; grid-template-columns: 6.4rem 1fr; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+  .phase:last-child { border-bottom: none; }
+  .phase .when { font-family: var(--mono); font-size: .72rem; color: var(--accent); padding-top: .25rem; }
+  .phase h3 { margin: 0 0 .3rem; }
+  .phase p { margin: 0 0 .3rem; font-size: .95rem; }
+  .phase .ships { font-family: var(--mono); font-size: .7rem; color: var(--ink-soft); display: block; margin-top: .2rem; line-height: 1.7; }
+  .phase .exit { font-family: var(--mono); font-size: .72rem; color: var(--accent); margin-top: .45rem; display: block; }
+  @media (max-width: 760px) { .phase { grid-template-columns: 1fr; gap: .2rem; } }
+  .sources { font-size: .85rem; color: var(--ink-soft); border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1.2rem; }
+  .sources li { margin-bottom: .3rem; }
+
+  @media (max-width: 760px) {
+    .lane.c5, .lane.c6, .cells.c5 { grid-template-columns: 1fr 1fr; }
+    .cells.c4 { grid-template-columns: 1fr 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="col">
+  <p class="eyebrow">Architecture Brief · Companion · Knowledge Plane</p>
+  <h1>The Knowledge Plane, in detail</h1>
+  <p class="standfirst">Ingestion, indexing, and deterministic retrieval over code, Jira, Confluence, meetings, and Obsidian — with no locally hosted models.</p>
+  <p class="meta">2026-07-27 · Draft 4.1 · Postgres becomes the search engine (FTS + pgvector); OpenSearch demoted to a deferred scale option — the whole stack now runs locally without Docker</p>
+
+  <div class="thesis">
+    <span class="label">Design thesis</span>
+    <p>Retrieval is a <strong>fast, deterministic function</strong>, not an agent. Every source normalizes to one canonical document model; lexical and structural search do most of the work; embeddings come from an API through your gateway, once per content revision; rank fusion is arithmetic you own. The only LLM calls are one bounded summary per meeting and opt-in synthesis at the edge.</p>
+  </div>
+
+  <div class="callout">
+    <p><span class="label">Deployment reality</span><strong>Your ELK is a hosted logging cluster for microservices — it is a data source, not a home.</strong> Logs stay where they are and are queried live via a <code>fetch_logs</code> MCP tool; they are never re-indexed into the knowledge plane (volume, retention, and cost all say no). The knowledge plane ships as containers on the same hosted Kubernetes your services run on: connectors as CronJobs, the retrieval service as a Deployment, Zoekt as a StatefulSet with a PVC, Postgres via operator or a managed offering, and Postgres carrying catalog, link graph, and search in one store (OpenSearch enters only if scale later demands a dedicated cluster). The same stack runs fully local for development — macOS (brew), Linux (apt), Windows via WSL2 — with no Docker: brew/apt processes, connectors as CLI runs, MCP over stdio. Native Windows is explicitly not a support target; WSL2 is the Windows path (the two components with Windows friction, pg_search and Zoekt, are POSIX-clean under WSL).</p>
+  </div>
+
+  <div class="callout">
+    <p><span class="label">Constraint honored</span><strong>No local model hosting.</strong> Embeddings via MaaS API through the LiteLLM gateway (batch, ~$0.01–0.02 per million tokens). No local cross-encoder reranker — v1 ships without reranking; an API reranker is added only if the eval suite proves the gap. ELSER is out: it runs models on Elasticsearch ML nodes, which is self-hosted model serving by another name — and needs Platinum anyway.</p>
+  </div>
+</header>
+
+<section class="wide">
+  <h2 style="max-width:44rem;margin-left:auto;margin-right:auto;"><span class="num">00</span>Architecture</h2>
+  <div class="diagram-scroll">
+    <div class="diagram">
+
+      <div class="lane c5">
+        <div class="node"><span class="name">Bitbucket</span><span class="sub">webhooks + git fetch</span></div>
+        <div class="node"><span class="name">Confluence</span><span class="sub">CQL lastModified + webhooks</span></div>
+        <div class="node"><span class="name">Jira</span><span class="sub">JQL updated ≥ cursor</span></div>
+        <div class="node"><span class="name">Transcripts</span><span class="sub">VTT exports, allow-listed meetings</span></div>
+        <div class="node"><span class="name">Obsidian vaults</span><span class="sub">git-synced markdown</span></div>
+      </div>
+
+      <div class="vflow"><span class="flow">K1</span> your existing MCP extractors, repurposed as connectors · queue-buffered <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Ingestion Pipeline</span>
+          <span class="role">idempotent · every stage replayable from the raw store</span>
+        </div>
+        <div class="cells c5">
+          <div class="cell"><b>Raw store</b><span>S3-compatible blobs · originals kept for reprocessing</span></div>
+          <div class="cell"><b>Normalizer</b><span>source → canonical doc model · markdown body · ACL stamp</span></div>
+          <div class="cell"><b>Chunker</b><span>heading/turn-aware · 400–800 tok · breadcrumb prefix</span></div>
+          <div class="cell"><b>Hash gate</b><span>sha256(body) unchanged → stop · embed-once guarantee</span></div>
+          <div class="cell hot"><b>Embed via gateway</b><span>MaaS batch API · model id stored with vector · only LLM-adjacent step</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">K1</span> index writers <span class="arrow">↓</span> &nbsp;·&nbsp; <span class="flow">K2</span> changed chunks → gateway batch embed <span class="arrow">↓</span> &nbsp;·&nbsp; <span class="flow">K4</span> ACL sync every 15 min <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Index Topology</span>
+          <span class="role">four stores, each doing the one thing it is best at</span>
+        </div>
+        <div class="cells c4">
+          <div class="cell"><b>Zoekt</b><span>trigram lexical code search · all repos · no authz of its own — never exposed directly</span></div>
+          <div class="cell"><b>Postgres · symbols</b><span>SCIP defs/refs · tree-sitter fallback · per-language fidelity varies</span></div>
+          <div class="cell"><b>Postgres · chunks</b><span>FTS (+ pg_search for true BM25) + pgvector kNN + filters · same instance as catalog · OpenSearch only if scale demands later — the logging ELK is a query target, never a home</span></div>
+          <div class="cell"><b>Postgres · catalog</b><span>doc registry · ACL groups · link graph edges · sync cursors · eval golden sets</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">K3</span> all reads go through one service — no client talks to an index directly <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Retrieval Service</span>
+          <span class="role">one stateless Go/Python service · the determinism boundary</span>
+        </div>
+        <div class="cells c5">
+          <div class="cell"><b>1 · Rule router</b><span>ticket-key / path / symbol / error-string patterns → target index · no LLM</span></div>
+          <div class="cell"><b>2 · Executors</b><span>BM25 ∥ kNN ∥ Zoekt ∥ catalog joins · parallel fan-out</span></div>
+          <div class="cell"><b>3 · Fusion</b><span>RRF in-service, k=60, tiebreak on doc id · engine-native RRF varies by product and license — own the math, keep ranking versioned in git</span></div>
+          <div class="cell"><b>4 · Rank modifiers</b><span>recency decay · quality tier prior · closed-form, versioned in git</span></div>
+          <div class="cell hot"><b>5 · ACL filter</b><span>mandatory, server-side, fail-closed · injected from caller identity, never agent-controlled</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">K3</span> MCP surface — six tools, IDs + snippets out, full docs only on request · <span class="flow">K5</span> fresh=true pull-through <span class="arrow">↓</span></div>
+
+      <div class="lane c6">
+        <div class="node"><span class="name">search_code</span><span class="sub">file:line + snippet</span></div>
+        <div class="node"><span class="name">find_symbol / refs</span><span class="sub">defs · references</span></div>
+        <div class="node"><span class="name">search_docs</span><span class="sub">id + title + snippet</span></div>
+        <div class="node"><span class="name">get_doc</span><span class="sub">full canonical doc · fresh=true pull-through</span></div>
+        <div class="node"><span class="name">expand</span><span class="sub">link-graph neighborhood</span></div>
+        <div class="node"><span class="name">fetch_logs</span><span class="sub">live query to hosted logging ELK · never re-indexed</span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <h2 style="max-width:44rem;margin:3rem auto .8rem;"><span class="num">00·B</span>Component view — what actually deploys</h2>
+  <p style="max-width:44rem;margin:0 auto 0;">Every box below is a deployable on the hosted kube (namespace <code>eil</code>) or an external system it talks to. Workload types are tagged; <span class="wl v1">v1</span> marks components that ship only after v0 data justifies them.</p>
+  <div class="diagram-scroll">
+    <div class="diagram">
+
+      <div class="plane collect" style="border-top-color: var(--ink);">
+        <div class="plane-title">
+          <span class="name">External systems</span>
+          <span class="role">not yours to deploy — integrate only</span>
+        </div>
+        <div class="cells c4">
+          <div class="cell"><b>Bitbucket DC</b><span>webhooks out · git fetch · built-in search API = v0 code search (native ACLs)</span></div>
+          <div class="cell"><b>Confluence · Jira DC</b><span>REST + webhooks · CQL/JQL cursors · permission APIs</span></div>
+          <div class="cell"><b>AD / LDAP</b><span>groups → ACL truth · identity reconcile</span></div>
+          <div class="cell"><b>LiteLLM gateway → MaaS</b><span>batch embeddings (K2) · transcript summaries · lives in model-access namespace</span></div>
+          <div class="cell"><b>Logging ELK</b><span>live fetch_logs target · never ingested</span></div>
+          <div class="cell"><b>Transcript drop</b><span>VTT exports, allow-listed</span></div>
+          <div class="cell"><b>Obsidian vaults (git)</b><span>curated tier in · PRs out (K6)</span></div>
+          <div class="cell"><b>S3-compatible store</b><span>raw blobs · replay source · managed service</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">K1</span> events + pulls <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Ingest group</span>
+          <span class="role">stateless · queue-buffered · every stage replayable</span>
+        </div>
+        <div class="cells c4">
+          <div class="cell"><b>webhook-receiver<span class="wl">Deploy</span></b><span>verifies + enqueues source events · dumb by design</span></div>
+          <div class="cell"><b>connector-{jira, confluence, bitbucket, transcripts, obsidian}<span class="wl">CronJob</span></b><span>cursor poll 5–15 min · nightly full-listing reconcile (deletes) · contract-tested</span></div>
+          <div class="cell"><b>ingest-worker<span class="wl">Deploy ×N</span></b><span>normalize → chunk → hash gate → index writes · calls gateway for K2 embeds + transcript summaries</span></div>
+          <div class="cell"><b>acl-syncer<span class="wl">CronJob 15m</span></b><span>space/page/repo perms + AD groups → acl_groups stamps (K4) · fail-closed</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="arrow">↓</span> writes <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Data group</span>
+          <span class="role">the only stateful things you own</span>
+        </div>
+        <div class="cells c4">
+          <div class="cell"><b>Postgres<span class="wl">Operator / managed / brew</span></b><span>catalog · link graph · symbols · cursors · audit · golden sets · doc chunks (FTS + pgvector) — one store, laptop-identical</span></div>
+          <div class="cell"><b>OpenSearch<span class="wl v1">Deferred · scale option</span></b><span>enters only when chunk count or relevance tooling outgrows Postgres — RRF-in-service makes the swap invisible to agents</span></div>
+          <div class="cell"><b>zoekt-{index,web}server<span class="wl v1">StatefulSet · v1</span></b><span>trigram code index · re-index on push webhook</span></div>
+          <div class="cell"><b>Queue<span class="wl">Existing</span></b><span>raw-events + ingest-tasks topics · org's Rabbit/Redis</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">K3</span> reads — only via the retrieval service <span class="arrow">↑↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Serve group</span>
+          <span class="role">the determinism + ACL boundary</span>
+        </div>
+        <div class="cells c4">
+          <div class="cell"><b>retrieval-svc<span class="wl">Deploy ×N</span></b><span>MCP + HTTP · rule router · parallel executors · in-service RRF · rank modifiers · mandatory ACL filter · per-call audit · v0: proxies Bitbucket search for search_code</span></div>
+          <div class="cell"><b>token-issuer<span class="wl">In retrieval-svc</span></b><span>short-lived per-user MCP credentials · the anti-shared-service-account control</span></div>
+          <div class="cell"><b>symbol-indexer<span class="wl v1">Job per push · v1</span></b><span>SCIP → Postgres · tree-sitter fallback · fidelity labeled per language</span></div>
+          <div class="cell"><b>eval-runner<span class="wl">CronJob + CI</span></b><span>golden-set recall@10 · ACL red-team suite · conversion-quality samples</span></div>
+        </div>
+      </div>
+
+      <div class="vflow">consumers: Amp (MCP) · Copilot agent mode (MCP) · workflow runners (HTTP/MCP) <span class="arrow">↑</span></div>
+
+    </div>
+  </div>
+</section>
+
+<main class="col">
+
+  <h2><span class="num">01</span>Information flows</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Flow</th><th>Path</th><th>Cadence</th><th>Model use</th></tr></thead>
+      <tbody>
+        <tr><td><span class="fnum">K1</span> Ingest</td><td>Source API → connector (CronJob) → raw blob (S3) → normalize → chunk (breadcrumb-prefixed) → hash gate → Zoekt / OpenSearch / Postgres writes</td><td>Webhooks (sec–min) + cursor poll 5–15 min + nightly full-listing reconcile (catches deletions)</td><td>None — deterministic code; one Nemotron summary per allow-listed transcript</td></tr>
+        <tr><td><span class="fnum">K2</span> Embed</td><td>Chunks whose <code>content_hash</code> changed → LiteLLM batch → NV-Embed-class MaaS → vector + model id stored in OpenSearch</td><td>Piggybacks K1; quiet day = $0</td><td>Embedding API only; skipped entirely in BM25-only mode</td></tr>
+        <tr><td><span class="fnum">K3</span> Retrieve</td><td>Agent → MCP tool → rule router → executors in parallel (BM25 ∥ kNN ∥ Zoekt ∥ catalog joins) → in-service RRF → recency/tier modifiers → mandatory ACL filter → IDs + snippets; <code>get_doc</code> for full text</td><td>On demand · &lt;200 ms target</td><td>None</td></tr>
+        <tr><td><span class="fnum">K4</span> ACL sync</td><td>Confluence space + page restrictions · Jira roles · Bitbucket repo perms · AD groups → <code>acl_groups</code> stamps in catalog</td><td>Every 15 min · fail-closed</td><td>None</td></tr>
+        <tr><td><span class="fnum">K5</span> Freshness pull-through</td><td><code>get_doc(id, fresh=true)</code> → live fetch from source API → returned to caller → re-indexed as side effect</td><td>On demand (incident paths)</td><td>None</td></tr>
+        <tr><td><span class="fnum">K6</span> Curation loop</td><td>Workflow drafts (postmortems, decision digests) → git PR against Obsidian vault → human merge → K1 re-ingests at <code>curated</code> tier</td><td>Event-driven + monthly staleness-review PRs</td><td>Drafting only, outside the plane</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The property to defend in review: <strong>K1, K3, K4, K5 — everything that runs constantly — contain no LLM calls.</strong> The plane's marginal cost per query is compute, not tokens.</p>
+
+  <h2><span class="num">02</span>Tech stack</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Pick</th><th>Why</th><th>Rejected</th></tr></thead>
+      <tbody>
+        <tr><td>Text + vector index</td><td>Postgres, same instance as the catalog: FTS for lexical (pg_search/ParadeDB extension for true BM25; plain <code>ts_rank</code> acceptable for v0), pgvector for kNN. At this corpus scale (single-digit millions of chunks) it carries hybrid search comfortably; exact vector scan restores <em>strict</em> determinism; and the identical stack runs on a laptop via Homebrew — no Docker</td><td>OpenSearch dedicated cluster on kube (hybrid + native RRF free, Apache 2.0) — the planned scale escape; Meilisearch/Typesense single binaries (good engines, but a second store beside the catalog)</td><td>Chunks approach ~5–10M, p95 latency SLOs slip, or relevance tooling needs outgrow SQL — the in-service RRF design makes the engine swap invisible to agents</td></tr>
+        <tr><td>Rank fusion</td><td>RRF in the retrieval service</td><td>ES-native RRF retriever needs an Enterprise license; client-side RRF is ~20 lines, deterministic, and index-agnostic</td><td>ES RRF retriever; learned linear fusion (needs calibration data)</td></tr>
+        <tr><td>Code search</td><td>Zoekt — with Bitbucket DC built-in search as the zero-infra v0 (see §03)</td><td>Actively maintained by Sourcegraph since 2017; GitLab adopted it for Exact Code Search and runs it in production on GitLab.com — the strongest possible independent validation for a free engine</td><td>livegrep (single-digit-GB scale); OpenGrok (heavy JVM, dated); Hound (stagnant); OpenSearch-for-code (analyzers mangle identifiers, no trigram regex)</td></tr>
+        <tr><td>Symbols</td><td>SCIP indexers → Postgres, tree-sitter fallback</td><td>Precise defs/refs where indexers exist; approximate elsewhere, honestly labeled</td><td>LSP-on-demand (slow, stateful); ctags only (no cross-file refs)</td></tr>
+        <tr><td>Catalog · links · ACL</td><td>Postgres</td><td>Joins are the deterministic backbone; “everything about PAY-981” is a query, not a search</td><td>Graph DB (edge table suffices); LLM-built knowledge graph (expensive, non-deterministic)</td></tr>
+        <tr><td>Embeddings</td><td>MaaS API via LiteLLM, batch</td><td>text-embedding-3-small class: $0.01–0.02/M tokens batch; hash-gated so re-syncs cost zero</td><td>Local bge/gte serving (ruled out by constraint); ELSER (Platinum + is model serving on ES nodes)</td></tr>
+        <tr><td>Reranker</td><td>None in v1</td><td>Ship, measure recall@10; add an API reranker (Cohere/Voyage class) only where evals prove the gap</td><td>Local cross-encoder (constraint); reranker-by-default (cost with unproven benefit)</td></tr>
+        <tr><td>Pipeline transport</td><td>Existing queue (Rabbit/Redis Streams)</td><td>Buffering + retry; whatever the org already runs</td><td>Kafka just for this (overkill)</td></tr>
+        <tr><td>Raw blobs</td><td>S3-compatible object store</td><td>Reprocess without re-fetching; chunker/model changes replay from here</td><td>—</td></tr>
+        <tr><td>Retrieval + MCP</td><td>One stateless service</td><td>Single choke point for routing, fusion, ranking, ACL; horizontally scalable</td><td>Per-index MCP servers (ACL logic duplicated N times — a leak waiting to happen)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2><span class="num">03</span>Is Zoekt the best? The code-search decision record</h2>
+  <p>Short answer: <strong>yes, Zoekt is the best build option — but it is not the best first step.</strong> The full field:</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Option</th><th>Strengths</th><th>Dealbreakers / costs</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Bitbucket DC built-in search</td><td><strong>Zero new infra</strong>, already indexing your repos, and — uniquely — <strong>enforces Bitbucket's own ACLs natively</strong>, so no permission engineering at all</td><td>No regex; max 9 expressions / 250 chars per query; single characters not indexed; files &gt; 512 KiB unsearchable; the REST search endpoint is internal/unsupported (a public API is a long-open Atlassian request); performance sags on big instances</td><td><strong>v0.</strong> Wrap it in <code>search_code</code> today; ship value in a week</td></tr>
+        <tr><td>Zoekt</td><td>Trigram index → real regex + exact match at speed; ranked cross-repo results; single binary; maintained by Sourcegraph since 2017; <strong>GitLab bet on it for Exact Code Search and runs it on GitLab.com</strong> — production-proven at far beyond your scale</td><td>No authz of its own — repo-ACL filtering must live in your retrieval service (K4 already builds this); you own index refresh + operations (StatefulSet, PVC, re-index on push)</td><td><strong>v1 default.</strong> Deploy when v0's query limits demonstrably bite agents</td></tr>
+        <tr><td>Sourcegraph Enterprise</td><td>Zoekt + precise SCIP navigation + UI + Bitbucket DC permission syncing, productized</td><td>License cost; overlaps heavily with what the retrieval service already does; another vendor relationship</td><td><strong>Buy trigger:</strong> symbol-navigation demand outgrows self-managed SCIP</td></tr>
+        <tr><td>livegrep / Hound / OpenGrok</td><td>Simple (livegrep, Hound); mature cross-referencing (OpenGrok)</td><td>livegrep targets single-digit-GB corpora; Hound effectively stagnant; OpenGrok is a heavy JVM stack with dated ergonomics</td><td>Rejected</td></tr>
+        <tr><td>OpenSearch as code index</td><td>One less system — reuse the docs cluster</td><td>Text analyzers tokenize away what code search needs (<code>snake_case</code>, operators, punctuation); no trigram regex; every serious code-search product builds a dedicated engine instead — that pattern is the evidence</td><td>Rejected</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The staging matters more than the winner: <strong>v0 costs nothing and is ACL-safe by construction</strong>, which buys time to build the repo-ACL filter properly before Zoekt goes live. And because both sit behind the same <code>search_code</code> MCP tool, the v0→v1 swap is invisible to every agent and workflow — the tool contract is the interface, not the engine. Instrument v0's failure modes (queries needing regex, truncated results, latency) and let that data, not enthusiasm, schedule the Zoekt deployment.</p>
+
+  <h2><span class="num">04</span>Ingestion — the per-source fine print</h2>
+  <p>The pipeline shape is identical for every source (connector → raw blob → normalize → chunk → hash gate → write). What differs is where each source will hurt you:</p>
+  <ul>
+    <li><strong>Confluence.</strong> Incremental CQL on <code>lastModified</code>. The trap is conversion: storage format → markdown is <em>lossy</em> — macros, includes, and layout tables can turn into garbage chunks that poison BM25 and embeddings alike. Expand common macros, drop unrenderable ones explicitly, and keep a conversion-quality sample in the eval set. Honor <em>page-level</em> restrictions, not just space permissions — pages restricted tighter than their space are the classic enterprise-search leak.</li>
+    <li><strong>Jira.</strong> Issue = parent doc; description and comment threads as child chunks; status/labels/components as filterable metadata, not body text. Regex-extract issue keys everywhere (commits, PRs, pages) into the link graph.</li>
+    <li><strong>Code.</strong> Never in Elasticsearch. Zoekt for text, SCIP for symbols, git metadata (CODEOWNERS, blame recency, commit→ticket links) into the catalog. Semantic code embeddings deferred until lexical+symbol hit-rate data argues for them.</li>
+    <li><strong>Transcripts.</strong> Allow-listed meeting types only — engineering reviews and incident calls in, HR and legal-adjacent meetings never ingested. One small-model MaaS pass per meeting produces a structured summary (decisions, actions, topics) stored as <code>quality_tier: generated</code>; the raw transcript indexes at the lowest tier with a retention clock.</li>
+    <li><strong>Obsidian.</strong> Cheapest connector: git-synced markdown, chunk by heading, <code>[[wikilinks]]</code> feed the link graph. Everything here is <code>quality_tier: curated</code> — the top ranking prior — because a human approved it. Workflows write <em>proposals</em> back as git PRs; humans merge; the corpus compounds.</li>
+  </ul>
+
+  <h2><span class="num">05</span>The query path</h2>
+  <p>No LLM interprets queries. A rule router classifies them — developer queries are heavily patterned, so rules cover the overwhelming majority:</p>
+  <pre><code>"PAY-981"                        → catalog lookup + expand()        0 tokens, a join
+"RetryHandler.java:142" / path   → Zoekt file/path search
+handleRetry-shaped token         → symbol DB
+quoted string / error message    → Zoekt + ES phrase, exact match
+natural language (the rest)      → search cluster: BM25 ∥ kNN → RRF</code></pre>
+  <p>Fusion is Reciprocal Rank Fusion computed in the retrieval service — fixed <code>k=60</code>, per-arm weights in config, ties broken on doc id. Rank modifiers are closed-form and versioned in git: exponential recency decay and the quality-tier prior (curated &gt; authored &gt; generated &gt; raw). Because every stage is code, the whole path is regression-testable: a golden set of ~50 real queries per team runs recall@10 in CI on every chunker, ranking, or model change.</p>
+  <p>Results are two-phase by design: <code>search_*</code> returns IDs, titles, and snippets — compact enough for an agent to scan for a few hundred tokens — and only <code>get_doc</code> returns full content. This is the single biggest token-cost lever in the whole platform.</p>
+
+  <h2><span class="num">06</span>Heavy critique — where this design is weakest</h2>
+  <p>What a hostile reviewer should say about this design, with the honest response to each:</p>
+
+  <div class="risk">
+    <div class="risk-head"><h3>ACL fidelity is the hardest promise on this page</h3><span class="chip high">High</span></div>
+    <p>Group-sync lag creates a leak window when someone loses access; Confluence page-level restrictions are easy to miss; fail-closed over-filtering silently degrades results and erodes trust in the other direction. This is the risk that turns the project into an incident.</p>
+    <p class="fix"><b>Response</b>Permission sync every 15 minutes, not nightly; page-level restriction checks in the Confluence normalizer; a red-team eval — restricted docs planted per tenant, CI asserts they never surface for unauthorized identities. Ship this <em>before</em> wide rollout.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>“Deterministic” is overstated for the vector arm</h3><span class="chip high">High</span></div>
+    <p>HNSW is approximate: recall varies with segment merges and replica state, so kNN results are <em>stable, not bit-identical</em>. Claiming full determinism invites embarrassment the first time a golden-set run flickers.</p>
+    <p class="fix"><b>Response</b>Reframe the guarantee: the lexical and structural paths (most traffic, via the router) are strictly deterministic; the hybrid path is bounded-variance, with BM25 as the primary arm and kNN as recall assist. Small tenants can use exact kNN. Golden-set assertions on the hybrid path use recall@10 thresholds, not exact orderings.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>API embeddings put a third party on the critical path</h3><span class="chip med">Med</span></div>
+    <p>Providers deprecate embedding models; a forced migration means a full re-embed and eval re-baseline, and you cannot A/B a replacement locally. Ingest also now depends on MaaS availability.</p>
+    <p class="fix"><b>Response</b>Cheap in practice: 1M chunks ≈ 500M tokens ≈ $5–10 at batch rates for a full re-embed — the cost is the eval re-baseline, not the compute. Store model id with every vector, keep raw blobs for replay, and queue-buffer ingest so MaaS outages delay freshness rather than lose data. This is a manageable tax for honoring the no-local-models constraint.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Confluence-to-markdown conversion quality decides doc retrieval</h3><span class="chip med">Med</span></div>
+    <p>Enterprise wikis are macro soup. If 20% of pages normalize into mangled chunks, hybrid search degrades in ways dashboards will not show — users just quietly stop trusting it.</p>
+    <p class="fix"><b>Response</b>Treat the normalizer as a first-class component with its own test corpus: sample pages per space, human-graded conversion checks, and an explicit “could not render” marker that excludes a chunk rather than indexing noise.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Symbol precision is uneven and will be blamed on the platform</h3><span class="chip med">Med</span></div>
+    <p>SCIP indexers are excellent for some languages, absent for others; tree-sitter fallback is single-file approximation, not real cross-file resolution. Users experience this as “find-references is wrong.”</p>
+    <p class="fix"><b>Response</b>Label fidelity per language in tool responses (<code>precision: full | approximate</code>) so agents and humans can weigh results; prioritize SCIP coverage for the org’s top languages; revisit Sourcegraph Enterprise if symbol demand outgrows this.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Freshness gap during incidents</h3><span class="chip med">Med</span></div>
+    <p>Webhooks drop; the nightly reconcile means content can be stale exactly when an incident-triage workflow needs the page edited an hour ago.</p>
+    <p class="fix"><b>Response</b>Add a pull-through path: <code>get_doc(id, fresh=true)</code> fetches live from the source API, returns it, and re-indexes as a side effect. Deterministic, bounded, and only paid for on demand.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Curation rot: the Obsidian tier can rank stale truths first</h3><span class="chip med">Med</span></div>
+    <p>A curated note from 2024 outranking this month’s Confluence page is the failure mode of quality priors — yesterday’s architecture served as today’s answer.</p>
+    <p class="fix"><b>Response</b>Recency decay applies to curated content too, just with a gentler half-life; vault notes carry a <code>reviewed:</code> date in frontmatter, and a monthly workflow files PRs against notes past their review window.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>The real long-term cost is connector maintenance, not compute</h3><span class="chip high">High</span></div>
+    <p>Five connectors × API changes, auth rotations, and edge cases is the unglamorous work that kills internal platforms — the search infra will outlive the enthusiasm for feeding it.</p>
+    <p class="fix"><b>Response</b>Connectors are owned, on-call-adjacent software with contract tests against each source API and staleness alarms per source (“Confluence cursor hasn’t advanced in 24h” pages someone). Budget it into headcount honestly or the plane silently rots.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Buy-vs-build: you are building Glean-lite — say so out loud</h3><span class="chip med">Med</span></div>
+    <p>Glean’s architecture — hybrid retrieval over a permissions-aware knowledge graph, ACLs enforced at query time — is exactly this design, productized with 100+ connectors. And Atlassian now bundles Rovo free into Cloud Premium/Enterprise plans.</p>
+    <p class="fix"><b>Response</b>The build case rests on three legs: the org is on Data Center (Bitbucket + Bamboo), where Rovo doesn’t reach; Rovo and Glean are human-search products with weak MCP/agent extensibility, while this plane is agent-first; and determinism + cost control are design goals no vendor sells. If the org migrates to Atlassian Cloud or Glean lands enterprise MCP access, re-run this decision — the connectors and catalog survive either way.</p>
+  </div>
+
+  <h2><span class="num">07</span>What changed from Draft 1</h2>
+  <ul>
+    <li><strong>Embeddings moved from local bge/gte serving to MaaS batch APIs</strong> through the gateway — the no-local-models constraint costs single-digit dollars per full corpus embed at current batch rates.</li>
+    <li><strong>RRF moved from “Elasticsearch does it natively” to in-service fusion</strong> — the native RRF retriever is Enterprise-licensed; owning the ~20 lines is cheaper, deterministic, and portable to OpenSearch if licensing ever forces the move.</li>
+    <li><strong>Local cross-encoder reranking dropped</strong>; replaced by “nothing until evals prove the gap, then an API reranker.”</li>
+    <li><strong>Determinism claim downgraded honestly</strong>: strict on lexical/structural paths, bounded-variance on the vector arm.</li>
+    <li><strong>OpenSearch demoted from default to deferred scale option (4.1).</strong> At this corpus size, Postgres FTS + pgvector carries hybrid search inside the same instance as the catalog — one stateful service instead of two, exact vector scan instead of approximate ANN, and the whole stack runs locally via Homebrew with no Docker. OpenSearch returns only if chunk count or relevance tooling outgrows SQL; because the engine is just an executor behind the retrieval service, the swap is invisible to every agent.</li>
+    <li><strong>Search fully decoupled from the logging ELK (2.1).</strong> Your ELK is a hosted logging cluster for production microservices — not yours to extend, and the wrong place for knowledge indexes even if it were (a noisy log day would degrade retrieval; retrieval load would degrade incident response). Its role narrows to a live query target behind <code>fetch_logs</code>.</li>
+  </ul>
+
+  <h2><span class="num">08</span>Implementation phases</h2>
+  <p>Sized for one builder plus AI agents, part-time alongside other work. Each phase is independently valuable — if investment stops after any phase, what shipped still pays for itself. Weeks are effort estimates, not calendar promises.</p>
+  <p><strong>Operating model: local-first, prove, then promote.</strong> Phases 0–1 run entirely on a laptop (brew/apt Postgres, ingest as CLI runs, MCP over stdio, personal credentials only — ACL by construction, since you can only ingest what you can read). Promotion to kube happens per component, each with its own gate:</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Order</th><th>Promotes</th><th>Gate</th><th>What changes</th></tr></thead>
+      <tbody>
+        <tr><td>P1</td><td>Postgres → operator/managed on kube</td><td>Local proof complete (see criteria below)</td><td>A connection string. Data re-ingested from sources, not migrated — the connectors are the recovery path by design</td></tr>
+        <tr><td>P2</td><td>retrieval-svc → Deployment, HTTP/streamable MCP + token-issuer</td><td><strong>ACL red-team suite green</strong> + per-user MCP auth spike verified in Amp/Copilot</td><td>stdio → HTTP transport; implicit identity → per-user short-lived tokens; audit log becomes load-bearing</td></tr>
+        <tr><td>P3</td><td>Connectors → CronJobs + webhook-receiver</td><td>P2 live; service accounts vault-managed</td><td>Personal credentials → service accounts — this switch happens <em>only</em> on kube, never on laptops; webhooks + reconcile replace manual CLI runs</td></tr>
+        <tr><td>P4</td><td>Zoekt · embeddings · transcripts</td><td>Their existing evidence gates (v0 failure data, eval gap)</td><td>Born on kube — never local obligations</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>“Proven” means, concretely:</strong> the <code>expand()</code> demo works on real org data; a recall@10 baseline exists over 20–30 real golden queries; two weeks of daily self-use show agents reaching for the MCP tools instead of exploring (visible in your own Amp threads); p95 tool latency under 500 ms locally. Because every component is 12-factor and the CI builds the images, each promotion is configuration and supervision — not a rewrite; the laptop profile survives forever as the development environment.</p>
+  <div>
+    <div class="phase">
+      <span class="when">Phase 0<br>~1 wk</span>
+      <div>
+        <h3>Foundations</h3>
+        <p>Namespace, Postgres (schema migrations for canonical doc model, link graph, cursors, audit), queue topics, S3 bucket, CI pipeline, and a hello-world MCP <code>retrieval-svc</code> answering a hardcoded query end-to-end from Amp.</p>
+        <span class="ships">ships: retrieval-svc skeleton · Postgres schemas · CI</span>
+        <span class="exit">exit: an Amp session calls the MCP tool and gets an answer</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Phase 1<br>~3 wks</span>
+      <div>
+        <h3>Catalog, link graph, first connectors — pilot scope</h3>
+        <p>Jira + Confluence connectors (cursor poll + nightly reconcile), normalizer + chunker + hash gate, BM25-only <code>search_docs</code>, <code>get_doc</code>, <code>expand</code>, and <code>search_code</code> v0 proxying Bitbucket DC built-in search (native ACLs, zero infra). <strong>Pilot team + unrestricted spaces only</strong> — the full ACL gate doesn't exist yet, so scope is the access control.</p>
+        <span class="ships">ships: connector-jira · connector-confluence · webhook-receiver · ingest-worker · search_docs/get_doc/expand/search_code(v0) · MCP call-volume metrics</span>
+        <span class="exit">exit: expand("PAY-981") demo lands · recall@10 baseline recorded · v0 search_code failure modes instrumented</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Phase 2<br>~2–3 wks</span>
+      <div>
+        <h3>ACL gate — the rollout gate</h3>
+        <p>acl-syncer (15-min cadence, space + page-level + repo + AD groups), mandatory server-side filter in every executor, per-user short-lived tokens from token-issuer (kills the shared-service-account failure mode), per-call audit log, and the red-team suite: planted restricted docs that CI asserts never surface for wrongly-scoped identities.</p>
+        <span class="ships">ships: acl-syncer · token-issuer · audit log · red-team CI</span>
+        <span class="exit">exit: red-team suite green two consecutive weeks → open beyond pilot</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Phase 3<br>~2–3 wks</span>
+      <div>
+        <h3>Code search v1 — if v0 data demands it</h3>
+        <p>Zoekt StatefulSet indexing all repos (re-index on push webhook), repo-ACL filtering in retrieval-svc, SCIP symbol-indexer Jobs for the org's top languages with tree-sitter fallback, <code>find_symbol</code>/<code>find_refs</code>. Same MCP contract — the v0→v1 swap is invisible to agents. Skip or defer if v0 instrumentation shows the built-in search suffices.</p>
+        <span class="ships">ships: zoekt-indexserver · zoekt-webserver · symbol-indexer · connector-bitbucket (full)</span>
+        <span class="exit">exit: p95 search_code &lt; 200 ms · symbol coverage labeled per language · regex-query failures from v0 now succeed</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Phase 4<br>~2 wks</span>
+      <div>
+        <h3>Hybrid semantics — if evals demand it</h3>
+        <p>Batch-embed the docs corpus via gateway (NV-Embed-class), kNN arm + in-service RRF, golden-set CI gating every ranking change. If conceptual code queries still fail: the summary-embedding arm (one Nemotron summary per module, embed the summaries — not raw code). Entirely conditional on the phase-1 baseline showing a real gap.</p>
+        <span class="ships">ships: K2 embed path · kNN executor · RRF fusion · golden-set CI</span>
+        <span class="exit">exit: measured recall@10 uplift over BM25-only justifies the arm — or the arm is documented as not needed</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Phase 5<br>~2–3 wks</span>
+      <div>
+        <h3>Transcripts, curation loop, multi-team</h3>
+        <p>Transcript connector (allow-listed, retention clocks, strictest ACL tier) with one Nemotron summary per meeting; Obsidian write-back (workflow drafts → vault PRs → human merge → curated tier); <code>fetch_logs</code> against the logging ELK; per-team onboarding as one YAML (spaces, projects, repos, vault, groups); staleness alarms on every connector.</p>
+        <span class="ships">ships: connector-transcripts · connector-obsidian (write-back) · fetch_logs · tenant onboarding config</span>
+        <span class="exit">exit: second team onboarded by config only, no code changes</span>
+      </div>
+    </div>
+  </div>
+  <p>Two sequencing rules the phases encode: <strong>nothing rolls out beyond the pilot before the ACL gate is green</strong> (phase 2 is the gate, not a feature), and <strong>the two expensive optional components — Zoekt and embeddings — each require data from the previous phase to justify their existence.</strong> The cheapest infrastructure is the component you measured your way out of building.</p>
+
+  <div class="sources">
+    <p style="font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:.6rem;">Selected sources</p>
+    <ul style="list-style:none;padding:0;">
+      <li><a href="https://www.glean.com/resources/guides/glean-knowledge-graph">Glean — the knowledge graph behind permissions-aware enterprise search</a></li>
+      <li><a href="https://u11d.com/blog/reciprocal-rank-fusion-on-free-elasticsearch-licensing-workarounds-and-the-open-search-alternative/">RRF on free Elasticsearch: licensing and workarounds</a></li>
+      <li><a href="https://www.elastic.co/search-labs/blog/hybrid-search-elasticsearch">Elastic — hybrid search overview</a></li>
+      <li><a href="https://softwaredoug.com/blog/2025/03/13/elasticsearch-hybrid-search-strategies">Benchmarked Elasticsearch hybrid search recipes</a></li>
+      <li><a href="https://tokenmix.ai/blog/text-embedding-models-comparison">Embedding API pricing comparison, 2026</a></li>
+      <li><a href="https://www.atlassian.com/software/rovo">Atlassian Rovo</a></li>
+      <li><a href="https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/code_search_with_zoekt/">GitLab — why we chose Zoekt for Exact Code Search</a></li>
+      <li><a href="https://github.com/sourcegraph/zoekt">sourcegraph/zoekt — maintained fork since 2017</a></li>
+      <li><a href="https://confluence.atlassian.com/bitbucketserver/bitbucket-search-syntax-814204781.html">Bitbucket DC search syntax and limits</a></li>
+      <li><a href="https://jira.atlassian.com/browse/BSERV-11632">BSERV-11632 — public code-search API request (open)</a></li>
+    </ul>
+  </div>
+
+</main>

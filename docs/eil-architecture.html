@@ -1,0 +1,378 @@
+<title>Enterprise Intelligence Layer — Architecture</title>
+<style>
+  :root {
+    --ground: #F6F7F5;
+    --ink: #16211F;
+    --ink-soft: #46534F;
+    --accent: #0E7C6B;
+    --accent-wash: #E3EEEA;
+    --caution: #A85E14;
+    --caution-wash: #F6EDE2;
+    --danger: #9B3324;
+    --danger-wash: #F7E8E4;
+    --line: #D5DBD8;
+    --card: #FFFFFF;
+    --display: "Avenir Next", Avenir, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --body: Charter, "Iowan Old Style", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html { background: var(--ground); }
+  body {
+    font-family: var(--body); color: var(--ink); line-height: 1.6; font-size: 17px;
+    margin: 0; padding: 3.5rem 1.5rem 6rem;
+  }
+  .col { max-width: 44rem; margin: 0 auto; }
+  .wide { max-width: 70rem; margin: 0 auto; }
+
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 .75rem; }
+  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(1.9rem, 4.5vw, 2.7rem); line-height: 1.12; letter-spacing: -.015em; margin: 0 0 .6rem; text-wrap: balance; }
+  .standfirst { font-size: 1.12rem; color: var(--ink-soft); margin: 0 0 .4rem; max-width: 40rem; }
+  .meta { font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); letter-spacing: .06em; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.35rem; letter-spacing: -.01em; margin: 3.2rem 0 .8rem; text-wrap: balance; }
+  h2 .num { color: var(--accent); font-family: var(--mono); font-size: .85rem; font-weight: 400; margin-right: .6rem; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 1.02rem; margin: 1.8rem 0 .4rem; }
+  p { margin: 0 0 1rem; }
+  ul { padding-left: 1.2rem; margin: 0 0 1rem; }
+  li { margin-bottom: .45rem; }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code { font-family: var(--mono); font-size: .82em; background: #ECEFED; padding: .1em .35em; border-radius: 3px; white-space: nowrap; }
+
+  .thesis { border: 2px solid var(--ink); background: var(--card); padding: 1.2rem 1.4rem; margin: 2.2rem 0 0; }
+  .thesis p { margin: 0; font-size: 1.05rem; }
+  .thesis .label { font-family: var(--mono); font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: .5rem; }
+
+  .constraints { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.2rem; }
+  .constraint {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .04em;
+    background: var(--card); border: 1px solid var(--line); padding: .35rem .7rem; color: var(--ink-soft);
+  }
+  .constraint b { color: var(--caution); font-weight: 600; }
+
+  /* diagram */
+  .diagram-scroll { overflow-x: auto; margin: 1.6rem 0 0; padding-bottom: .5rem; }
+  .diagram { min-width: 760px; display: flex; flex-direction: column; }
+  .lane { display: grid; gap: .7rem; }
+  .lane.c4 { grid-template-columns: repeat(4, 1fr); }
+  .lane.c6 { grid-template-columns: repeat(6, 1fr); }
+  .node { background: var(--card); border: 1.5px solid var(--ink); padding: .65rem .8rem; }
+  .node .name { font-family: var(--display); font-weight: 700; font-size: .88rem; display: block; }
+  .node .sub { font-family: var(--mono); font-size: .63rem; color: var(--ink-soft); line-height: 1.5; display: block; margin-top: .3rem; }
+  .tag { font-family: var(--mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; padding: .08rem .38rem; border: 1px solid currentColor; display: inline-block; margin-bottom: .4rem; }
+  .tag.closed { color: var(--caution); }
+  .tag.yours { color: var(--accent); }
+  .flow {
+    font-family: var(--mono); font-size: .62rem; letter-spacing: .06em; color: var(--card);
+    background: var(--accent); padding: .1rem .45rem; border-radius: 999px; display: inline-block;
+  }
+  .flow.warn { background: var(--caution); }
+  .vflow { font-family: var(--mono); font-size: .7rem; color: var(--ink-soft); text-align: center; padding: .55rem 0; line-height: 1.6; }
+  .vflow .arrow { color: var(--accent); }
+  .split { display: grid; grid-template-columns: 3fr 2fr; gap: .8rem; align-items: stretch; }
+  .plane { background: var(--card); border: 1.5px solid var(--line); border-top: 3px solid var(--accent); padding: 1rem 1.1rem 1.1rem; }
+  .plane.collect { border-top-color: var(--caution); }
+  .plane-title { display: flex; align-items: baseline; gap: .7rem; margin-bottom: .8rem; flex-wrap: wrap; }
+  .plane-title .name { font-family: var(--display); font-weight: 700; font-size: 1rem; }
+  .plane-title .role { font-family: var(--mono); font-size: .66rem; color: var(--ink-soft); }
+  .cells { display: grid; gap: .6rem; }
+  .cells.c5 { grid-template-columns: repeat(5, 1fr); }
+  .cells.c4 { grid-template-columns: repeat(4, 1fr); }
+  .cells.c2 { grid-template-columns: repeat(2, 1fr); }
+  .cell { background: var(--ground); border: 1px solid var(--line); padding: .5rem .6rem; }
+  .cell b { font-family: var(--display); font-size: .78rem; font-weight: 600; display: block; }
+  .cell span { font-family: var(--mono); font-size: .62rem; color: var(--ink-soft); line-height: 1.5; display: block; margin-top: .25rem; }
+  .cell.hot { border-color: var(--caution); }
+  .cell.hot b { color: var(--caution); }
+
+  /* tables */
+  .table-scroll { overflow-x: auto; margin: 1rem 0 1.4rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 660px; font-size: .88rem; }
+  th { font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; text-align: left; color: var(--ink-soft); border-bottom: 2px solid var(--ink); padding: .5rem .7rem .4rem; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .7rem; vertical-align: top; line-height: 1.5; }
+  td:first-child { font-family: var(--display); font-weight: 600; font-size: .84rem; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  td .fnum { font-family: var(--mono); font-size: .7rem; color: var(--accent); }
+
+  /* critique cards */
+  .risk { background: var(--card); border: 1px solid var(--line); padding: 1rem 1.15rem; margin-bottom: .9rem; }
+  .risk-head { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; margin-bottom: .4rem; }
+  .risk-head h3 { margin: 0; font-size: .98rem; }
+  .chip { font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; padding: .12rem .5rem; border-radius: 999px; }
+  .chip.high { background: var(--danger-wash); color: var(--danger); }
+  .chip.med { background: var(--caution-wash); color: var(--caution); }
+  .risk p { margin: 0 0 .5rem; font-size: .93rem; }
+  .risk .fix { font-size: .88rem; color: var(--ink-soft); margin: 0; }
+  .risk .fix b { font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); font-weight: 400; margin-right: .4rem; }
+
+  .phase { display: grid; grid-template-columns: 5.2rem 1fr; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+  .phase:last-child { border-bottom: none; }
+  .phase .when { font-family: var(--mono); font-size: .72rem; color: var(--accent); padding-top: .25rem; }
+  .phase h3 { margin: 0 0 .3rem; }
+  .phase p { margin: 0; font-size: .95rem; }
+  .phase .exit { font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); margin-top: .45rem; display: block; }
+
+  @media (max-width: 760px) {
+    .lane.c4, .cells.c4, .cells.c5 { grid-template-columns: 1fr 1fr; }
+    .lane.c6 { grid-template-columns: 1fr 1fr; }
+    .split { grid-template-columns: 1fr; }
+    .phase { grid-template-columns: 1fr; gap: .2rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="col">
+  <p class="eyebrow">Architecture Brief · Rev 2</p>
+  <h1>Enterprise Intelligence Layer</h1>
+  <p class="standfirst">Full solution architecture: four planes, six information flows, the tech stack with its runners-up, and the critique that should be read before any of it is built.</p>
+  <p class="meta">2026-07-27 · companion deep-dive: <a href="https://claude.ai/code/artifact/c93842e4-e785-466c-bd63-b61f6d6e947e">Knowledge Plane, draft 2.1</a></p>
+
+  <div class="thesis">
+    <span class="label">Design thesis</span>
+    <p>Two kinds of AI systems, opposite strategies. Amp and Copilot are <strong>closed</strong> — collect from their admin APIs, never intercept. MaaS is <strong>controlled</strong> — every call routes through <strong>one gateway</strong>, the choke point where cost, tracing, routing, and budgets live. Around that split: a telemetry plane that unifies three differently-shaped cost sources, a knowledge plane that answers deterministically for zero tokens, and an orchestration plane where scripts own control flow and call models as functions.</p>
+    <div class="constraints">
+      <span class="constraint"><b>C1</b> MaaS = non-frontier only (Nemotron-class)</span>
+      <span class="constraint"><b>C2</b> no local models, no local Docker — hosted kube only</span>
+      <span class="constraint"><b>C3</b> ELK = hosted logging cluster, logs-only, not extendable</span>
+      <span class="constraint"><b>C4</b> Atlassian Data Center estate (Bitbucket · Bamboo · Jira · Confluence)</span>
+    </div>
+  </div>
+</header>
+
+<section class="wide">
+  <h2 style="max-width:44rem;margin-left:auto;margin-right:auto;"><span class="num">00</span>System architecture</h2>
+  <div class="diagram-scroll">
+    <div class="diagram">
+
+      <div class="lane c4">
+        <div class="node">
+          <span class="tag closed">Closed</span>
+          <span class="name">Amp</span>
+          <span class="sub">IDE + CLI · frontier models · usage via admin API</span>
+        </div>
+        <div class="node">
+          <span class="tag closed">Closed</span>
+          <span class="name">GitHub Copilot</span>
+          <span class="sub">org models · metrics API · seat + premium-request billing</span>
+        </div>
+        <div class="node">
+          <span class="tag yours">Yours</span>
+          <span class="name">Workflows &amp; agents</span>
+          <span class="sub">kube jobs · Nemotron via gateway · MCP tools</span>
+        </div>
+        <div class="node">
+          <span class="tag yours">Yours</span>
+          <span class="name">Bamboo CI</span>
+          <span class="sub">workflow triggers · headless Amp = frontier escape hatch <span class="flow warn">F5b</span></span>
+        </div>
+      </div>
+
+      <div class="vflow">
+        <span class="flow warn">F1</span> usage &amp; billing APIs, pulled — never proxied <span class="arrow">↘</span>&nbsp;&nbsp;&nbsp;
+        <span class="flow">F4</span> MCP retrieval calls <span class="arrow">⇅</span>&nbsp;&nbsp;&nbsp;
+        <span class="flow">F2</span> inference <span class="arrow">↓</span>
+      </div>
+
+      <div class="split">
+        <div class="plane collect">
+          <div class="plane-title">
+            <span class="name">Telemetry &amp; Cost Plane</span>
+            <span class="role">one fact table · three cost shapes reconciled</span>
+          </div>
+          <div class="cells c2">
+            <div class="cell"><b>Collectors (CronJobs)</b><span>Copilot metrics + billing · Amp admin API · gateway logs · contract-tested, staleness-alarmed</span></div>
+            <div class="cell hot"><b>Identity resolver</b><span>GitHub handle ↔ corp email ↔ Amp acct ↔ virtual key · AD-reconciled nightly</span></div>
+            <div class="cell"><b>Usage fact table</b><span>Postgres · user · team · tool · model · tokens · cost · day</span></div>
+            <div class="cell"><b>Traces + evals</b><span>Langfuse (self-hosted, kube) · golden sets · acceptance signals</span></div>
+            <div class="cell" style="grid-column: span 2;"><b>Dashboards &amp; budgets</b><span>Grafana · spend by user/team/tool/model · cost-per-task · budget + anomaly alerts <span class="flow">F6</span></span></div>
+          </div>
+        </div>
+
+        <div class="plane">
+          <div class="plane-title">
+            <span class="name">Model Access Plane</span>
+            <span class="role">the choke point</span>
+          </div>
+          <div class="cells" style="grid-template-columns: 1fr;">
+            <div class="cell"><b>LiteLLM gateway · HA pair</b><span>virtual keys per user/team · routing · retries · prompt caching · rate limits · hard budgets</span></div>
+            <div class="cell"><b>MaaS catalog</b><span>Nemotron-class chat models · NV-Embed-class embeddings (verify) · batch endpoints</span></div>
+            <div class="cell hot"><b>No frontier here — by policy</b><span>frontier work exits via headless Amp in Bamboo <span class="flow warn">F5b</span>, costed in Amp credits</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">F3</span> ingestion — deterministic connectors, webhooks + cursor polls + nightly reconcile <span class="arrow">↓</span></div>
+
+      <div class="lane c6">
+        <div class="node"><span class="name">Bitbucket</span><span class="sub">webhooks + git fetch</span></div>
+        <div class="node"><span class="name">Confluence</span><span class="sub">CQL cursor · 5–15 min</span></div>
+        <div class="node"><span class="name">Jira</span><span class="sub">JQL cursor · 5–15 min</span></div>
+        <div class="node"><span class="name">Transcripts</span><span class="sub">allow-listed · VTT</span></div>
+        <div class="node"><span class="name">Obsidian vaults</span><span class="sub">git-synced · curated tier</span></div>
+        <div class="node"><span class="name">Logging ELK</span><span class="sub">NOT ingested · live query only <span class="flow">F4</span></span></div>
+      </div>
+
+      <div class="vflow"><span class="arrow">↓</span> normalize → chunk → hash gate → index · embeddings via gateway batch (the only model touch) <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Knowledge Plane</span>
+          <span class="role">deterministic retrieval · zero tokens · <a href="https://claude.ai/code/artifact/c93842e4-e785-466c-bd63-b61f6d6e947e">full design →</a></span>
+        </div>
+        <div class="cells c5">
+          <div class="cell"><b>Zoekt</b><span>code lexical · StatefulSet</span></div>
+          <div class="cell"><b>SCIP symbols</b><span>defs/refs → Postgres · per-lang fidelity labeled</span></div>
+          <div class="cell"><b>OpenSearch</b><span>docs chunks · BM25 + kNN · dedicated cluster</span></div>
+          <div class="cell"><b>Catalog + link graph</b><span>Postgres · ACLs · “PAY-981” = a join</span></div>
+          <div class="cell"><b>Retrieval svc + MCP</b><span>rule router · in-service RRF · mandatory ACL filter · 6 tools</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">F5</span> triggers: Bitbucket webhook · ELK alert · Jira event · cron <span class="arrow">↓</span> &nbsp; outputs: PR comments · Jira tickets · Obsidian PRs <span class="arrow">↗</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Orchestration Plane</span>
+          <span class="role">scripts call models — models never run the show</span>
+        </div>
+        <div class="cells c5">
+          <div class="cell"><b>Runner</b><span>queue + kube Jobs · Temporal only when durable state demands</span></div>
+          <div class="cell"><b>Deterministic steps</b><span>fetch · diff · filter · format · 0 tokens</span></div>
+          <div class="cell"><b>Judgment steps</b><span>Nemotron via gateway <span class="flow">F2</span> · structured output · tight context from F4</span></div>
+          <div class="cell hot"><b>Frontier steps</b><span>headless Amp in Bamboo <span class="flow warn">F5b</span> · only where evals prove need</span></div>
+          <div class="cell"><b>Eval gates</b><span>cost-per-run + quality → telemetry <span class="flow">F6</span></span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<main class="col">
+
+  <h2><span class="num">01</span>Information flows</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Flow</th><th>Path</th><th>Cadence</th><th>LLM?</th></tr></thead>
+      <tbody>
+        <tr><td><span class="fnum">F1</span> Usage collection</td><td>Amp admin API + Copilot metrics/billing → collectors → identity resolver → fact table → dashboards</td><td>Nightly (Copilot data lags ~24h anyway)</td><td>None</td></tr>
+        <tr><td><span class="fnum">F2</span> Controlled inference</td><td>Workflow/agent → LiteLLM (auth, route, budget) → Nemotron → response; logs + traces → fact table + Langfuse</td><td>On demand</td><td>Nemotron-class</td></tr>
+        <tr><td><span class="fnum">F3</span> Ingestion</td><td>Source → connector → raw blob (S3) → normalize → chunk → hash gate → OpenSearch/Zoekt/Postgres writes; changed chunks → gateway batch embed</td><td>Webhooks (sec) + cursor poll (5–15 min) + ACL sync (15 min) + nightly reconcile (deletes)</td><td>None — embeddings only, on changed chunks; one Nemotron summary per transcript</td></tr>
+        <tr><td><span class="fnum">F4</span> Retrieval</td><td>Agent → MCP tool → rule router → index executors ∥ → RRF fusion → rank modifiers → ACL filter → IDs + snippets; <code>get_doc</code> for full text; <code>fetch_logs</code> live to ELK</td><td>On demand, &lt;200 ms target</td><td>None</td></tr>
+        <tr><td><span class="fnum">F5</span> Workflow execution</td><td>Trigger → runner → deterministic steps + F4 context → judgment steps via F2 → output (PR comment, ticket, vault PR)</td><td>Event-driven + cron</td><td>Narrow, structured steps only</td></tr>
+        <tr><td><span class="fnum">F5b</span> Frontier escape</td><td>Bamboo plan → headless Amp CLI → Amp cloud (frontier) → output; cost lands in F1 as Amp credits</td><td>Only where eval gates prove Nemotron insufficient</td><td>Frontier, vendor-side</td></tr>
+        <tr><td><span class="fnum">F6</span> Feedback</td><td>Eval scores + acceptance signals + cost-per-run → dashboards → routing/budget/tier decisions per workflow</td><td>Continuous; golden sets in CI</td><td>Optional LLM-as-judge samples</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The property worth defending in review: <strong>F1, F3, and F4 — the flows that run constantly — contain no LLM calls.</strong> Model spend occurs only in F2/F5 where a workflow explicitly chose it, and F5b where evals proved cheaper tiers insufficient. Cost scales with decisions made, not data moved.</p>
+
+  <h2><span class="num">02</span>Tech stack — best options with runners-up</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Best option</th><th>Runner-up</th><th>Revisit when</th></tr></thead>
+      <tbody>
+        <tr><td>LLM gateway</td><td>LiteLLM, HA Deployment on kube — broadest model/provider coverage, virtual keys, budgets, OTel out of the box</td><td>Kong/Envoy AI Gateway (stronger infra pedigree, weaker LLM feature depth)</td><td>LiteLLM ops pain at scale, or org standardizes on Kong</td></tr>
+        <tr><td>Docs search</td><td>OpenSearch, dedicated cluster via operator — hybrid + native RRF free, Apache 2.0</td><td>Elastic Cloud (if platform team brings licensing + ops)</td><td>Platform team offers managed Elastic with Platinum</td></tr>
+        <tr><td>Code search</td><td>Zoekt StatefulSet — strongest free engine, powers Sourcegraph</td><td>Sourcegraph Enterprise</td><td>Symbol/nav demand outgrows SCIP fidelity</td></tr>
+        <tr><td>Symbols</td><td>SCIP indexers → Postgres; tree-sitter fallback, fidelity labeled per language</td><td>LSP-on-demand (slow, stateful)</td><td>—</td></tr>
+        <tr><td>Catalog · links · ACL · facts</td><td>Postgres (operator or managed) — the deterministic backbone</td><td>Graph DB</td><td>Never, realistically</td></tr>
+        <tr><td>Rank fusion</td><td>In-service RRF, k=60, versioned in git — portable, deterministic, license-proof</td><td>Engine-native RRF</td><td>—</td></tr>
+        <tr><td>Embeddings</td><td>NV-Embed-class via MaaS batch through gateway; <em>BM25-only if catalog lacks one</em> — and that is a legitimate v1</td><td>Third-party embedding API (if procurement allows)</td><td>MaaS catalog grows; evals show semantic gap</td></tr>
+        <tr><td>Traces / LLM obs</td><td>Langfuse self-hosted on kube; OTel GenAI spans → Grafana</td><td>OTel-only into existing observability (one less stateful service — acceptable start)</td><td>Org buys Datadog/vendor LLM observability</td></tr>
+        <tr><td>Workflow engine</td><td>Queue (existing Rabbit/Redis) + kube Jobs — boring, debuggable</td><td>Temporal</td><td>First workflow needing durable multi-day state</td></tr>
+        <tr><td>Frontier access</td><td>Headless Amp CLI in Bamboo, per-workflow, eval-gated</td><td>GitHub Models org API (verify with admins)</td><td>Admin confirms GitHub Models; or MaaS gains frontier</td></tr>
+        <tr><td>Summarization / judgment</td><td>Nemotron-class via gateway, structured outputs, tight scoped prompts</td><td>—</td><td>—</td></tr>
+        <tr><td>Raw blobs</td><td>S3-compatible object store — replay-ability for chunker/model changes</td><td>—</td><td>—</td></tr>
+        <tr><td>Whole category</td><td><strong>Build</strong> (agent-first, deterministic, DC estate)</td><td>Glean / Atlassian Rovo (Cloud-only, human-search-first)</td><td>Org migrates to Atlassian Cloud; Glean ships real MCP</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2><span class="num">03</span>Heavy critique — the whole solution</h2>
+  <p>The knowledge plane's own eight risks live in the <a href="https://claude.ai/code/artifact/c93842e4-e785-466c-bd63-b61f6d6e947e">companion brief</a>. These are the solution-level ones — several would sink the project regardless of how well any single plane is built.</p>
+
+  <div class="risk">
+    <div class="risk-head"><h3>MCP identity propagation is the weakest link in the ACL story</h3><span class="chip high">High</span></div>
+    <p>The retrieval service filters by caller identity — but how does it <em>know</em> the caller? If teams configure the MCP server in Amp/Copilot with one shared service account, every ACL in the knowledge plane is theater: everyone searches as the service account. This is the single most likely way the platform causes a data incident, and it fails silently.</p>
+    <p class="fix"><b>Response</b>Per-user credentials, non-negotiable: OAuth device flow or short-lived per-user tokens issued by the retrieval service, distributed via managed MCP config — never a shared key in a team wiki. Audit-log every call with resolved identity. CI red-team test: a planted restricted doc must not surface for a wrongly-scoped token.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>You are building the org's most attractive honeypot</h3><span class="chip high">High</span></div>
+    <p>Code, tickets, wiki, meeting transcripts, and per-user activity — aggregated, indexed, and reachable through one service. The EIL concentrates more sensitive data than any system it reads from. Its blast radius on compromise exceeds any single source system's, and security review will (correctly) treat it that way.</p>
+    <p class="fix"><b>Response</b>Threat-model before wide rollout, not after. Encryption at rest, secrets via vault, network policies isolating the namespace, transcripts behind the strictest tier with retention clocks, and the security team engaged at design time — being invited early is cheaper than being discovered late.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>The gateway is a single point of failure on every workflow's critical path</h3><span class="chip high">High</span></div>
+    <p>LiteLLM is a fast-moving Python project, not battle-worn infrastructure. When it's down, every judgment step in every workflow stops — and because it's also the budget enforcer, teams will lobby to "temporarily" bypass it, which permanently destroys cost attribution.</p>
+    <p class="fix"><b>Response</b>HA replicas behind a service, stateless config in git, pinned versions with staged upgrades, health-based failover. Politically: bypass is impossible by policy <em>and</em> by network — MaaS credentials live only in the gateway's namespace. If ops pain persists two quarters, the runner-up (Kong AI Gateway) is the planned exit.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Nemotron ceiling: judgment quality will disappoint before cost does</h3><span class="chip med">Med</span></div>
+    <p>Mid-tier models handle narrow structured judgment well, but users compare every output to what Amp gives them interactively — frontier quality. Mediocre PR-review comments erode trust in the whole platform, not just that workflow. Meanwhile the F5b escape hatch bills in Amp credits, which can quietly exceed what frontier API calls would have cost.</p>
+    <p class="fix"><b>Response</b>Eval gates decide each workflow's tier with data, not optimism; workflows that fail eval at Nemotron tier ship via F5b or don't ship. Track F5b cost-per-run from day one — it's in the fact table already. Re-run the tier decision whenever the MaaS catalog changes.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Vendor APIs own your telemetry roadmap</h3><span class="chip med">Med</span></div>
+    <p>F1 depends on Copilot and Amp admin APIs you don't control: granularity is coarse (per-user tokens for Copilot don't exist), schemas change without your consent, and lag is ~24h. Collector rot is the telemetry plane's version of connector rot.</p>
+    <p class="fix"><b>Response</b>Contract tests against both APIs; staleness alarms per collector; dashboards annotate granularity honestly (Copilot = seats + premium requests, never tokens) so nobody builds decisions on false precision. Named owner, same as knowledge-plane connectors.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Identity drift corrupts attribution quietly</h3><span class="chip med">Med</span></div>
+    <p>Joiners, leavers, GitHub handle renames, contractors with two accounts — the identity map decays continuously, and misattributed spend discredits the dashboards the moment a team lead spots their own name wrong.</p>
+    <p class="fix"><b>Response</b>Nightly reconcile against AD/LDAP as source of truth; unmapped-identity alarm (any usage row that can't resolve pages the owner); history kept so past spend re-attributes correctly after a fix.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Adoption risk: indexes nobody queries are pure cost</h3><span class="chip med">Med</span></div>
+    <p>The plane only pays off if Amp sessions and workflows actually call the MCP tools. If setup friction is high or results disappoint early, agents keep "exploring" expensively and the EIL becomes shelfware with an on-call rotation.</p>
+    <p class="fix"><b>Response</b>Measure MCP tool-call volume per team from week one — it's the platform's north-star metric, on the same Grafana board as cost. Ship team-default Amp/MCP configs so the tools are present without setup. The <code>expand("PAY-981")</code> demo is the adoption wedge; lead with it.</p>
+  </div>
+
+  <div class="risk">
+    <div class="risk-head"><h3>Platform weight: ~8 stateful-ish services need a named owner</h3><span class="chip med">Med</span></div>
+    <p>Gateway, retrieval service, OpenSearch, Zoekt, Postgres, Langfuse, collectors, connectors — plus dashboards. Built as a side project, this rots in six months; the failure mode isn't an outage, it's slow decay into distrust.</p>
+    <p class="fix"><b>Response</b>Treat EIL as a product with an owning team and an on-call story before phase 3. Trim weight where possible: start OTel-only instead of Langfuse, defer Temporal, defer embeddings — every deferred service is real risk reduction. The build order below is sequenced so each phase is independently valuable if investment stops there.</p>
+  </div>
+
+  <h2><span class="num">04</span>Build order</h2>
+  <div>
+    <div class="phase">
+      <span class="when">Weeks 1–3</span>
+      <div>
+        <h3>Gateway + cost floor</h3>
+        <p>LiteLLM HA on kube, virtual keys. Amp + Copilot collectors, identity map, fact table, first Grafana board.</p>
+        <span class="exit">exit: total AI spend answerable in one query · F1 + F2 live</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Weeks 4–6</span>
+      <div>
+        <h3>Observability</h3>
+        <p>OTel GenAI spans → Grafana; budgets + anomaly alerts; implicit quality signals. Langfuse only if OTel-only proves insufficient.</p>
+        <span class="exit">exit: latency, errors, cost-per-task per model · F6 skeleton</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Weeks 7–10</span>
+      <div>
+        <h3>Knowledge plane core</h3>
+        <p>Catalog + link graph + Jira/Confluence connectors, then Zoekt + SCIP. ACL gate + per-user MCP auth + red-team eval <em>before</em> rollout. BM25-only; embeddings deferred.</p>
+        <span class="exit">exit: F3 + F4 live · expand("PAY-981") demo · MCP call volume on dashboards</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Weeks 11+</span>
+      <div>
+        <h3>Workflows, evals, and semantics</h3>
+        <p>PR review + incident triage as first pipelines, eval-gated tiering (Nemotron vs F5b). Golden-set retrieval CI. Add kNN arm + embeddings only where evals show the gap. Transcripts + Obsidian write-back last.</p>
+        <span class="exit">exit: two workflows in production with cost + quality tracked · F5 live</span>
+      </div>
+    </div>
+  </div>
+
+</main>

@@ -1,0 +1,34 @@
+[project]
+name = "eil"
+version = "0.1.0"
+description = "Enterprise Intelligence Layer — knowledge plane (phase 0)"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.15",
+    "pydantic>=2.9",
+    "psycopg[binary]>=3.2",
+    "mcp>=1.2",
+]
+
+[project.scripts]
+eil = "eil.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eil"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

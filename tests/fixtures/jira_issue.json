@@ -1,0 +1,20 @@
+{
+  "key": "PAY-981",
+  "url": "https://jira.example.com/browse/PAY-981",
+  "fields": {
+    "summary": "Parked payments not alerting after retry exhaustion",
+    "status": "In Progress",
+    "issuetype": "Bug",
+    "project": "PAY",
+    "reporter": "asha",
+    "created": "2026-05-20T08:15:00+00:00",
+    "updated": "2026-06-01T11:00:00+00:00",
+    "description": "After the 12th failed retry the payment parks correctly but no PagerDuty alert fires. Suspect the alert rule regressed in the retry-scheduler 2.4 release.",
+    "comments": [
+      {
+        "author": "krunal",
+        "body": "Confirmed: alert rule filters on status=PARKED but 2.4 renamed the status to RETRY_EXHAUSTED. Fix in progress, see also PAY-990."
+      }
+    ]
+  }
+}
