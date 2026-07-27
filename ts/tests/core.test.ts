@@ -74,4 +74,12 @@ describe("ranking", () => {
   it("treats unknown age as old", () => {
     expect(modifier("authored", null, NOW)).toBe(TIER_PRIOR.authored! * RECENCY_FLOOR);
   });
+  it("floor holds for ancient docs", () => {
+    expect(modifier("authored", daysAgo(10_000), NOW)).toBeGreaterThanOrEqual(
+      RECENCY_FLOOR * 0.999,
+    );
+  });
+  it("is deterministic", () => {
+    expect(modifier("generated", daysAgo(42), NOW)).toBe(modifier("generated", daysAgo(42), NOW));
+  });
 });
