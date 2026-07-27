@@ -16,9 +16,21 @@ export function packF32(v: Float32Array): Buffer {
   return b;
 }
 
-export function unpackF32(b: Buffer): Float32Array {
-  const out = new Float32Array(b.length >> 2);
-  for (let i = 0; i < out.length; i++) out[i] = b.readFloatLE(i * 4);
+export function unpackF32(b: Buffer | Uint8Array | ArrayBuffer): Float32Array {
+  const buf = b instanceof ArrayBuffer ? new Uint8Array(b) : b;
+  const out = new Float32Array(buf.length >> 2);
+  for (let i = 0; i < out.length; i++) {
+    // Handle both Node.js Buffer (readFloatLE) and Uint8Array
+    const offset = i * 4;
+    if ("readFloatLE" in buf) {
+      out[i] = (buf as Buffer).readFloatLE(offset);
+    } else {
+      // Uint8Array: manually read 4 bytes as little-endian float32
+      const u8 = buf as Uint8Array;
+      const view = new DataView(u8.buffer, u8.byteOffset + offset, 4);
+      out[i] = view.getFloat32(0, true);
+    }
+  }
   return out;
 }
 

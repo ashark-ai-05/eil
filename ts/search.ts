@@ -9,6 +9,7 @@ import { rrf } from "./core/fusion.js";
 import { modifier } from "./core/ranking.js";
 import { classify } from "./core/router.js";
 import type { Db } from "./db.js";
+import { type Embedder, cosine, getEmbedder, unpackF32 } from "./embed/index.js";
 
 export const SNIPPET_OPTS = "StartSel=**, StopSel=**, MaxWords=40, MinWords=10";
 export const GET_DOC_MAX_CHARS = 8_000;
@@ -66,6 +67,7 @@ export async function searchDocs(
   viewer: Viewer,
   query: string,
   limit = 8,
+  embedder?: Embedder,
 ): Promise<Record<string, unknown>> {
   const decision = classify(query);
 
@@ -103,7 +105,14 @@ export async function searchDocs(
       });
     }
   }
-  const fused = rrf({ fts: [...byDoc.keys()] });
+  const arms: Record<string, string[]> = { fts: [...byDoc.keys()] };
+  try {
+    const vec = await vecArm(client, viewer, query, limit, byDoc, embedder);
+    if (vec && vec.length > 0) arms.vec = vec;
+  } catch (err: any) {
+    console.error(`vec arm skipped: ${err.message}`); // best-effort: degrade to FTS-only
+  }
+  const fused = rrf(arms);
   const scored = fused
     .map(([docId, score]): [number, string] => {
       const entry = byDoc.get(docId)!;
@@ -206,4 +215,49 @@ export async function audit(
     "INSERT INTO audit_log (principal, tool, args, result_count) VALUES ($1, $2, $3, $4)",
     [principal, tool, JSON.stringify(args), resultCount],
   );
+}
+
+/** Best-effort semantic arm: cosine over ACL-visible embedded chunks. Returns a
+ *  ranked docId list (best chunk per doc) and augments `byDoc` for vec-only
+ *  docs. Returns null when nothing is embedded. Reuses visibleSql for ACL. */
+async function vecArm(
+  client: Db,
+  viewer: Viewer,
+  query: string,
+  limit: number,
+  byDoc: Map<string, SearchResult & { updated: Date | null }>,
+  embedder?: Embedder,
+): Promise<string[] | null> {
+  const has = await client.query("SELECT 1 FROM chunks WHERE embedding IS NOT NULL LIMIT 1");
+  if (has.rows.length === 0) return null; // nothing embedded -> pure FTS
+  const emb = embedder ?? getEmbedder(); // may throw if misconfigured -> caught by caller
+  const qv = (await emb.embed([query]))[0]!;
+  const res = await client.query(
+    `SELECT c.doc_id, c.text, c.embedding, d.title, d.url, d.quality_tier, d.updated_at
+     FROM chunks c JOIN documents d ON d.id = c.doc_id
+     WHERE c.embedding IS NOT NULL AND ${visibleSql(1, 2, 3)}`,
+    [viewer.principal, viewer.groups, tenantOf(viewer)],
+  );
+  const best = new Map<string, { score: number; row: any }>();
+  for (const row of res.rows) {
+    const score = cosine(qv, unpackF32(row.embedding as Buffer));
+    const cur = best.get(row.doc_id);
+    if (!cur || score > cur.score) best.set(row.doc_id, { score, row });
+  }
+  const ranked = [...best.entries()]
+    .sort((a, b) => (b[1].score !== a[1].score ? b[1].score - a[1].score : a[0] < b[0] ? -1 : 1))
+    .slice(0, limit * 3);
+  for (const [docId, { row }] of ranked) {
+    if (!byDoc.has(docId)) {
+      byDoc.set(docId, {
+        id: docId,
+        title: row.title,
+        url: row.url,
+        tier: row.quality_tier,
+        snippet: String(row.text).slice(0, 240),
+        updated: row.updated_at,
+      });
+    }
+  }
+  return ranked.map(([docId]) => docId);
 }

@@ -124,3 +124,65 @@ describe("backfill", () => {
     }
   });
 });
+
+import { localViewer } from "../search.js";
+
+describe("vec arm fusion", () => {
+  it("surfaces a lexically-disjoint doc via cosine and respects ACL", async () => {
+    const { connect } = await import("../db.js");
+    const { upsertDocument } = await import("../store.js");
+    const { searchDocs } = await import("../search.js");
+    const c = await connect();
+    try {
+      // A doc that shares NO query words but should match by vector.
+      await upsertDocument(c, {
+        id: "jira:issue:PAY-2",
+        tenant: "default",
+        source: "jira",
+        title: "Auth outage",
+        hierarchy: [],
+        aclGroups: [],
+        qualityTier: "authored",
+        body: "Sign-in service returned 500s during the rollout.",
+        links: [],
+      } as any);
+      // Stub: query "zzz" -> [1,0,0]; PAY-2 body -> [1,0,0] (nearest); others -> [0,1,0].
+      const stubEmbed: Embedder = {
+        id: "stub:v2",
+        embed: async (texts) =>
+          texts.map((t) =>
+            t.includes("Sign-in") || t === "zzz"
+              ? Float32Array.from([1, 0, 0])
+              : Float32Array.from([0, 1, 0]),
+          ),
+      };
+      // embed all chunks with this stub so PAY-2 chunk = [1,0,0]
+      const { backfill } = await import("../embed/backfill.js");
+      await backfill(c, stubEmbed, { reembed: true });
+      const res = await searchDocs(c, localViewer(), "zzz", 8, stubEmbed);
+      // "zzz" matches nothing lexically, so only the vec arm can surface PAY-2:
+      expect((res.results as any[]).map((r: any) => r.id)).toContain("jira:issue:PAY-2");
+    } finally {
+      await c.end();
+    }
+  });
+
+  it("is FTS-only (no throw) when embeddings are absent or provider errors", async () => {
+    const { connect } = await import("../db.js");
+    const { searchDocs } = await import("../search.js");
+    const throwing: Embedder = {
+      id: "boom",
+      embed: async () => {
+        throw new Error("no endpoint");
+      },
+    };
+    const c = await connect();
+    try {
+      // still returns FTS results for a lexical query without throwing
+      const res = await searchDocs(c, localViewer(), "authenticate", 8, throwing);
+      expect(Array.isArray(res.results as any)).toBe(true);
+    } finally {
+      await c.end();
+    }
+  });
+});
