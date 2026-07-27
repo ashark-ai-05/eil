@@ -2,12 +2,31 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createInterface } from "node:readline";
 import { Command } from "commander";
 import type pg from "pg";
 import type { CanonicalDoc } from "./contracts/models.js";
 import { connect, migrate } from "./db.js";
 
 const program = new Command("eil").description("Enterprise Intelligence Layer CLI");
+
+function promptHidden(label: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    const out = process.stdout;
+    // Mute echo: intercept writes while reading the answer.
+    const mutedWrite = (rl as any)._writeToOutput;
+    (rl as any)._writeToOutput = (s: string) => {
+      if (s.includes(label)) out.write(s);
+    };
+    rl.question(`${label}: `, (answer) => {
+      (rl as any)._writeToOutput = mutedWrite;
+      out.write("\n");
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
 
 const db = program.command("db").description("Database management");
 db.command("migrate")
@@ -319,6 +338,66 @@ program
   .action(async () => {
     const { serve } = await import("./mcp-server.js");
     await serve();
+  });
+
+const auth = program.command("auth").description("Manage connector tokens in the OS keychain");
+
+auth
+  .command("login <source>")
+  .description("Store a connector token in the OS keychain (jira|confluence|bitbucket|elk)")
+  .option("--stdin", "read the token from stdin instead of an interactive prompt")
+  .action(async (source, opts) => {
+    const { SOURCES, keychainBackend, setSecret } = await import("./connectors/keychain.js");
+    const account = SOURCES[source];
+    if (!account) {
+      console.log(`unknown source '${source}'. valid: ${Object.keys(SOURCES).join(", ")}`);
+      process.exit(1);
+    }
+    const backend = keychainBackend();
+    if (!backend.available) {
+      console.log(
+        `no keychain backend available (${backend.name}) — install libsecret-tools (Linux) or set ${account} directly`,
+      );
+      process.exit(1);
+    }
+    const token = opts.stdin
+      ? readFileSync(0, "utf-8").trim()
+      : await promptHidden(`${source} token`);
+    if (!token) {
+      console.log("no token provided");
+      process.exit(1);
+    }
+    setSecret(account, token);
+    console.log(`stored ${account} in the ${backend.name} keychain`);
+  });
+
+auth
+  .command("status")
+  .description("Show where each connector token resolves from (never prints secrets)")
+  .action(async () => {
+    const { SOURCES, getSecret, keychainBackend, resolvedSource } = await import(
+      "./connectors/keychain.js"
+    );
+    const backend = keychainBackend();
+    console.log(`keychain backend: ${backend.name} (available: ${backend.available})`);
+    for (const [source, account] of Object.entries(SOURCES)) {
+      const from = resolvedSource(account, process.env, getSecret);
+      console.log(`  ${source.padEnd(11)} ${account.padEnd(22)} <- ${from}`);
+    }
+  });
+
+auth
+  .command("logout <source>")
+  .description("Remove a connector token from the OS keychain")
+  .action(async (source) => {
+    const { SOURCES, deleteSecret } = await import("./connectors/keychain.js");
+    const account = SOURCES[source];
+    if (!account) {
+      console.log(`unknown source '${source}'. valid: ${Object.keys(SOURCES).join(", ")}`);
+      process.exit(1);
+    }
+    deleteSecret(account);
+    console.log(`removed ${account} from the keychain`);
   });
 
 program.parseAsync(process.argv);

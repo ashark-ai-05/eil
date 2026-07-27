@@ -250,3 +250,20 @@ export function keychainBackend(): { name: BackendName; available: boolean } {
     return { name: kc.name, available: false };
   }
 }
+
+export const SOURCES: Record<string, string> = {
+  jira: "EIL_JIRA_TOKEN",
+  confluence: "EIL_CONFLUENCE_TOKEN",
+  bitbucket: "EIL_BITBUCKET_TOKEN",
+  elk: "EIL_ELK_TOKEN",
+};
+
+export function resolvedSource(
+  account: string,
+  env: NodeJS.ProcessEnv,
+  kcGet: (a: string) => string | null,
+): "keychain" | "env" | "missing" {
+  if (kcGet(account)) return "keychain";
+  if (env[account]) return "env";
+  return "missing";
+}

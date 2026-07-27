@@ -157,3 +157,23 @@ describe("Windows/WSL wincred backend", () => {
     expect(() => kc.set('EIL_JIRA_TOKEN"; calc; #', "x")).toThrow(/invalid keychain account/);
   });
 });
+
+import { SOURCES, resolvedSource } from "../connectors/keychain.js";
+
+describe("auth status helper", () => {
+  it("maps the four sources to their token accounts", () => {
+    expect(SOURCES).toEqual({
+      jira: "EIL_JIRA_TOKEN",
+      confluence: "EIL_CONFLUENCE_TOKEN",
+      bitbucket: "EIL_BITBUCKET_TOKEN",
+      elk: "EIL_ELK_TOKEN",
+    });
+  });
+
+  it("reports the winning source, keychain first", () => {
+    const kc = (a: string) => (a === "EIL_JIRA_TOKEN" ? "x" : null);
+    expect(resolvedSource("EIL_JIRA_TOKEN", {}, kc)).toBe("keychain");
+    expect(resolvedSource("EIL_CONFLUENCE_TOKEN", { EIL_CONFLUENCE_TOKEN: "y" }, kc)).toBe("env");
+    expect(resolvedSource("EIL_ELK_TOKEN", {}, kc)).toBe("missing");
+  });
+});
