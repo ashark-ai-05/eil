@@ -71,10 +71,10 @@ def ingest_confluence(fixture: FixtureOpt = None, tenant: str = "default") -> No
     from eil import db, store
     from eil.connectors.confluence import ConfluenceClient
 
+    client = _client(ConfluenceClient, "EIL_CONFLUENCE_URL and EIL_CONFLUENCE_TOKEN")
     with db.connect() as conn:
         cursor = store.get_cursor(conn, "confluence")
     typer.echo(f"live sync from cursor: {cursor or '(beginning)'}")
-    client = _client(ConfluenceClient, "EIL_CONFLUENCE_URL and EIL_CONFLUENCE_TOKEN")
     _ingest("confluence", normalize, client.updated_since(cursor), tenant,
             cursor_of=lambda p: p.get("updated"))
 
@@ -90,10 +90,10 @@ def ingest_jira(fixture: FixtureOpt = None, tenant: str = "default") -> None:
     from eil import db, store
     from eil.connectors.jira import JiraClient
 
+    client = _client(JiraClient, "EIL_JIRA_URL and EIL_JIRA_TOKEN")
     with db.connect() as conn:
         cursor = store.get_cursor(conn, "jira")
     typer.echo(f"live sync from cursor: {cursor or '(beginning)'}")
-    client = _client(JiraClient, "EIL_JIRA_URL and EIL_JIRA_TOKEN")
     _ingest("jira", normalize, client.updated_since(cursor), tenant,
             cursor_of=lambda p: p["fields"].get("updated"))
 

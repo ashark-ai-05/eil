@@ -106,3 +106,29 @@ def test_ingester_always_sees_own_documents(conn):
 def test_empty_acl_is_fail_closed_for_others(conn):
     stranger = Viewer("someone-else", groups=["grp-payments"])
     assert get_doc(conn, stranger, "confluence:page:open") is None
+
+
+def test_reingest_heals_empty_ingested_by(conn):
+    """Pre-0003 rows (ingested_by='') are invisible but repairable: the hash
+    gate must not block re-ingest of unchanged content in that state."""
+    doc = _doc("confluence:page:legacy", "Legacy", "legacy content here", [])
+    upsert_document(conn, doc)
+    conn.execute("UPDATE documents SET ingested_by = '' WHERE id = 'confluence:page:legacy'")
+    assert get_doc(conn, Viewer(ME), "confluence:page:legacy") is None  # invisible
+    assert upsert_document(conn, doc) is True  # gate bypassed, not a no-op
+    assert get_doc(conn, Viewer(ME), "confluence:page:legacy") is not None  # healed
+
+
+def test_deleting_document_cascades_its_link_edges(conn):
+    doc = _doc("confluence:page:doomed", "Doomed", "references DOOM-1", [])
+    doc = doc.model_copy(update={"links": ["jira:issue:DOOM-1"]})
+    upsert_document(conn, doc)
+    count = conn.execute(
+        "SELECT count(*) FROM links WHERE src_id = 'confluence:page:doomed'"
+    ).fetchone()[0]
+    assert count == 1
+    conn.execute("DELETE FROM documents WHERE id = 'confluence:page:doomed'")
+    count = conn.execute(
+        "SELECT count(*) FROM links WHERE src_id = 'confluence:page:doomed'"
+    ).fetchone()[0]
+    assert count == 0  # links_src_fk cascade
