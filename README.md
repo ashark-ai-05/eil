@@ -193,6 +193,37 @@ on older instances). Then `pnpm eil ingest confluence` (no --fixture) syncs
 incrementally from the stored cursor. You can only ingest what you can read —
 service accounts exist only on kube, after the ACL gate.
 
+### Selective ingestion (granularity)
+
+Ingest exactly what you need instead of the whole instance. Pick **one selector
+family per run**; each selection re-syncs incrementally under its own cursor.
+
+```sh
+# Confluence
+pnpm eil ingest confluence --space ENG,OPS         # one or more spaces
+pnpm eil ingest confluence --page 12345 --with-descendants   # a page + its subtree
+pnpm eil ingest confluence --page 12345,67890      # exact pages
+pnpm eil ingest confluence --query 'label = incident'        # raw CQL (page predicate)
+
+# Jira
+pnpm eil ingest jira --project PAY,CHK             # one or more projects
+pnpm eil ingest jira --issue PAY-981,PAY-42        # exact issues
+pnpm eil ingest jira --query 'assignee = currentUser() AND sprint in openSprints()'
+```
+
+| Grain | Confluence | Jira |
+|---|---|---|
+| whole instance | (no flag) | (no flag) |
+| container(s) | `--space K[,K2]` | `--project P[,P2]` |
+| subtree | `--page ID --with-descendants` | — |
+| exact item(s) | `--page ID[,ID2]` | `--issue K[,K2]` |
+| anything | `--query '<CQL>'` | `--query '<JQL>'` |
+
+Notes: space/project selections are incremental (own cursor per space/project);
+exact `--page`/`--issue` always re-fetch the named items (hash-gated, so
+unchanged docs are no-ops). `--reconcile` (deletion sweep) is **full-instance
+only** — a scoped listing can't safely decide what to delete outside its scope.
+
 ## Testing on the work machine — step by step
 
 Windows work machine → do everything inside **WSL2** (native Windows is not a
@@ -335,7 +366,7 @@ which is how the TS port was verified.
 - [x] Full TypeScript port, golden-verified against the Python original
 - [x] Canonical model, chunker, router, RRF, rank modifiers (tier + recency)
 - [x] Fail-closed ACL on every read path + 11-scenario red-team suite
-- [x] Live connectors (cursor CQL/JQL sync), Obsidian, Bitbucket search v0, ELK logs
+- [x] Live connectors with **selective ingestion** — spaces/pages/subtrees, projects/issues, raw CQL/JQL, per-scope cursors
 - [x] LLM provider layer: maas | amp | copilot; usage in `llm_calls`
 - [x] Metrics schema + views + eval trend + HTML report + Grafana provisioning
 - [ ] Golden-query log growth from real usage (`docs/golden-queries.md`)
