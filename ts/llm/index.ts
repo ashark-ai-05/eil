@@ -5,8 +5,11 @@
  * provider selection, driven by eval data.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type pg from "pg";
+
+const execFileAsync = promisify(execFile);
 
 export interface LLMResult {
   text: string;
@@ -78,7 +81,9 @@ export class CliProvider implements Provider {
     const fullPrompt = opts.system ? `${opts.system}\n\n${prompt}` : prompt;
     const started = performance.now();
     try {
-      const stdout = execFileSync(this.argv[0]!, [...this.argv.slice(1), fullPrompt], {
+      // async execFile: a long-running Amp/Copilot subprocess must never
+      // block the MCP server's event loop.
+      const { stdout } = await execFileAsync(this.argv[0]!, [...this.argv.slice(1), fullPrompt], {
         encoding: "utf-8",
         timeout: this.timeoutMs,
       });

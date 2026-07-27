@@ -35,6 +35,9 @@ export function required(name: string): string {
   return value;
 }
 
+/** A stalled upstream must never hang a tool call indefinitely. */
+export const FETCH_TIMEOUT_MS = 30_000;
+
 export async function getJson(
   client: DcClient,
   path: string,
@@ -42,7 +45,10 @@ export async function getJson(
 ): Promise<any> {
   const url = new URL(client.baseUrl + path);
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, String(v));
-  const res = await client.fetcher(url, { headers: client.headers });
+  const res = await client.fetcher(url, {
+    headers: client.headers,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
   return res.json();
 }
@@ -52,6 +58,7 @@ export async function postJson(client: DcClient, path: string, body: unknown): P
     method: "POST",
     headers: { ...client.headers, "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`POST ${path} -> ${res.status}`);
   return res.json();

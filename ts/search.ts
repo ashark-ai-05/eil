@@ -108,7 +108,10 @@ export async function searchDocs(
     const { updated: _updated, ...entry } = byDoc.get(docId)!;
     return { ...entry, score: Math.round(score * 1e6) / 1e6 };
   });
-  return { route: decision.route, results };
+  // Honesty about execution: path/symbol/exact routes currently fall through
+  // to FTS (specialized executors arrive with Zoekt/symbols). The executor
+  // field tells callers what actually ran, so route ≠ executor is visible.
+  return { route: decision.route, executor: "fts", results };
 }
 
 export async function getDoc(

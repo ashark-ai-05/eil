@@ -126,12 +126,17 @@ export async function callTool(
   if (!spec) return { error: `unknown tool: ${name}`, tools: Object.keys(REGISTRY).sort() };
   const missing = spec.requiresEnv.filter((e) => !process.env[e]);
   if (missing.length > 0) return { error: `${name} not configured: set ${missing.join(" and ")}` };
+  // Validate before opening any connection; return a clean error dict rather
+  // than letting ZodError propagate (its message echoes caller-supplied values).
+  const parsed = spec.schema.safeParse(args);
+  if (!parsed.success) {
+    return { error: `invalid arguments for ${name}`, issues: parsed.error.flatten().fieldErrors };
+  }
   const v = viewer ?? localViewer();
   const ownsClient = client === undefined;
   const c = client ?? (await connect());
   try {
-    const parsed = spec.schema.parse(args);
-    const result = (await spec.handler(c, v, parsed)) ?? {};
+    const result = (await spec.handler(c, v, parsed.data)) ?? {};
     await audit(c, v.principal, name, args, resultCount(result));
     return result;
   } finally {

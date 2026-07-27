@@ -21,12 +21,26 @@ export async function setCursor(client: pg.Client, source: string, cursor: strin
   );
 }
 
-/** Insert or update a document and its chunks/links. Returns true if content changed. */
+/**
+ * Insert or update a document and its chunks/links. Returns true if content
+ * changed. Owns its transaction: FOR UPDATE only serializes concurrent
+ * upserts if the lock survives past the SELECT, so the BEGIN/COMMIT lives
+ * here rather than being an invisible caller obligation.
+ */
 export async function upsertDocument(client: pg.Client, doc: CanonicalDoc): Promise<boolean> {
+  await client.query("BEGIN");
+  try {
+    const changed = await upsertInTx(client, doc);
+    await client.query("COMMIT");
+    return changed;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  }
+}
+
+async function upsertInTx(client: pg.Client, doc: CanonicalDoc): Promise<boolean> {
   const hash = contentHash(doc);
-  // FOR UPDATE serializes concurrent upserts of the same doc for the whole
-  // transaction — without it, two workers can interleave the chunk
-  // delete+insert below.
   const existing = await client.query(
     "SELECT content_hash, ingested_by FROM documents WHERE id = $1 FOR UPDATE",
     [doc.id],

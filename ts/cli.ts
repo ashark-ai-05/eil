@@ -44,14 +44,13 @@ async function ingestDocs(
       outcome.seen += 1;
       const value = cursorOf ? cursorOf(doc) : null;
       try {
-        await client.query("BEGIN");
+        // upsertDocument owns its transaction — per-doc commit, so one bad
+        // record can't starve the batch.
         if (await upsertDocument(client, doc)) {
           outcome.changed += 1;
           console.log(`  ~ ${doc.id}`);
         }
-        await client.query("COMMIT"); // per-doc commit: one bad record can't starve the batch
       } catch (err: any) {
-        await client.query("ROLLBACK");
         outcome.failed += 1;
         console.log(`  ! failed (${err.constructor?.name ?? "Error"}): ${err.message}`);
         if (value && (retryFrom === null || value < retryFrom)) retryFrom = value;

@@ -136,6 +136,13 @@ describe("tool registry (portability contract)", () => {
     expect(result.tools).toContain("search_docs");
   });
 
+  it("invalid arguments return a clean error dict, before any DB connection", async () => {
+    const result: any = await callTool("search_docs", { query: 123 });
+    expect(result.error).toContain("invalid arguments for search_docs");
+    expect(result.issues).toBeDefined();
+    expect(JSON.stringify(result)).not.toContain("123"); // no echo of caller values beyond field names
+  });
+
   it("env-gated tools fail closed without a database", async () => {
     for (const v of ["EIL_BITBUCKET_URL", "EIL_BITBUCKET_TOKEN", "EIL_ELK_URL", "EIL_ELK_TOKEN"]) {
       delete process.env[v];
