@@ -70,6 +70,15 @@ export function securityKeychain(run: Runner): Keychain {
       return r.status === 0 && r.stdout !== "" ? r.stdout.replace(/\n$/, "") : null;
     },
     set: (a, s) => {
+      // KNOWN TRADEOFF (macOS only): the secret is passed via `-w <value>` on
+      // argv, so it is briefly visible to the same user's process listing during
+      // a store. `security add-generic-password` has no usable stdin channel
+      // (`-w` with no value reads /dev/tty via readpassphrase, not a pipe), and
+      // the only leak-free fix is the native SecItemAdd API — which would break
+      // this module's zero-native-dep contract. Accepted because: single-user
+      // local-first tool, writes are rare (`eil auth login`), and reads never
+      // expose (get() uses `-w` with no value -> stdout). Linux (secret-tool)
+      // and Windows/WSL2 (powershell) both keep the secret on stdin, not argv.
       const r = run("security", ["add-generic-password", "-a", a, "-s", SERVICE, "-U", "-w", s]);
       if (r.status !== 0) throw new Error(`keychain write failed for ${a}`);
     },
