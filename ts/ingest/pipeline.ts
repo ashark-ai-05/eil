@@ -5,9 +5,9 @@ import type { Scope } from "../connectors/scope.js";
 import { cursorKey, predicate } from "../connectors/scope.js";
 import type { CanonicalDoc } from "../contracts/models.js";
 import { connect } from "../db.js";
-import type { ConfluencePage } from "../ingest/confluence.js";
-import type { JiraIssue } from "../ingest/jira.js";
 import { getCursor } from "../store.js";
+import type { ConfluencePage } from "./confluence.js";
+import type { JiraIssue } from "./jira.js";
 
 interface IngestOutcome {
   seen: number;
@@ -89,7 +89,7 @@ export async function ingestConfluenceScope(
   scope: Scope,
   tenant: string,
 ): Promise<void> {
-  const { normalize } = await import("../ingest/confluence.js");
+  const { normalize } = await import("./confluence.js");
   if (scope.kind === "pages") {
     const ids = scope.ids;
     const withDesc = scope.withDescendants;
@@ -117,7 +117,7 @@ export async function ingestConfluenceScope(
 }
 
 export async function ingestJiraScope(jira: JiraLike, scope: Scope, tenant: string): Promise<void> {
-  const { normalize } = await import("../ingest/jira.js");
+  const { normalize } = await import("./jira.js");
   if (scope.kind === "issues") {
     const keys = scope.keys;
     console.log(`scope jira:issues [${keys.join(", ")}]`);

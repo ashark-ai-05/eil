@@ -118,6 +118,11 @@ export function predicate(scope: Scope): string | null {
     case "project":
       return `project = "${scope.key}"`;
     case "query":
+      // Escape-hatch trust boundary: the raw query is the user's own CQL/JQL,
+      // run under their PAT (ACL-bounded) and never reaches a deletion path
+      // (listIds/reconcile are full-instance only). Parenthesized so a
+      // well-formed predicate composes; a malformed one only broadens/breaks
+      // the user's own read — acceptable for a documented raw escape hatch.
       return `(${scope.q})`;
     case "all":
     case "pages":
