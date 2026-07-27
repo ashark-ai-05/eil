@@ -22,11 +22,11 @@ export class ConfluenceClient {
     this.client = makeClient("CONFLUENCE", baseUrl, token, fetcher);
   }
 
-  async *updatedSince(cursor: string | null): AsyncGenerator<ConfluencePage> {
-    let cql = "type=page order by lastmodified asc";
-    if (cursor) {
-      cql = `type=page and lastmodified >= "${cqlTs(cursor)}" order by lastmodified asc`;
-    }
+  async *updatedSince(cursor: string | null, scope?: string): AsyncGenerator<ConfluencePage> {
+    const clauses = ["type=page"];
+    if (scope) clauses.push(scope);
+    if (cursor) clauses.push(`lastmodified >= "${cqlTs(cursor)}"`);
+    const cql = `${clauses.join(" and ")} order by lastmodified asc`;
     let start = 0;
     for (;;) {
       const data = await getJson(this.client, "/rest/api/content/search", {
@@ -49,13 +49,33 @@ export class ConfluenceClient {
     return this.toPageDict(data);
   }
 
+  /** Page subtree for --with-descendants: every page under `pageId`, any depth. */
+  async *descendants(pageId: string): AsyncGenerator<ConfluencePage> {
+    const cql = `ancestor = ${pageId} order by lastmodified asc`;
+    let start = 0;
+    for (;;) {
+      const data = await getJson(this.client, "/rest/api/content/search", {
+        cql,
+        expand: "body.storage,ancestors,version,space",
+        limit: PAGE_SIZE,
+        start,
+      });
+      for (const page of data.results ?? []) yield this.toPageDict(page);
+      if ((data.size ?? 0) < PAGE_SIZE) return;
+      start += PAGE_SIZE;
+    }
+  }
+
   /** Complete id listing for reconcile (flow K1 deletions) — ids only, paged. */
-  async listIds(): Promise<string[]> {
+  async listIds(scope?: string): Promise<string[]> {
+    const clauses = ["type=page"];
+    if (scope) clauses.push(scope);
+    const cql = `${clauses.join(" and ")} order by id asc`;
     const ids: string[] = [];
     let start = 0;
     for (;;) {
       const data = await getJson(this.client, "/rest/api/content/search", {
-        cql: "type=page order by id asc",
+        cql,
         limit: PAGE_SIZE,
         start,
       });

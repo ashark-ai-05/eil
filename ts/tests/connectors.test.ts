@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { Fetcher } from "../connectors/auth.js";
 import { BitbucketSearchClient } from "../connectors/bitbucket.js";
-import { ConfluenceClient, cqlTs } from "../connectors/confluence.js";
+import { ConfluenceClient, PAGE_SIZE, cqlTs } from "../connectors/confluence.js";
 import { ElkClient } from "../connectors/elk.js";
 import { JiraClient } from "../connectors/jira.js";
 import { normalize as normalizePage } from "../ingest/confluence.js";
@@ -46,6 +46,70 @@ describe("confluence", () => {
     expect(doc.body).toContain("## Steps");
     expect(doc.links).toContain("jira:issue:PAY-981");
     expect(doc.url).toBe("https://confluence.example.com/pages/777");
+  });
+});
+
+describe("confluence scoped", () => {
+  const apiPage = (id: string) => ({
+    id,
+    title: `p${id}`,
+    space: { name: "S" },
+    ancestors: [],
+    version: { when: "2026-06-03T10:00:00+00:00", by: { displayName: "a" } },
+    _links: { webui: `/pages/${id}` },
+    body: { storage: { value: "<p>x</p>" } },
+  });
+
+  it("with no scope builds the exact legacy CQL (regression)", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [], size: 0 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null)) {
+      /* drain */
+    }
+    expect(seen).toBe("type=page order by lastmodified asc");
+  });
+
+  it("injects a space predicate", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [], size: 0 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null, 'space = "ENG"')) {
+      /* drain */
+    }
+    expect(seen).toBe('type=page and space = "ENG" order by lastmodified asc');
+  });
+
+  it("descendants queries ancestor = id", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [apiPage("9")], size: 1 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    const out = [];
+    for await (const p of c.descendants("100")) {
+      out.push(p);
+    }
+    expect(seen).toBe("ancestor = 100 order by lastmodified asc");
+    expect(out).toHaveLength(1);
+  });
+
+  it("scoped listIds carries the predicate", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [], size: 0 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    await c.listIds('space = "ENG"');
+    expect(seen).toBe('type=page and space = "ENG" order by id asc');
   });
 });
 
