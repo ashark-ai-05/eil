@@ -120,6 +120,26 @@ function fixturePayloads(path: string): any[] {
   return Array.isArray(payloads) ? payloads : [payloads];
 }
 
+/** Full-listing reconcile (flow K1 deletions): fetch the complete id list
+ * from the source and tombstone catalog docs that no longer exist there. */
+async function runReconcile(
+  source: string,
+  listIds: () => Promise<string[]>,
+  tenant: string,
+): Promise<void> {
+  console.log(`reconcile: fetching full ${source} id listing...`);
+  const present = await listIds();
+  const { reconcile } = await import("./store.js");
+  const client = await connect();
+  try {
+    const removed = await reconcile(client, source, present, tenant);
+    for (const id of removed) console.log(`  - ${id} (deleted at source)`);
+    console.log(`reconcile: ${present.length} present at source, ${removed.length} removed`);
+  } finally {
+    await client.end();
+  }
+}
+
 /** Build a connector client with a clean one-line error when env is missing —
  * validated BEFORE any output, mirroring the original guard semantics. */
 function liveClient<T>(build: () => T, requiredEnv: string): T {
@@ -137,6 +157,7 @@ ingest
   .command("confluence")
   .description("Ingest Confluence pages — fixture JSON, or live CQL sync from the cursor")
   .option("--fixture <path>", "JSON fixture (one item or a list); omit for live sync")
+  .option("--reconcile", "after sync, delete catalog docs removed at the source (full id listing)")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
     const { normalize } = await import("./ingest/confluence.js");
@@ -161,12 +182,14 @@ ingest
       for await (const page of conf.updatedSince(cursor)) yield normalize(page, opts.tenant);
     })();
     await ingestDocs("confluence", docs, (d) => d.updatedAt ?? null);
+    if (opts.reconcile) await runReconcile("confluence", () => conf.listIds(), opts.tenant);
   });
 
 ingest
   .command("jira")
   .description("Ingest Jira issues — fixture JSON, or live JQL sync from the cursor")
   .option("--fixture <path>", "JSON fixture (one item or a list); omit for live sync")
+  .option("--reconcile", "after sync, delete catalog docs removed at the source (full id listing)")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
     const { normalize } = await import("./ingest/jira.js");
@@ -188,6 +211,7 @@ ingest
       for await (const issue of jira.updatedSince(cursor)) yield normalize(issue, opts.tenant);
     })();
     await ingestDocs("jira", docs, (d) => d.updatedAt ?? null);
+    if (opts.reconcile) await runReconcile("jira", () => jira.listIds(), opts.tenant);
   });
 
 ingest
@@ -197,7 +221,10 @@ ingest
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
     const { walkVault } = await import("./ingest/obsidian.js");
-    await ingestDocs("obsidian", walkVault(opts.vault, opts.tenant));
+    const docs = walkVault(opts.vault, opts.tenant);
+    await ingestDocs("obsidian", docs);
+    // The vault walk IS a full listing — reconcile deletions on every run.
+    await runReconcile("obsidian", async () => docs.map((d) => d.id), opts.tenant);
   });
 
 program

@@ -22,6 +22,27 @@ export async function setCursor(client: Db, source: string, cursor: string): Pro
 }
 
 /**
+ * Full-listing reconcile — the deletion story (design flow K1). A doc deleted
+ * at the source never appears in an "updated since" query; only diffing a
+ * complete id listing produces tombstones. Deletes catalog docs of `source`
+ * (and tenant) absent from presentIds; chunks and outgoing links follow via
+ * FK cascade. Returns the removed ids.
+ */
+export async function reconcile(
+  client: Db,
+  source: string,
+  presentIds: string[],
+  tenant = "default",
+): Promise<string[]> {
+  const res = await client.query(
+    "DELETE FROM documents WHERE source = $1 AND tenant = $2" +
+      " AND NOT (id = ANY($3::text[])) RETURNING id",
+    [source, tenant, presentIds],
+  );
+  return res.rows.map((r) => r.id as string);
+}
+
+/**
  * Insert or update a document and its chunks/links. Returns true if content
  * changed. Owns its transaction: FOR UPDATE only serializes concurrent
  * upserts if the lock survives past the SELECT, so the BEGIN/COMMIT lives

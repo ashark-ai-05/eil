@@ -4,7 +4,15 @@
  * promotion).
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import pg from "pg";
 
@@ -27,13 +35,56 @@ export function dsn(): string {
 /**
  * Zero-install backend: EIL_DATABASE_URL=pglite://<data-dir> runs real
  * Postgres (WASM, in-process) from node_modules — no server, no admin
- * rights. Single process at a time (the data dir is exclusively locked),
- * which matches local single-user mode; kube promotion still targets real
- * Postgres via a normal DSN.
+ * rights. PGlite itself enforces NO lock on its data dir — two processes can
+ * open it concurrently and silently interleave (verified experimentally) —
+ * so EIL adds a pidfile lock: the second process gets a clear error instead
+ * of silent concurrent access. Reentrant within one process; stale locks
+ * (dead pid) are reclaimed. Kube promotion targets server Postgres via DSN.
  */
+function acquirePgliteLock(lockPath: string): void {
+  try {
+    const fd = openSync(lockPath, "wx");
+    writeSync(fd, String(process.pid));
+    closeSync(fd);
+  } catch {
+    let holder = 0;
+    try {
+      holder = Number(readFileSync(lockPath, "utf-8")) || 0;
+    } catch {}
+    if (holder === process.pid) return; // reentrant within this process
+    let alive = false;
+    if (holder > 0) {
+      try {
+        process.kill(holder, 0);
+        alive = true;
+      } catch {}
+    }
+    if (alive) {
+      throw new Error(
+        `pglite data dir is in use by pid ${holder} (${lockPath}). ` +
+          "PGlite supports one process at a time — stop the other process, " +
+          "or switch to a server tier (see README concurrency decision rule).",
+      );
+    }
+    rmSync(lockPath, { force: true }); // stale lock from a dead process
+    const fd = openSync(lockPath, "wx");
+    writeSync(fd, String(process.pid));
+    closeSync(fd);
+  }
+  process.once("exit", () => {
+    try {
+      if (Number(readFileSync(lockPath, "utf-8")) === process.pid)
+        rmSync(lockPath, { force: true });
+    } catch {}
+  });
+}
+
 async function connectPglite(url: string): Promise<Db> {
   const { PGlite } = await import("@electric-sql/pglite");
   const dataDir = url.slice("pglite://".length) || ".eil-pglite";
+  mkdirSync(dataDir, { recursive: true });
+  const lockPath = join(dataDir, ".eil.lock");
+  acquirePgliteLock(lockPath);
   const pgl = await PGlite.create(dataDir);
   return {
     query: async (text: string, params?: any[]) => {
@@ -44,7 +95,14 @@ async function connectPglite(url: string): Promise<Db> {
       const results = await pgl.exec(text);
       return results[results.length - 1] ?? { rows: [] };
     },
-    end: () => pgl.close(),
+    end: async () => {
+      await pgl.close();
+      try {
+        if (Number(readFileSync(lockPath, "utf-8")) === process.pid) {
+          rmSync(lockPath, { force: true });
+        }
+      } catch {}
+    },
   };
 }
 

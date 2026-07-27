@@ -36,6 +36,32 @@ export class JiraClient {
     }
   }
 
+  /** Fetch one issue live — the get_doc fresh=true pull-through (flow K5). */
+  async getIssue(key: string): Promise<JiraIssue> {
+    const data = await getJson(this.client, `/rest/api/2/issue/${encodeURIComponent(key)}`, {
+      fields: FIELDS,
+    });
+    return this.toIssueDict(data);
+  }
+
+  /** Complete id listing for reconcile (flow K1 deletions) — keys only, paged. */
+  async listIds(): Promise<string[]> {
+    const ids: string[] = [];
+    let start = 0;
+    for (;;) {
+      const data = await getJson(this.client, "/rest/api/2/search", {
+        jql: "order by key asc",
+        fields: "key",
+        maxResults: PAGE_SIZE,
+        startAt: start,
+      });
+      const issues = data.issues ?? [];
+      for (const issue of issues) ids.push(`jira:issue:${issue.key}`);
+      start += issues.length;
+      if (start >= (data.total ?? 0) || issues.length === 0) return ids;
+    }
+  }
+
   toIssueDict(apiIssue: any): JiraIssue {
     const f = apiIssue.fields;
     const comments = (f.comment?.comments ?? []).map((c: any) => ({

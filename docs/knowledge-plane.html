@@ -141,7 +141,7 @@
   <p class="eyebrow">Architecture Brief · Companion · Knowledge Plane</p>
   <h1>The Knowledge Plane, in detail</h1>
   <p class="standfirst">Ingestion, indexing, and deterministic retrieval over code, Jira, Confluence, meetings, and Obsidian — with no locally hosted models.</p>
-  <p class="meta">2026-07-27 · Draft 4.1 · Postgres becomes the search engine (FTS + pgvector); OpenSearch demoted to a deferred scale option — the whole stack now runs locally without Docker</p>
+  <p class="meta">2026-07-27 · Draft 4.3 · conformance-audit corrections: K1 deletion reconcile + K5 fresh pull-through now implemented; webhook-receiver corrected to P3 (kube-only)</p>
 
   <div class="thesis">
     <span class="label">Design thesis</span>
@@ -474,7 +474,7 @@ natural language (the rest)      → search cluster: BM25 ∥ kNN → RRF</code>
       <div>
         <h3>Catalog, link graph, first connectors — pilot scope</h3>
         <p>Jira + Confluence connectors (cursor poll + nightly reconcile), normalizer + chunker + hash gate, BM25-only <code>search_docs</code>, <code>get_doc</code>, <code>expand</code>, and <code>search_code</code> v0 proxying Bitbucket DC built-in search (native ACLs, zero infra). <strong>Pilot team + unrestricted spaces only</strong> — the full ACL gate doesn't exist yet, so scope is the access control.</p>
-        <span class="ships">ships: connector-jira · connector-confluence · webhook-receiver · ingest-worker · search_docs/get_doc/expand/search_code(v0) · MCP call-volume metrics</span>
+        <span class="ships">ships: connector-jira · connector-confluence · ingest-worker · search_docs/get_doc/expand/search_code(v0) · MCP call-volume metrics · (webhook-receiver is P3 — kube-only, per the promotion pathway)</span>
         <span class="exit">exit: expand("PAY-981") demo lands · recall@10 baseline recorded · v0 search_code failure modes instrumented</span>
       </div>
     </div>

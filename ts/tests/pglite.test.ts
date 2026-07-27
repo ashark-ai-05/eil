@@ -87,4 +87,48 @@ describe("pglite zero-install backend", () => {
     const res = await client.query("SELECT sum(calls)::int AS n FROM metrics.vw_tool_calls");
     expect(res.rows[0].n).toBeGreaterThanOrEqual(1);
   });
+
+  it("a SECOND PROCESS opening the same data dir is refused (pidfile lock)", () => {
+    // In-process reconnects are reentrant by design; the lock guards across
+    // processes — so spawn a real one and expect the clear refusal.
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    let output = "";
+    try {
+      output = execFileSync("pnpm", ["-s", "eil", "search", "x"], {
+        encoding: "utf-8",
+        stdio: "pipe",
+        env: { ...process.env, EIL_DATABASE_URL: `pglite://${dataDir}` },
+        timeout: 30_000,
+      });
+    } catch (err: any) {
+      output = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    }
+    expect(output).toContain("in use by pid");
+  });
+
+  it("reconcile tombstones docs deleted at the source", async () => {
+    const { reconcile } = await import("../store.js");
+    const doomed = normalizePage({ ...fixture("confluence_page.json"), id: "99999" });
+    await upsertDocument(client, doomed);
+    expect(await getDoc(client, VIEWER, "confluence:page:99999")).not.toBeNull();
+    // full listing that no longer contains 99999
+    const removed = await reconcile(client, "confluence", ["confluence:page:12345"]);
+    expect(removed).toEqual(["confluence:page:99999"]);
+    expect(await getDoc(client, VIEWER, "confluence:page:99999")).toBeNull();
+    const orphanLinks = await client.query(
+      "SELECT count(*)::int AS n FROM links WHERE src_id = 'confluence:page:99999'",
+    );
+    expect(orphanLinks.rows[0].n).toBe(0); // cascade followed
+  });
+
+  it("tenant-scoped viewer sees only its tenant; unscoped viewer sees all", async () => {
+    const other = normalizePage({ ...fixture("confluence_page.json"), id: "55555" }, "team-b");
+    await upsertDocument(client, other);
+    const scoped: Viewer = { principal: ME, groups: [], tenant: "default" };
+    expect(await getDoc(client, scoped, "confluence:page:55555")).toBeNull();
+    const scopedB: Viewer = { principal: ME, groups: [], tenant: "team-b" };
+    expect(await getDoc(client, scopedB, "confluence:page:55555")).not.toBeNull();
+    expect(await getDoc(client, VIEWER, "confluence:page:55555")).not.toBeNull(); // unscoped
+    await client.query("DELETE FROM documents WHERE id = 'confluence:page:55555'");
+  });
 });

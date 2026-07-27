@@ -41,6 +41,30 @@ export class ConfluenceClient {
     }
   }
 
+  /** Fetch one page live — the get_doc fresh=true pull-through (flow K5). */
+  async getPage(id: string): Promise<ConfluencePage> {
+    const data = await getJson(this.client, `/rest/api/content/${encodeURIComponent(id)}`, {
+      expand: "body.storage,ancestors,version,space",
+    });
+    return this.toPageDict(data);
+  }
+
+  /** Complete id listing for reconcile (flow K1 deletions) — ids only, paged. */
+  async listIds(): Promise<string[]> {
+    const ids: string[] = [];
+    let start = 0;
+    for (;;) {
+      const data = await getJson(this.client, "/rest/api/content/search", {
+        cql: "type=page order by id asc",
+        limit: PAGE_SIZE,
+        start,
+      });
+      for (const page of data.results ?? []) ids.push(`confluence:page:${page.id}`);
+      if ((data.size ?? 0) < PAGE_SIZE) return ids;
+      start += PAGE_SIZE;
+    }
+  }
+
   /** Map a Confluence API response item to the normalizer's page shape. */
   toPageDict(apiPage: any): ConfluencePage {
     const version = apiPage.version ?? {};

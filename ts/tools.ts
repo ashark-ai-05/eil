@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { type Db, connect } from "./db.js";
+// (freshFetch imports its connectors lazily — no cost unless fresh=true is used)
 import { type Viewer, audit, expand, getDoc, localViewer, searchDocs } from "./search.js";
 
 export interface ToolSpec<S extends z.ZodRawShape = z.ZodRawShape> {
@@ -35,15 +36,60 @@ const searchDocsSpec: ToolSpec = {
   handler: (c, v, a) => searchDocs(c, v, a.query, a.limit ?? 8),
 };
 
+/**
+ * fresh=true pull-through (flow K5): re-fetch the doc live from its source
+ * with personal credentials, re-index it, then serve it through the normal
+ * ACL-filtered read. Falls back to the catalog copy (with a note) when the
+ * source is unsupported or its env isn't configured.
+ */
+async function freshFetch(c: Db, id: string): Promise<string | null> {
+  try {
+    if (id.startsWith("confluence:page:")) {
+      if (!process.env.EIL_CONFLUENCE_URL) return "fresh unavailable: EIL_CONFLUENCE_URL not set";
+      const { ConfluenceClient } = await import("./connectors/confluence.js");
+      const { normalize } = await import("./ingest/confluence.js");
+      const { upsertDocument } = await import("./store.js");
+      const page = await new ConfluenceClient().getPage(id.slice("confluence:page:".length));
+      await upsertDocument(c, normalize(page));
+      return null;
+    }
+    if (id.startsWith("jira:issue:")) {
+      if (!process.env.EIL_JIRA_URL) return "fresh unavailable: EIL_JIRA_URL not set";
+      const { JiraClient } = await import("./connectors/jira.js");
+      const { normalize } = await import("./ingest/jira.js");
+      const { upsertDocument } = await import("./store.js");
+      const issue = await new JiraClient().getIssue(id.slice("jira:issue:".length));
+      await upsertDocument(c, normalize(issue));
+      return null;
+    }
+    return `fresh unavailable: unsupported source for ${id}`;
+  } catch (err: any) {
+    return `fresh fetch failed: ${String(err.message).slice(0, 200)}`;
+  }
+}
+
 const getDocSpec: ToolSpec = {
   name: "get_doc",
   description:
     "Fetch one document's content by canonical id (from search_docs/expand). " +
-    "Large documents are windowed; pass section=1,2,... for more.",
-  schema: z.object({ id: z.string(), section: z.number().int().default(0) }),
+    "Large documents are windowed; pass section=1,2,... for more. Pass " +
+    "fresh=true to re-fetch live from the source before reading (incident paths).",
+  schema: z.object({
+    id: z.string(),
+    section: z.number().int().default(0),
+    fresh: z.boolean().default(false),
+  }),
   requiresEnv: [],
-  handler: async (c, v, a) =>
-    (await getDoc(c, v, a.id, a.section ?? 0)) ?? { error: `not found: ${a.id}` },
+  handler: async (c, v, a) => {
+    const freshNote = a.fresh ? await freshFetch(c, a.id) : null;
+    const doc = await getDoc(c, v, a.id, a.section ?? 0);
+    if (!doc) return { error: `not found: ${a.id}`, ...(freshNote ? { fresh: freshNote } : {}) };
+    return freshNote
+      ? { ...doc, fresh: freshNote }
+      : a.fresh
+        ? { ...doc, fresh: "refreshed" }
+        : doc;
+  },
 };
 
 const expandSpec: ToolSpec = {

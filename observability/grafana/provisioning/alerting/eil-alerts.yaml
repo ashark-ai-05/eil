@@ -1,0 +1,77 @@
+# O-1 alert rules — the designed tripwires. Cursor staleness is the #1
+# connector-rot tripwire; zero-result spikes are the adoption killer; recall
+# drops also gate CI (eil eval --min-recall), this alert covers drift between
+# releases. Routing to Jira tickets is O-3.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: eil
+    folder: EIL
+    interval: 5m
+    rules:
+      - uid: eil-cursor-stale
+        title: Connector cursor stale > 24h
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Alerting
+        annotations:
+          summary: "A connector's sync cursor hasn't advanced in over 24 hours — it has silently died."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: eil-pg
+            model:
+              format: table
+              rawSql: "SELECT coalesce(max(age_hours), 0) AS value FROM metrics.vw_connector_health"
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [24] }
+      - uid: eil-zero-result-spike
+        title: Zero-result rate spike (today)
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Alerting
+        annotations:
+          summary: "More than 30% of today's searches return nothing — corpus gap or router regression."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: eil-pg
+            model:
+              format: table
+              rawSql: "SELECT coalesce(max(zero_rate), 0) AS value FROM metrics.vw_zero_results WHERE day = now()::date AND calls >= 10"
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.3] }
+      - uid: eil-recall-drop
+        title: Eval recall below baseline
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Alerting
+        annotations:
+          summary: "Latest recorded eval run fell below 0.9 mean recall — retrieval regressed."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: eil-pg
+            model:
+              format: table
+              rawSql: "SELECT mean_recall AS value FROM metrics.vw_eval_trend ORDER BY at DESC LIMIT 1"
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [0.9] }

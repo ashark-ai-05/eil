@@ -81,6 +81,63 @@ describe("jira", () => {
   });
 });
 
+describe("reconcile listings and single-item fetchers", () => {
+  it("confluence listIds pages through ids only", async () => {
+    const calls: number[] = [];
+    const fetcher: Fetcher = async (url) => {
+      const u = new URL(String(url));
+      calls.push(Number(u.searchParams.get("start")));
+      expect(u.searchParams.get("expand")).toBeNull(); // ids only — no body fetch
+      const start = Number(u.searchParams.get("start"));
+      const batch =
+        start === 0 ? Array.from({ length: 50 }, (_, i) => ({ id: String(i) })) : [{ id: "50" }];
+      return jsonResponse({ results: batch, size: batch.length });
+    };
+    const client = new ConfluenceClient("https://c.example.com", "pat", fetcher);
+    const ids = await client.listIds();
+    expect(ids).toHaveLength(51);
+    expect(ids[0]).toBe("confluence:page:0");
+    expect(calls).toEqual([0, 50]);
+  });
+
+  it("jira listIds pages through keys only", async () => {
+    const fetcher: Fetcher = async (url) => {
+      const u = new URL(String(url));
+      expect(u.searchParams.get("fields")).toBe("key");
+      const start = Number(u.searchParams.get("startAt"));
+      return jsonResponse({
+        issues: start === 0 ? [{ key: "PAY-1" }, { key: "PAY-2" }] : [],
+        total: 2,
+      });
+    };
+    const client = new JiraClient("https://j.example.com", "pat", fetcher);
+    expect(await client.listIds()).toEqual(["jira:issue:PAY-1", "jira:issue:PAY-2"]);
+  });
+
+  it("getPage and getIssue fetch single items for fresh=true", async () => {
+    const cFetcher: Fetcher = async (url) => {
+      expect(String(url)).toContain("/rest/api/content/777");
+      return jsonResponse({
+        id: "777",
+        title: "T",
+        version: {},
+        body: { storage: { value: "<p>x</p>" } },
+      });
+    };
+    const page = await new ConfluenceClient("https://c.example.com", "pat", cFetcher).getPage(
+      "777",
+    );
+    expect(page.id).toBe("777");
+
+    const jFetcher: Fetcher = async (url) => {
+      expect(String(url)).toContain("/rest/api/2/issue/PAY-9");
+      return jsonResponse({ key: "PAY-9", fields: { summary: "s" } });
+    };
+    const issue = await new JiraClient("https://j.example.com", "pat", jFetcher).getIssue("PAY-9");
+    expect(issue.key).toBe("PAY-9");
+  });
+});
+
 describe("bitbucket", () => {
   it("maps hits and enforces the query limit", async () => {
     const fetcher: Fetcher = async (_url, init) => {

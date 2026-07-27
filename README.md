@@ -83,9 +83,10 @@ Because PGlite *is* Postgres, migrations, FTS, the jsonb ACL predicate, and
 the metrics views run unchanged — `ts/tests/pglite.test.ts` proves the full
 pipeline on this backend in CI.
 
-**Concurrency decision rule.** PGlite locks its data dir exclusively — one
-process at a time. Fine for bootstrap and sequential use (migrate, ingest,
-then serve). The moment two things must run at once (MCP server answering
+**Concurrency decision rule.** PGlite is one process at a time — EIL enforces
+this with a pidfile lock (PGlite itself would silently allow concurrent access,
+which is worse; a second process gets a clear "in use by pid N" error). Fine
+for bootstrap and sequential use (migrate, ingest, then serve). The moment two things must run at once (MCP server answering
 while an ingest runs), switch tiers — it's only an env-var change, no code:
 
 | Tier | Concurrent processes | Install rights |

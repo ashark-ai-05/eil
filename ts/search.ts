@@ -14,27 +14,34 @@ export const SNIPPET_OPTS = "StartSel=**, StopSel=**, MaxWords=40, MinWords=10";
 export const GET_DOC_MAX_CHARS = 8_000;
 export const EXPAND_MAX_EDGES = 50;
 
-// Mandatory, fail-closed: a doc is visible iff the viewer ingested it or
-// shares a group with its acl_groups stamps. $-placeholders are appended per
-// query via the params helper.
-const aclSql = (principalIdx: number, groupsIdx: number) =>
-  `(d.ingested_by = $${principalIdx} OR d.acl_groups ?| $${groupsIdx}::text[])`;
+// Mandatory, fail-closed visibility: viewer ingested the doc OR shares an
+// acl_groups stamp, AND (when the viewer is tenant-scoped) the doc belongs
+// to that tenant. Only static $-indices ever reach SQL text.
+const visibleSql = (principalIdx: number, groupsIdx: number, tenantIdx: number) =>
+  `((d.ingested_by = $${principalIdx} OR d.acl_groups ?| $${groupsIdx}::text[])` +
+  ` AND ($${tenantIdx}::text IS NULL OR d.tenant = $${tenantIdx}))`;
 
 export interface Viewer {
   principal: string;
   groups: string[];
+  /** When set, reads are scoped to this tenant; unset = no tenant filter. */
+  tenant?: string;
 }
 
-/** Local mode: OS user + optional EIL_USER_GROUPS. On kube: token claims. */
+const tenantOf = (viewer: Viewer): string | null => viewer.tenant ?? null;
+
+/** Local mode: OS user + optional EIL_USER_GROUPS / EIL_TENANT. On kube: token claims. */
 export function localViewer(): Viewer {
   const raw = process.env.EIL_USER_GROUPS ?? "";
-  return {
+  const viewer: Viewer = {
     principal: userInfo().username,
     groups: raw
       .split(",")
       .map((g) => g.trim())
       .filter(Boolean),
   };
+  if (process.env.EIL_TENANT) viewer.tenant = process.env.EIL_TENANT;
+  return viewer;
 }
 
 export interface SearchResult {
@@ -77,10 +84,10 @@ export async function searchDocs(
             ts_headline('english', c.text,
                         websearch_to_tsquery('english', $1), $2) AS snippet
      FROM chunks c JOIN documents d ON d.id = c.doc_id
-     WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND ${aclSql(4, 5)}
+     WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND ${visibleSql(4, 5, 6)}
      ORDER BY rank DESC, c.doc_id, c.seq
      LIMIT $3`,
-    [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups],
+    [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, tenantOf(viewer)],
   );
 
   const byDoc = new Map<string, SearchResult & { updated: Date | null }>();
@@ -123,8 +130,8 @@ export async function getDoc(
 ): Promise<Record<string, unknown> | null> {
   const res = await client.query(
     `SELECT id, title, url, source, quality_tier, hierarchy, updated_at, body
-     FROM documents d WHERE id = $1 AND ${aclSql(2, 3)}`,
-    [docId, viewer.principal, viewer.groups],
+     FROM documents d WHERE id = $1 AND ${visibleSql(2, 3, 4)}`,
+    [docId, viewer.principal, viewer.groups, tenantOf(viewer)],
   );
   const row = res.rows[0];
   if (!row) return null;
@@ -154,8 +161,8 @@ export async function expand(
   // leak nothing — not even the ids its body references (dangling out-edges
   // would otherwise slip past the destination-side ACL check below).
   const restricted = await client.query(
-    `SELECT 1 FROM documents d WHERE d.id = $1 AND NOT ${aclSql(2, 3)}`,
-    [docId, viewer.principal, viewer.groups],
+    `SELECT 1 FROM documents d WHERE d.id = $1 AND NOT ${visibleSql(2, 3, 4)}`,
+    [docId, viewer.principal, viewer.groups, tenantOf(viewer)],
   );
   if (restricted.rows.length > 0) return { id: docId, edges: [], truncated: false };
 
@@ -166,15 +173,15 @@ export async function expand(
   const res = await client.query(
     `(SELECT l.dst_id AS other, l.rel, 'out' AS direction, d.title
       FROM links l LEFT JOIN documents d ON d.id = l.dst_id
-      WHERE l.src_id = $1 AND (d.id IS NULL OR ${aclSql(2, 3)})
-      ORDER BY other LIMIT $4)
+      WHERE l.src_id = $1 AND (d.id IS NULL OR ${visibleSql(2, 3, 4)})
+      ORDER BY other LIMIT $5)
      UNION ALL
      (SELECT l.src_id AS other, l.rel, 'in' AS direction, d.title
       FROM links l LEFT JOIN documents d ON d.id = l.src_id
-      WHERE l.dst_id = $1 AND (d.id IS NULL OR ${aclSql(2, 3)})
-      ORDER BY other LIMIT $4)
+      WHERE l.dst_id = $1 AND (d.id IS NULL OR ${visibleSql(2, 3, 4)})
+      ORDER BY other LIMIT $5)
      ORDER BY direction, other`,
-    [docId, viewer.principal, viewer.groups, limit],
+    [docId, viewer.principal, viewer.groups, tenantOf(viewer), limit],
   );
   const edges: Edge[] = res.rows.map((row) => ({
     id: row.other,
