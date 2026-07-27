@@ -1,0 +1,228 @@
+<title>Observability Plane — Design</title>
+<style>
+  :root {
+    --ground: #F6F7F5;
+    --ink: #16211F;
+    --ink-soft: #46534F;
+    --accent: #0E7C6B;
+    --accent-wash: #E3EEEA;
+    --caution: #A85E14;
+    --caution-wash: #F6EDE2;
+    --danger: #9B3324;
+    --danger-wash: #F7E8E4;
+    --line: #D5DBD8;
+    --card: #FFFFFF;
+    --display: "Avenir Next", Avenir, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --body: Charter, "Iowan Old Style", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html { background: var(--ground); }
+  body { font-family: var(--body); color: var(--ink); line-height: 1.6; font-size: 17px; margin: 0; padding: 3.5rem 1.5rem 6rem; }
+  .col { max-width: 44rem; margin: 0 auto; }
+  .wide { max-width: 66rem; margin: 0 auto; }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 .75rem; }
+  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(1.9rem, 4.5vw, 2.7rem); line-height: 1.12; letter-spacing: -.015em; margin: 0 0 .6rem; text-wrap: balance; }
+  .standfirst { font-size: 1.12rem; color: var(--ink-soft); margin: 0 0 .4rem; max-width: 40rem; }
+  .meta { font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); letter-spacing: .06em; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.35rem; letter-spacing: -.01em; margin: 3.2rem 0 .8rem; text-wrap: balance; }
+  h2 .num { color: var(--accent); font-family: var(--mono); font-size: .85rem; font-weight: 400; margin-right: .6rem; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 1.02rem; margin: 1.8rem 0 .4rem; }
+  p { margin: 0 0 1rem; }
+  ul { padding-left: 1.2rem; margin: 0 0 1rem; }
+  li { margin-bottom: .45rem; }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code { font-family: var(--mono); font-size: .82em; background: #ECEFED; padding: .1em .35em; border-radius: 3px; white-space: nowrap; }
+  .thesis { border: 2px solid var(--ink); background: var(--card); padding: 1.2rem 1.4rem; margin: 2.2rem 0 0; }
+  .thesis p { margin: 0; font-size: 1.05rem; }
+  .thesis .label { font-family: var(--mono); font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: .5rem; }
+  .diagram-scroll { overflow-x: auto; margin: 1.6rem 0 0; padding-bottom: .5rem; }
+  .diagram { min-width: 700px; display: flex; flex-direction: column; }
+  .lane { display: grid; gap: .7rem; }
+  .lane.c5 { grid-template-columns: repeat(5, 1fr); }
+  .lane.c4 { grid-template-columns: repeat(4, 1fr); }
+  .node { background: var(--card); border: 1.5px solid var(--ink); padding: .65rem .8rem; }
+  .node .name { font-family: var(--display); font-weight: 700; font-size: .86rem; display: block; }
+  .node .sub { font-family: var(--mono); font-size: .62rem; color: var(--ink-soft); line-height: 1.5; display: block; margin-top: .3rem; }
+  .tag { font-family: var(--mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; padding: .08rem .38rem; border: 1px solid currentColor; display: inline-block; margin-bottom: .4rem; }
+  .tag.live { color: var(--accent); }
+  .tag.next { color: var(--caution); }
+  .flow { font-family: var(--mono); font-size: .62rem; letter-spacing: .06em; color: var(--card); background: var(--accent); padding: .1rem .45rem; border-radius: 999px; display: inline-block; }
+  .vflow { font-family: var(--mono); font-size: .7rem; color: var(--ink-soft); text-align: center; padding: .55rem 0; line-height: 1.6; }
+  .vflow .arrow { color: var(--accent); }
+  .plane { background: var(--card); border: 1.5px solid var(--line); border-top: 3px solid var(--accent); padding: 1rem 1.1rem 1.1rem; }
+  .plane-title { display: flex; align-items: baseline; gap: .7rem; margin-bottom: .8rem; flex-wrap: wrap; }
+  .plane-title .name { font-family: var(--display); font-weight: 700; font-size: 1rem; }
+  .plane-title .role { font-family: var(--mono); font-size: .66rem; color: var(--ink-soft); }
+  .cells { display: grid; gap: .6rem; }
+  .cells.c4 { grid-template-columns: repeat(4, 1fr); }
+  .cells.c3 { grid-template-columns: repeat(3, 1fr); }
+  .cell { background: var(--ground); border: 1px solid var(--line); padding: .5rem .6rem; }
+  .cell b { font-family: var(--display); font-size: .78rem; font-weight: 600; display: block; }
+  .cell span { font-family: var(--mono); font-size: .62rem; color: var(--ink-soft); line-height: 1.5; display: block; margin-top: .25rem; }
+  .cell.hot { border-color: var(--caution); }
+  .cell.hot b { color: var(--caution); }
+  .table-scroll { overflow-x: auto; margin: 1rem 0 1.4rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .88rem; }
+  th { font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; text-align: left; color: var(--ink-soft); border-bottom: 2px solid var(--ink); padding: .5rem .7rem .4rem; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .7rem; vertical-align: top; line-height: 1.5; }
+  td:first-child { font-family: var(--display); font-weight: 600; font-size: .84rem; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  .phase { display: grid; grid-template-columns: 5.6rem 1fr; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+  .phase:last-child { border-bottom: none; }
+  .phase .when { font-family: var(--mono); font-size: .72rem; color: var(--accent); padding-top: .25rem; }
+  .phase h3 { margin: 0 0 .3rem; }
+  .phase p { margin: 0; font-size: .95rem; }
+  .phase .exit { font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); margin-top: .45rem; display: block; }
+  @media (max-width: 760px) {
+    .lane.c5, .lane.c4, .cells.c4, .cells.c3 { grid-template-columns: 1fr 1fr; }
+    .phase { grid-template-columns: 1fr; gap: .2rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="col">
+  <p class="eyebrow">Architecture Brief · Companion · Observability Plane</p>
+  <h1>Observability &amp; monitoring</h1>
+  <p class="standfirst">Cost, model performance, platform health, and adoption — measured where the facts already live, with SQL views as the metrics layer and Grafana on top.</p>
+  <p class="meta">2026-07-27 · Draft 1 · companions: <a href="https://claude.ai/code/artifact/2b1de2a5-d103-41bf-b154-34efcf588ac3">full solution rev 2</a> · <a href="https://claude.ai/code/artifact/c93842e4-e785-466c-bd63-b61f6d6e947e">knowledge plane draft 4.2</a></p>
+
+  <div class="thesis">
+    <span class="label">Design thesis</span>
+    <p>The knowledge plane already emits its own telemetry as a side effect of working: every MCP call lands in <code>audit_log</code>, every model call in <code>llm_calls</code>, every sync advances <code>sync_cursors</code>, every eval produces recall numbers. Observability v0 is therefore <strong>not a new system — it is SQL views over facts that already exist</strong>, plus collectors for the two vendors, plus Grafana reading Postgres directly. Metric definitions are versioned, deterministic SQL in git — testable like everything else. No new datastore, no agent required to answer “what happened.”</p>
+  </div>
+</header>
+
+<section class="wide">
+  <h2 style="max-width:44rem;margin-left:auto;margin-right:auto;"><span class="num">00</span>Architecture</h2>
+  <div class="diagram-scroll">
+    <div class="diagram">
+
+      <div class="lane c5">
+        <div class="node"><span class="tag live">Live</span><span class="name">audit_log</span><span class="sub">every MCP tool call · principal · args · result count</span></div>
+        <div class="node"><span class="tag live">Live</span><span class="name">llm_calls</span><span class="sub">provider · model · tokens · latency · caller</span></div>
+        <div class="node"><span class="tag live">Live</span><span class="name">sync_cursors + CI</span><span class="sub">connector freshness · red-team + eval status</span></div>
+        <div class="node"><span class="tag next">Next</span><span class="name">Vendor collectors</span><span class="sub">eil collect amp · eil collect copilot · nightly CronJob</span></div>
+        <div class="node"><span class="tag next">Next</span><span class="name">Gateway logs</span><span class="sub">LiteLLM OTel/webhook when it deploys · exact per-request cost</span></div>
+      </div>
+
+      <div class="vflow"><span class="flow">O1</span> facts land in Postgres — same instance, separate <code>metrics</code> schema <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Metrics Layer — SQL views, versioned in git</span>
+          <span class="role">the metric IS its definition · deterministic · tested like code</span>
+        </div>
+        <div class="cells c4">
+          <div class="cell"><b>usage_facts</b><span>user · team · tool · model · tokens · cost · day — the one normalized cost table (three vendor shapes reconciled)</span></div>
+          <div class="cell"><b>eval_runs</b><span>eil eval writes every run: k · mean recall · git sha — trend, not snapshot</span></div>
+          <div class="cell hot"><b>identity_map</b><span>GitHub handle ↔ corp email ↔ Amp acct ↔ key · the sneaky-hard table · unmapped rows alarm</span></div>
+          <div class="cell"><b>vw_* views</b><span>vw_spend_daily · vw_tool_calls · vw_zero_results · vw_connector_health · vw_cost_per_run · vw_two_phase</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">O2</span> Grafana reads the views directly — native Postgres datasource, no exporter <span class="arrow">↓</span></div>
+
+      <div class="plane">
+        <div class="plane-title">
+          <span class="name">Grafana</span>
+          <span class="role">brew locally · Deployment on kube · dashboards provisioned from JSON in the repo</span>
+        </div>
+        <div class="cells c4">
+          <div class="cell"><b>Cost &amp; Usage</b><span>spend by user/team/tool/model · Amp credits · Copilot seats + premium reqs · MaaS tokens</span></div>
+          <div class="cell"><b>Model Performance</b><span>latency + error rate per provider/model · cost-per-completed-task · eval recall trend</span></div>
+          <div class="cell"><b>Platform Health</b><span>retrieval p95 · cursor age per source · ingest changed/day · red-team status</span></div>
+          <div class="cell"><b>Adoption</b><span>MCP calls per principal/tool (north star) · zero-result rate · two-phase ratio · est. tokens saved</span></div>
+        </div>
+      </div>
+
+      <div class="vflow"><span class="flow">O3</span> Grafana alerting <span class="arrow">↓</span> &nbsp;·&nbsp; <span class="flow">O4</span> alerts become Jira tickets via a workflow · eval regressions already block CI <span class="arrow">↺</span></div>
+
+      <div class="lane c4">
+        <div class="node"><span class="name">Cursor stale &gt; 24h</span><span class="sub">a connector silently died — pages the owner</span></div>
+        <div class="node"><span class="name">Recall below baseline</span><span class="sub">retrieval regressed · CI gate + dashboard trend</span></div>
+        <div class="node"><span class="name">Spend anomaly</span><span class="sub">day-over-day jump per team/provider · F5b Amp-credit watch</span></div>
+        <div class="node"><span class="name">Zero-result spike</span><span class="sub">agents asking, index not answering — adoption killer</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<main class="col">
+
+  <h2><span class="num">01</span>The four domains, and the question each answers</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Domain</th><th>Key metrics</th><th>Source</th><th>Question answered</th></tr></thead>
+      <tbody>
+        <tr><td>Cost &amp; usage</td><td>Spend by user/team/tool/model/day; inactive Copilot seats; Amp credit burn; F5b cost-per-run</td><td>usage_facts (collectors + gateway + llm_calls)</td><td>“What is AI costing us, and where?” — in each vendor’s native cost shape, never false token precision for Copilot</td></tr>
+        <tr><td>Model performance</td><td>Latency/error per provider·model; cost per <em>completed</em> task; recall trend; judgment-step retry rate</td><td>llm_calls · eval_runs · gateway (later)</td><td>“Is Nemotron good enough for this workflow, or does it need F5b?” — the tiering decision, made with data</td></tr>
+        <tr><td>Platform health</td><td>Retrieval p95; cursor age; docs changed/day; red-team suite status; migration drift</td><td>audit_log · sync_cursors · CI</td><td>“Is the plane alive and fresh?” — connector rot is the #1 named killer; cursor age is its tripwire</td></tr>
+        <tr><td>Adoption</td><td>MCP calls per principal/tool (<strong>north star</strong>); zero-result rate; get_doc-after-search ratio; estimated tokens saved vs exploration</td><td>audit_log</td><td>“Is anyone actually using it?” — indexes nobody queries are pure cost; this board decides the platform’s future honestly</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Two derived metrics deserve their names: <strong>zero-result rate</strong> (searches returning nothing — each one is a corpus gap, a router miss, or a semantic-arm argument, and the instrumented failure data that schedules Zoekt/embeddings), and the <strong>two-phase ratio</strong> (get_doc calls per search — near 1.0 means agents fetch selectively as designed; well above means snippets are too weak, near 0 means results aren’t worth opening).</p>
+
+  <h2><span class="num">02</span>Design decisions — and what was deliberately not chosen</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Choice</th><th>Rejected (for now)</th></tr></thead>
+      <tbody>
+        <tr><td>Metrics store</td><td>Postgres, separate <code>metrics</code> schema in the existing instance — facts are already there; joins between usage and content are free</td><td>Prometheus locally (pull-model scraping of CLI processes is a poor fit; returns at kube for infra metrics); a TSDB (row volume is tiny at this scale)</td></tr>
+        <tr><td>Metric definitions</td><td>SQL views in migrations — versioned, code-reviewed, deterministic, testable in the red-team/eval CI pattern</td><td>Metrics defined ad-hoc inside dashboard JSON (undiffable, unreviewable, silently divergent)</td></tr>
+        <tr><td>Dashboards</td><td>Grafana OSS — brew service locally, Deployment on kube, native Postgres datasource, dashboards provisioned from JSON committed to the repo (reusable across teams by construction)</td><td>Kibana (couples the plane to the logging ELK again); building a custom UI (a product nobody asked for)</td></tr>
+        <tr><td>LLM tracing</td><td>Defer. <code>llm_calls</code> covers who/what/cost/latency today; OTel GenAI spans from LiteLLM when the gateway deploys; Langfuse only if span volume ever justifies a dedicated trace store</td><td>Langfuse now (a stateful service ahead of need — the platform-weight critique applies)</td></tr>
+        <tr><td>Alert routing</td><td>Grafana alerting → webhook → a workflow files Jira tickets (dogfoods the orchestration plane); eval regressions already fail CI</td><td>PagerDuty integration before anything pages a human at night</td></tr>
+        <tr><td>Vendor collection</td><td><code>eil collect amp|copilot</code> — same CLI-locally / CronJob-on-kube pattern as connectors, contract-tested, staleness-alarmed, writing usage_facts in each vendor’s honest granularity</td><td>Any attempt at Copilot token-level attribution (doesn’t exist; seats + premium requests is the truth)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2><span class="num">03</span>Honest critique</h2>
+  <ul>
+    <li><strong>Grafana-on-Postgres has a scaling cliff</strong> — dashboard queries hit the same instance agents query. Fine for years at this volume; the <code>metrics</code> schema keeps the eventual split (read replica, or Prometheus at kube) a connection-string change. Watch retrieval p95 for dashboard-induced noise.</li>
+    <li><strong>“Tokens saved” is an estimate, not a measurement.</strong> It compares tool-call context sizes against an assumed exploration baseline. Label it estimated on the dashboard; the defensible numbers are call volume, zero-result rate, and vendor-billed spend.</li>
+    <li><strong>The identity map remains the weakest data.</strong> Collectors land vendor-keyed rows; joins are only as good as identity_map. The unmapped-rows alarm is the tripwire — treat any unmapped usage as a data bug, not noise.</li>
+    <li><strong>Local mode observes one user.</strong> Adoption boards are trivial until the kube promotion; their value starts at P2. Build them anyway — the views and dashboards are identical, only the row count changes.</li>
+    <li><strong>eval_runs needs eval entries to mean anything.</strong> Two fixture queries make a smoke test, not a baseline. The golden log growing from real usage is still the gating dependency for the Model Performance board’s recall panel.</li>
+  </ul>
+
+  <h2><span class="num">04</span>Implementation phases</h2>
+  <div>
+    <div class="phase">
+      <span class="when">O-0<br>~2 days</span>
+      <div>
+        <h3>Facts and views</h3>
+        <p>Migration: <code>metrics</code> schema, <code>usage_facts</code>, <code>eval_runs</code>, <code>identity_map</code>, and the first six <code>vw_*</code> views. <code>eil eval</code> writes eval_runs (with git sha). View tests in the red-team pattern: seeded facts in, expected aggregates out.</p>
+        <span class="exit">exit: every dashboard panel answerable by SELECT from a view</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">O-1<br>~2 days</span>
+      <div>
+        <h3>Grafana, provisioned</h3>
+        <p>brew-service Grafana + Postgres datasource + the four dashboards as provisioned JSON in <code>observability/</code>. Alert rules for cursor age, zero-result spike, recall drop.</p>
+        <span class="exit">exit: dashboards live locally from repo JSON alone — a second machine reproduces them with two commands</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">O-2<br>~3 days</span>
+      <div>
+        <h3>Vendor collectors</h3>
+        <p><code>eil collect amp</code> (admin API → per-user credits) and <code>eil collect copilot</code> (metrics + billing → seats, premium requests, acceptance) with contract tests against recorded fixtures; identity_map seeded and alarmed. Needs org API tokens — the first org-access dependency in this plane.</p>
+        <span class="exit">exit: one Grafana panel shows true org AI spend across all three sources</span>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">O-3<br>kube</span>
+      <div>
+        <h3>Promotion + gateway telemetry</h3>
+        <p>Collectors become CronJobs; Grafana a Deployment; LiteLLM ships OTel/webhook events into usage_facts for exact per-request MaaS cost; alert webhook → ticket-filing workflow. Gated behind the P1/P2 promotion gates like everything else.</p>
+        <span class="exit">exit: rev 2 brief’s F1/F2/F6 flows fully realized</span>
+      </div>
+    </div>
+  </div>
+
+</main>
