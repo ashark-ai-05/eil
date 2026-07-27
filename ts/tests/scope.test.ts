@@ -86,3 +86,13 @@ describe("predicate", () => {
     expect(predicate({ kind: "pages", ids: ["1"], withDescendants: false })).toBeNull();
   });
 });
+
+describe("CLI option shapes map to the rules", () => {
+  it("confluence: --space + --query is rejected; --with-descendants alone is rejected", () => {
+    expect(() => parseConfluenceScopes({ space: "ENG", query: "x" })).toThrow(/at most one/);
+    expect(() => parseConfluenceScopes({ withDescendants: true })).toThrow(/--with-descendants/);
+  });
+  it("jira: --project + --reconcile is rejected", () => {
+    expect(() => parseJiraScopes({ project: "PAY", reconcile: true })).toThrow(/full-instance/);
+  });
+});

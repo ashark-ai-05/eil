@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ConfluencePage } from "../ingest/confluence.js";
-import { ingestConfluenceScope } from "../ingest/pipeline.js";
+import type { JiraIssue } from "../ingest/jira.js";
+import { ingestConfluenceScope, ingestJiraScope } from "../ingest/pipeline.js";
 
 // Drive the orchestration against a real (PGlite) DB and a fake connector,
 // asserting the SCOPED cursor advances and the global one does not.
@@ -74,6 +75,65 @@ describe("ingestConfluenceScope", () => {
         "confluence:page:101",
       ]);
       expect(n.rows[0].n).toBe(2);
+    } finally {
+      await c.end();
+    }
+  });
+});
+
+const issue = (key: string, updated: string): JiraIssue => ({
+  key,
+  url: null,
+  fields: {
+    summary: `Issue ${key}`,
+    status: "Open",
+    issuetype: "Task",
+    project: "PAY",
+    reporter: "reporter@example.com",
+    created: "2026-06-05T00:00:00+00:00",
+    updated,
+    description: `body ${key} ${updated}`,
+    comments: [],
+    acl_groups: [],
+  },
+});
+
+const fakeJira = {
+  async *updatedSince(_cursor: string | null, _scope?: string) {
+    yield issue("PAY-100", "2026-06-05T00:00:00+00:00");
+  },
+  async getIssue(key: string) {
+    return issue(key, "2026-06-06T00:00:00+00:00");
+  },
+};
+
+describe("ingestJiraScope", () => {
+  it("advances the SCOPED cursor, not the global one", async () => {
+    await ingestJiraScope(fakeJira, { kind: "project", key: "PAY" }, "default");
+    const { connect } = await import("../db.js");
+    const { getCursor } = await import("../store.js");
+    const c = await connect();
+    try {
+      expect(await getCursor(c, "jira:project:PAY")).toBe("2026-06-05T00:00:00+00:00");
+      expect(await getCursor(c, "jira")).toBeNull();
+    } finally {
+      await c.end();
+    }
+  });
+
+  it("explicit issues write no cursor and can be upserted", async () => {
+    await ingestJiraScope(fakeJira, { kind: "issues", keys: ["PAY-1"] }, "default");
+    const { connect } = await import("../db.js");
+    const { getCursor } = await import("../store.js");
+    const c = await connect();
+    try {
+      // no cursor key exists for explicit issues
+      expect(await getCursor(c, "jira")).toBeNull();
+      // the issue was upserted
+      const n = await c.query("SELECT count(*)::int AS n FROM documents WHERE id = $1", [
+        "jira:issue:PAY-1",
+      ]);
+      expect(n.rows[0].n).toBe(1);
     } finally {
       await c.end();
     }

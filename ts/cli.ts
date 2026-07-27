@@ -86,11 +86,23 @@ const ingest = program.command("ingest").description("Ingest sources into the ca
 
 ingest
   .command("confluence")
-  .description("Ingest Confluence pages — fixture JSON, or live CQL sync from the cursor")
+  .description("Ingest Confluence — fixture, full CQL sync, or a selection (space/page/query)")
   .option("--fixture <path>", "JSON fixture (one item or a list); omit for live sync")
-  .option("--reconcile", "after sync, delete catalog docs removed at the source (full id listing)")
+  .option("--space <keys>", "one or more space keys, comma-separated")
+  .option("--page <ids>", "one or more page ids, comma-separated")
+  .option("--with-descendants", "with --page: also ingest each page's subtree")
+  .option("--query <cql>", "raw CQL predicate (advanced escape hatch)")
+  .option("--reconcile", "after a FULL sync, delete catalog docs removed at the source")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
+    const { parseConfluenceScopes } = await import("./connectors/scope.js");
+    let scopes: import("./connectors/scope.js").Scope[];
+    try {
+      scopes = parseConfluenceScopes(opts);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
     const { normalize } = await import("./ingest/confluence.js");
     if (opts.fixture) {
       await ingestDocs(
@@ -100,29 +112,33 @@ ingest
       return;
     }
     const { ConfluenceClient } = await import("./connectors/confluence.js");
-    const { getCursor } = await import("./store.js");
+    const { ingestConfluenceScope } = await import("./ingest/pipeline.js");
     const conf = liveClient(
       () => new ConfluenceClient(),
       "EIL_CONFLUENCE_URL and EIL_CONFLUENCE_TOKEN",
     );
-    const client = await connect();
-    const cursor = await getCursor(client, "confluence");
-    await client.end();
-    console.log(`live sync from cursor: ${cursor ?? "(beginning)"}`);
-    const docs = (async function* () {
-      for await (const page of conf.updatedSince(cursor)) yield normalize(page, opts.tenant);
-    })();
-    await ingestDocs("confluence", docs, (d) => d.updatedAt ?? null);
+    for (const scope of scopes) await ingestConfluenceScope(conf, scope, opts.tenant);
     if (opts.reconcile) await runReconcile("confluence", () => conf.listIds(), opts.tenant);
   });
 
 ingest
   .command("jira")
-  .description("Ingest Jira issues — fixture JSON, or live JQL sync from the cursor")
+  .description("Ingest Jira — fixture, full JQL sync, or a selection (project/issue/query)")
   .option("--fixture <path>", "JSON fixture (one item or a list); omit for live sync")
-  .option("--reconcile", "after sync, delete catalog docs removed at the source (full id listing)")
+  .option("--project <keys>", "one or more project keys, comma-separated")
+  .option("--issue <keys>", "one or more issue keys, comma-separated")
+  .option("--query <jql>", "raw JQL predicate (advanced escape hatch)")
+  .option("--reconcile", "after a FULL sync, delete catalog docs removed at the source")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
+    const { parseJiraScopes } = await import("./connectors/scope.js");
+    let scopes: import("./connectors/scope.js").Scope[];
+    try {
+      scopes = parseJiraScopes(opts);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
     const { normalize } = await import("./ingest/jira.js");
     if (opts.fixture) {
       await ingestDocs(
@@ -132,16 +148,9 @@ ingest
       return;
     }
     const { JiraClient } = await import("./connectors/jira.js");
-    const { getCursor } = await import("./store.js");
+    const { ingestJiraScope } = await import("./ingest/pipeline.js");
     const jira = liveClient(() => new JiraClient(), "EIL_JIRA_URL and EIL_JIRA_TOKEN");
-    const client = await connect();
-    const cursor = await getCursor(client, "jira");
-    await client.end();
-    console.log(`live sync from cursor: ${cursor ?? "(beginning)"}`);
-    const docs = (async function* () {
-      for await (const issue of jira.updatedSince(cursor)) yield normalize(issue, opts.tenant);
-    })();
-    await ingestDocs("jira", docs, (d) => d.updatedAt ?? null);
+    for (const scope of scopes) await ingestJiraScope(jira, scope, opts.tenant);
     if (opts.reconcile) await runReconcile("jira", () => jira.listIds(), opts.tenant);
   });
 
