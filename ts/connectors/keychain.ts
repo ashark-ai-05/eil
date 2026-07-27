@@ -139,15 +139,18 @@ public class EilCred {
   public static extern bool CredWrite(ref CREDENTIAL c, UInt32 f);
   [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   public static extern bool CredRead(string t, UInt32 ty, UInt32 f, out IntPtr c);
-  [DllImport("advapi32.dll", SetLastError=true)]
+  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   public static extern bool CredDelete(string t, UInt32 ty, UInt32 f);
   [DllImport("advapi32.dll")] public static extern void CredFree(IntPtr c);
 }
 "@`;
 
-/** account is validated to [A-Z0-9_] before reaching here, so it is safe to
+/** account is validated to [A-Z0-9_] before reaching here (guard enforces it), so it is safe to
  *  interpolate into the PowerShell string literal for the target name. */
 function psScript(op: "get" | "set" | "delete", account: string): string {
+  if (!/^[A-Z0-9_]+$/.test(account)) {
+    throw new Error(`invalid keychain account name: ${account}`);
+  }
   const target = `${SERVICE}:${account}`;
   if (op === "set") {
     return `${PS_PREAMBLE}

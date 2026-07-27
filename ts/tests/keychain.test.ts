@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { detectWsl, selectBackend } from "../connectors/keychain.js";
 import {
+  detectWsl,
   getSecret,
   memoryKeychain,
   secretToolKeychain,
   securityKeychain,
+  selectBackend,
   setSecret,
+  wincredKeychain,
 } from "../connectors/keychain.js";
 
 afterEach(() => {
@@ -125,8 +127,6 @@ describe("memory backend + top-level API", () => {
   });
 });
 
-import { wincredKeychain } from "../connectors/keychain.js";
-
 describe("Windows/WSL wincred backend", () => {
   it("invokes powershell.exe with an EncodedCommand and secret on stdin", () => {
     const { calls, runner } = recorder();
@@ -150,5 +150,10 @@ describe("Windows/WSL wincred backend", () => {
   it("get returns null when CredRead exits nonzero", () => {
     const kc = wincredKeychain(() => ({ status: 1, stdout: "" }));
     expect(kc.get("EIL_JIRA_TOKEN")).toBeNull();
+  });
+
+  it("rejects an account name that could break out of the script literal", () => {
+    const kc = wincredKeychain(() => ({ status: 0, stdout: "" }));
+    expect(() => kc.set('EIL_JIRA_TOKEN"; calc; #', "x")).toThrow(/invalid keychain account/);
   });
 });
