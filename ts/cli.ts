@@ -1,7 +1,7 @@
 /** The eil CLI — the only task runner. Cross-platform by construction. */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type pg from "pg";
 import type { CanonicalDoc } from "./contracts/models.js";
@@ -20,6 +20,50 @@ db.command("migrate")
     } finally {
       await client.end();
     }
+  });
+
+db.command("embedded")
+  .description(
+    "Run an embedded Postgres in the foreground — real PG from node_modules, no system install",
+  )
+  .option("--dir <dir>", "data directory", ".eil-pg")
+  .option("--port <port>", "port", "5433")
+  .action(async (opts) => {
+    let EmbeddedPostgres: any;
+    try {
+      const moduleName = "embedded-postgres"; // variable specifier: optional dep, resolved at runtime
+      EmbeddedPostgres = (await import(moduleName)).default;
+    } catch {
+      console.log(
+        "embedded-postgres is not installed. Add it with:\n  pnpm add -D embedded-postgres",
+      );
+      process.exit(1);
+    }
+    const port = Number(opts.port);
+    const epg = new EmbeddedPostgres({
+      databaseDir: opts.dir,
+      user: "eil",
+      password: "eil",
+      port,
+      persistent: true,
+    });
+    if (!existsSync(join(opts.dir, "PG_VERSION"))) await epg.initialise();
+    await epg.start();
+    const client = epg.getPgClient();
+    await client.connect();
+    const exists = await client.query("SELECT 1 FROM pg_database WHERE datname = 'eil'");
+    if (exists.rows.length === 0) await epg.createDatabase("eil");
+    await client.end();
+    console.log(`embedded Postgres running (data: ${opts.dir}, port: ${port})`);
+    console.log(`  export EIL_DATABASE_URL=postgresql://eil:eil@localhost:${port}/eil`);
+    console.log("press Ctrl+C to stop");
+    const stop = async () => {
+      await epg.stop();
+      process.exit(0);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    await new Promise(() => {}); // foreground until signalled
   });
 
 interface IngestOutcome {

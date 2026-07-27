@@ -7,3 +7,4 @@ dist/
 .env
 .remember/
 node_modules/
+.eil-pg/

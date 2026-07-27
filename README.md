@@ -62,7 +62,25 @@ pnpm test                       # 72 tests; DB suites use your local Postgres
 ```
 
 Non-default Postgres? Set `EIL_DATABASE_URL` (12-factor: all endpoints via
-env), e.g. `postgresql://user:pass@host:5432/eil`.
+env), e.g. `postgresql://user:pass@host:5432/eil`. Anything that speaks real
+Postgres is a drop-in: another local version, WSL2 apt, an org PG server, or
+managed offerings (RDS, Neon, Supabase, ...).
+
+### No admin rights? Embedded Postgres (experimental, Linux/WSL2)
+
+If you can't install Postgres at all, `eil db embedded` runs real PG binaries
+from `node_modules` as your user — no system install, no elevation:
+
+```sh
+pnpm add -D embedded-postgres@17     # beta-only upstream; not a default dep
+pnpm eil db embedded                 # boots PG in the foreground, prints the
+                                     # EIL_DATABASE_URL export to use
+```
+
+Caveats: the upstream package has no stable release, and its **darwin-arm64
+binaries are currently broken** (missing ICU dylib) — treat this as a
+Linux/WSL2 fallback only. On macOS use brew; on WSL2 prefer apt when
+permitted. Data persists in `.eil-pg/` (gitignored).
 
 ## Integrating with existing MCP setups
 
