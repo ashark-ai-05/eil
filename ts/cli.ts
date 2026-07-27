@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type pg from "pg";
-import type { CanonicalDoc } from "./contracts/models.js";
 import { connect, migrate } from "./db.js";
+import { ingestDocs, runReconcile } from "./ingest/pipeline.js";
 import { promptHidden } from "./prompt.js";
 
 const program = new Command("eil").description("Enterprise Intelligence Layer CLI");
@@ -67,78 +67,9 @@ db.command("embedded")
     await new Promise(() => {}); // foreground until signalled
   });
 
-interface IngestOutcome {
-  seen: number;
-  changed: number;
-  failed: number;
-  target: string | null;
-}
-
-async function ingestDocs(
-  source: string,
-  docs: AsyncIterable<CanonicalDoc> | Iterable<CanonicalDoc>,
-  cursorOf?: (doc: CanonicalDoc) => string | null,
-): Promise<void> {
-  const { setCursor, upsertDocument } = await import("./store.js");
-  const client = await connect();
-  const outcome: IngestOutcome = { seen: 0, changed: 0, failed: 0, target: null };
-  let latest: string | null = null;
-  let retryFrom: string | null = null; // earliest failed timestamp — cursor never passes it
-  try {
-    for await (const doc of docs) {
-      outcome.seen += 1;
-      const value = cursorOf ? cursorOf(doc) : null;
-      try {
-        // upsertDocument owns its transaction — per-doc commit, so one bad
-        // record can't starve the batch.
-        if (await upsertDocument(client, doc)) {
-          outcome.changed += 1;
-          console.log(`  ~ ${doc.id}`);
-        }
-      } catch (err: any) {
-        outcome.failed += 1;
-        console.log(`  ! failed (${err.constructor?.name ?? "Error"}): ${err.message}`);
-        if (value && (retryFrom === null || value < retryFrom)) retryFrom = value;
-        continue;
-      }
-      if (value && (latest === null || value > latest)) latest = value;
-    }
-    // Advance to the newest success, but never beyond the earliest failure.
-    outcome.target = retryFrom ?? latest;
-    if (outcome.target) await setCursor(client, source, outcome.target);
-  } finally {
-    await client.end();
-  }
-  let summary = `${outcome.seen} seen, ${outcome.changed} changed`;
-  if (outcome.failed > 0)
-    summary += `, ${outcome.failed} FAILED (cursor held at ${outcome.target})`;
-  else if (latest) summary += `, cursor -> ${latest}`;
-  console.log(summary);
-}
-
 function fixturePayloads(path: string): any[] {
   const payloads = JSON.parse(readFileSync(path, "utf-8"));
   return Array.isArray(payloads) ? payloads : [payloads];
-}
-
-/** Full-listing reconcile (flow K1 deletions): fetch the complete id list
- * from the source and tombstone catalog docs that no longer exist there. */
-async function runReconcile(
-  source: string,
-  listIds: () => Promise<string[]>,
-  tenant: string,
-): Promise<void> {
-  console.log(`reconcile: fetching full ${source} id listing...`);
-  const present = await listIds();
-  const { reconcile } = await import("./store.js");
-  const client = await connect();
-  try {
-    const removed = await reconcile(client, source, present, tenant);
-    for (const id of removed) console.log(`  - ${id} (deleted at source)`);
-    console.log(`reconcile: ${present.length} present at source, ${removed.length} removed`);
-  } finally {
-    await client.end();
-  }
 }
 
 /** Build a connector client with a clean one-line error when env is missing —
@@ -156,11 +87,23 @@ const ingest = program.command("ingest").description("Ingest sources into the ca
 
 ingest
   .command("confluence")
-  .description("Ingest Confluence pages — fixture JSON, or live CQL sync from the cursor")
+  .description("Ingest Confluence — fixture, full CQL sync, or a selection (space/page/query)")
   .option("--fixture <path>", "JSON fixture (one item or a list); omit for live sync")
-  .option("--reconcile", "after sync, delete catalog docs removed at the source (full id listing)")
+  .option("--space <keys>", "one or more space keys, comma-separated")
+  .option("--page <ids>", "one or more page ids, comma-separated")
+  .option("--with-descendants", "with --page: also ingest each page's subtree")
+  .option("--query <cql>", "raw CQL predicate (advanced escape hatch)")
+  .option("--reconcile", "after a FULL sync, delete catalog docs removed at the source")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
+    const { parseConfluenceScopes } = await import("./connectors/scope.js");
+    let scopes: import("./connectors/scope.js").Scope[];
+    try {
+      scopes = parseConfluenceScopes(opts);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
     const { normalize } = await import("./ingest/confluence.js");
     if (opts.fixture) {
       await ingestDocs(
@@ -170,29 +113,33 @@ ingest
       return;
     }
     const { ConfluenceClient } = await import("./connectors/confluence.js");
-    const { getCursor } = await import("./store.js");
+    const { ingestConfluenceScope } = await import("./ingest/pipeline.js");
     const conf = liveClient(
       () => new ConfluenceClient(),
       "EIL_CONFLUENCE_URL and EIL_CONFLUENCE_TOKEN",
     );
-    const client = await connect();
-    const cursor = await getCursor(client, "confluence");
-    await client.end();
-    console.log(`live sync from cursor: ${cursor ?? "(beginning)"}`);
-    const docs = (async function* () {
-      for await (const page of conf.updatedSince(cursor)) yield normalize(page, opts.tenant);
-    })();
-    await ingestDocs("confluence", docs, (d) => d.updatedAt ?? null);
+    for (const scope of scopes) await ingestConfluenceScope(conf, scope, opts.tenant);
     if (opts.reconcile) await runReconcile("confluence", () => conf.listIds(), opts.tenant);
   });
 
 ingest
   .command("jira")
-  .description("Ingest Jira issues — fixture JSON, or live JQL sync from the cursor")
+  .description("Ingest Jira — fixture, full JQL sync, or a selection (project/issue/query)")
   .option("--fixture <path>", "JSON fixture (one item or a list); omit for live sync")
-  .option("--reconcile", "after sync, delete catalog docs removed at the source (full id listing)")
+  .option("--project <keys>", "one or more project keys, comma-separated")
+  .option("--issue <keys>", "one or more issue keys, comma-separated")
+  .option("--query <jql>", "raw JQL predicate (advanced escape hatch)")
+  .option("--reconcile", "after a FULL sync, delete catalog docs removed at the source")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
+    const { parseJiraScopes } = await import("./connectors/scope.js");
+    let scopes: import("./connectors/scope.js").Scope[];
+    try {
+      scopes = parseJiraScopes(opts);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
     const { normalize } = await import("./ingest/jira.js");
     if (opts.fixture) {
       await ingestDocs(
@@ -202,16 +149,9 @@ ingest
       return;
     }
     const { JiraClient } = await import("./connectors/jira.js");
-    const { getCursor } = await import("./store.js");
+    const { ingestJiraScope } = await import("./ingest/pipeline.js");
     const jira = liveClient(() => new JiraClient(), "EIL_JIRA_URL and EIL_JIRA_TOKEN");
-    const client = await connect();
-    const cursor = await getCursor(client, "jira");
-    await client.end();
-    console.log(`live sync from cursor: ${cursor ?? "(beginning)"}`);
-    const docs = (async function* () {
-      for await (const issue of jira.updatedSince(cursor)) yield normalize(issue, opts.tenant);
-    })();
-    await ingestDocs("jira", docs, (d) => d.updatedAt ?? null);
+    for (const scope of scopes) await ingestJiraScope(jira, scope, opts.tenant);
     if (opts.reconcile) await runReconcile("jira", () => jira.listIds(), opts.tenant);
   });
 

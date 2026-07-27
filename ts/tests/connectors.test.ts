@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { Fetcher } from "../connectors/auth.js";
 import { BitbucketSearchClient } from "../connectors/bitbucket.js";
-import { ConfluenceClient, cqlTs } from "../connectors/confluence.js";
+import { ConfluenceClient, PAGE_SIZE, cqlTs } from "../connectors/confluence.js";
 import { ElkClient } from "../connectors/elk.js";
 import { JiraClient } from "../connectors/jira.js";
 import { normalize as normalizePage } from "../ingest/confluence.js";
@@ -49,6 +49,70 @@ describe("confluence", () => {
   });
 });
 
+describe("confluence scoped", () => {
+  const apiPage = (id: string) => ({
+    id,
+    title: `p${id}`,
+    space: { name: "S" },
+    ancestors: [],
+    version: { when: "2026-06-03T10:00:00+00:00", by: { displayName: "a" } },
+    _links: { webui: `/pages/${id}` },
+    body: { storage: { value: "<p>x</p>" } },
+  });
+
+  it("with no scope builds the exact legacy CQL (regression)", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [], size: 0 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null)) {
+      /* drain */
+    }
+    expect(seen).toBe("type=page order by lastmodified asc");
+  });
+
+  it("injects a space predicate", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [], size: 0 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null, 'space = "ENG"')) {
+      /* drain */
+    }
+    expect(seen).toBe('type=page and space = "ENG" order by lastmodified asc');
+  });
+
+  it("descendants queries ancestor = id", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [apiPage("9")], size: 1 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    const out = [];
+    for await (const p of c.descendants("100")) {
+      out.push(p);
+    }
+    expect(seen).toBe("ancestor = 100 order by lastmodified asc");
+    expect(out).toHaveLength(1);
+  });
+
+  it("scoped listIds carries the predicate", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [], size: 0 });
+    };
+    const c = new ConfluenceClient("https://x", "t", fetcher);
+    await c.listIds('space = "ENG"');
+    expect(seen).toBe('type=page and space = "ENG" order by id asc');
+  });
+});
+
 describe("jira", () => {
   it("paginates and maps issues", async () => {
     const makeIssue = (n: number) => ({
@@ -78,6 +142,49 @@ describe("jira", () => {
     const doc = normalizeIssue(issues[0]!);
     expect(doc.id).toBe("jira:issue:PAY-1");
     expect(doc.url).toBe("https://jira.example.com/browse/PAY-1");
+  });
+});
+
+describe("jira scoped", () => {
+  it("with no scope builds the exact legacy JQL (regression)", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("jql") ?? "";
+      return jsonResponse({ issues: [], total: 0 });
+    };
+    const c = new JiraClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null)) {
+      /* drain */
+    }
+    expect(seen).toBe("order by updated asc");
+  });
+
+  it("injects a project predicate and composes with the cursor", async () => {
+    const seen: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      seen.push(new URL(String(url)).searchParams.get("jql") ?? "");
+      return jsonResponse({ issues: [], total: 0 });
+    };
+    const c = new JiraClient("https://x", "t", fetcher);
+    for await (const _ of c.updatedSince(null, 'project = "PAY"')) {
+      /* drain */
+    }
+    for await (const _ of c.updatedSince("2026-06-01T00:00:00+00:00", 'project = "PAY"')) {
+      /* drain */
+    }
+    expect(seen[0]).toBe('project = "PAY" order by updated asc');
+    expect(seen[1]).toBe('project = "PAY" and updated >= "2026-06-01 00:00" order by updated asc');
+  });
+
+  it("scoped listIds carries the predicate", async () => {
+    let seen = "";
+    const fetcher: Fetcher = async (url) => {
+      seen = new URL(String(url)).searchParams.get("jql") ?? "";
+      return jsonResponse({ issues: [], total: 0 });
+    };
+    const c = new JiraClient("https://x", "t", fetcher);
+    await c.listIds('project = "PAY"');
+    expect(seen).toBe('project = "PAY" order by key asc');
   });
 });
 
