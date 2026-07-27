@@ -74,7 +74,7 @@ describe("HttpEmbedder", () => {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll } from "vitest";
+import { afterAll, beforeAll, vi } from "vitest";
 import { backfill } from "../embed/backfill.js";
 import type { Embedder } from "../embed/index.js";
 
@@ -167,9 +167,59 @@ describe("vec arm fusion", () => {
     }
   });
 
-  it("is FTS-only (no throw) when embeddings are absent or provider errors", async () => {
+  it("excludes an ACL-restricted doc from the vec arm even when it is the cosine-closest chunk", async () => {
+    const { connect } = await import("../db.js");
+    const { upsertDocument } = await import("../store.js");
+    const { searchDocs } = await import("../search.js");
+    const c = await connect();
+    try {
+      // A doc that shares NO query words and, once embedded, is the exact
+      // cosine match for the query — the strongest possible temptation for
+      // the vec arm to leak it if visibleSql were ever dropped or bypassed.
+      await upsertDocument(c, {
+        id: "jira:issue:PAY-3",
+        tenant: "default",
+        source: "jira",
+        title: "Payments incident",
+        hierarchy: [],
+        aclGroups: [],
+        qualityTier: "authored",
+        body: "Card processor rejected transactions during the incident.",
+        links: [],
+      } as any);
+      // ingested_by != localViewer().principal AND acl_groups shares nothing
+      // with localViewer().groups: fail-closed on both branches of visibleSql.
+      await c.query(
+        "UPDATE documents SET ingested_by = 'mallory-ingester'," +
+          " acl_groups = '[\"restricted-group\"]'::jsonb WHERE id = 'jira:issue:PAY-3'",
+      );
+      // Stub: query "www" -> [1,0,0]; PAY-3's chunk -> [1,0,0] (exact match,
+      // score 1); every other chunk -> [0,1,0] (orthogonal, score 0).
+      const stubEmbed: Embedder = {
+        id: "stub:v3",
+        embed: async (texts) =>
+          texts.map((t) =>
+            t.includes("Card processor") || t === "www"
+              ? Float32Array.from([1, 0, 0])
+              : Float32Array.from([0, 1, 0]),
+          ),
+      };
+      const { backfill } = await import("../embed/backfill.js");
+      await backfill(c, stubEmbed, { reembed: true });
+      const res = await searchDocs(c, localViewer(), "www", 8, stubEmbed);
+      const ids = (res.results as any[]).map((r: any) => r.id);
+      // Fail-closed proof: PAY-3 is the cosine-closest chunk in the whole
+      // corpus yet must never appear, because localViewer() can't see it.
+      expect(ids).not.toContain("jira:issue:PAY-3");
+    } finally {
+      await c.end();
+    }
+  });
+
+  it("is FTS-only (no throw) when the embed provider errors", async () => {
     const { connect } = await import("../db.js");
     const { searchDocs } = await import("../search.js");
+    const { backfill } = await import("../embed/backfill.js");
     const throwing: Embedder = {
       id: "boom",
       embed: async () => {
@@ -178,9 +228,21 @@ describe("vec arm fusion", () => {
     };
     const c = await connect();
     try {
-      // still returns FTS results for a lexical query without throwing
+      // Self-contained: guarantee at least one embedded chunk exists so the
+      // vec arm's "nothing embedded" guard passes and `throwing.embed()` is
+      // actually invoked. Without this, the test could pass vacuously via
+      // the empty-embeddings early return, never reaching the catch path —
+      // e.g. if run in isolation before any other test seeds embeddings.
+      await backfill(c, stub, {});
+      const embedded = await c.query("SELECT 1 FROM chunks WHERE embedding IS NOT NULL LIMIT 1");
+      expect(embedded.rows.length).toBeGreaterThan(0); // sanity: guard will pass
+
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const res = await searchDocs(c, localViewer(), "authenticate", 8, throwing);
       expect(Array.isArray(res.results as any)).toBe(true);
+      // Proves the catch path (not the guard-skip path) actually ran.
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("vec arm skipped"));
+      errSpy.mockRestore();
     } finally {
       await c.end();
     }
