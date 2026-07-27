@@ -58,7 +58,7 @@ pnpm eil ingest jira --fixture tests/fixtures/jira_issue.json
 pnpm eil search "how do payment retries work"
 pnpm eil search "PAY-981"      # entity route: catalog + link graph, zero search
 pnpm eil ingest obsidian --vault ~/path/to/vault   # your notes, curated tier
-pnpm test                       # 86 tests; DB suites use your local Postgres
+pnpm test                       # 107 tests; DB suites use your local Postgres
 ```
 
 Non-default Postgres? Set `EIL_DATABASE_URL` (12-factor: all endpoints via
@@ -199,6 +199,32 @@ and tombstone catalog docs that no longer exist there. It's a heavier call, so
 run it periodically rather than every sync. (Obsidian reconciles automatically:
 the vault walk already *is* a full listing.)
 
+### Storing tokens in the OS keychain (no env vars)
+
+Instead of exporting `EIL_<PREFIX>_TOKEN`, store each PAT in your operating
+system's credential store once:
+
+```sh
+pnpm eil auth login jira        # hidden prompt; stored in the OS keychain
+pnpm eil auth status            # shows, per source, whether the token resolves
+                                # from keychain / env / missing — never prints it
+pnpm eil auth logout jira       # remove it
+```
+
+Resolution is **keychain-first, env-var fallback**: a token in the keychain
+wins; `EIL_<PREFIX>_TOKEN` is used only when the keychain has no entry (so CI
+and scripts keep working). Backends, no extra installs:
+
+| Platform | Store |
+|---|---|
+| macOS | Keychain (`security`) |
+| Windows | Credential Manager (`powershell.exe` + Win32 CredMan) |
+| WSL2 | **bridges to Windows Credential Manager** — one store shared with the host |
+| Linux | libsecret (`secret-tool`; `sudo apt install libsecret-tools`) |
+
+If no backend is available, `auth login` says so and you fall back to the env
+var. `EIL_KEYCHAIN_BACKEND` can force a backend if detection guesses wrong.
+
 ## Testing on the work machine — step by step
 
 Windows work machine → do everything inside **WSL2** (native Windows is not a
@@ -233,7 +259,7 @@ git clone eil.bundle eil && cd eil && git remote remove origin
 ```sh
 pnpm install
 pnpm eil db migrate
-pnpm test                       # 86 tests; DB suites run against your local PG
+pnpm test                       # 107 tests; DB suites run against your local PG
 pnpm eil ingest confluence --fixture tests/fixtures/confluence_page.json
 pnpm eil ingest jira --fixture tests/fixtures/jira_issue.json
 pnpm eil search "PAY-981"       # entity route + link graph must work
@@ -268,6 +294,9 @@ export EIL_CONFLUENCE_TOKEN=...
 export EIL_BITBUCKET_URL=https://bitbucket.yourorg.internal   # for search_code
 export EIL_BITBUCKET_TOKEN=...
 ```
+
+Prefer not to keep tokens in your shell environment? Store them in the OS
+keychain instead — `pnpm eil auth login jira` (etc.) — and skip the `export`s.
 
 ### 6. First live sync — seed the cursor first
 
@@ -373,5 +402,6 @@ which is how the TS port was verified.
 - [x] Metrics schema + views + eval trend + HTML report + Grafana provisioning
 - [x] Data-trust audit: integrity invariants (CI-gated) + live drift sampling
 - [x] Zero-install PGlite backend + embedded-postgres no-admin concurrency tier
+- [x] OS keychain auth: keychain-first token resolution (macOS/Windows/WSL2/libsecret) + `eil auth`
 - [ ] Golden-query log growth from real usage (`docs/golden-queries.md`)
 - [ ] Per-user tokens + HTTP MCP transport (phase 2 — the kube rollout gate)
