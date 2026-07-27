@@ -7,22 +7,22 @@ token-issuer. Tool contracts do not change across that move.
 
 from __future__ import annotations
 
-import getpass
 import json
 
 from mcp.server.fastmcp import FastMCP
 
 from eil import db, search
+from eil.search import Viewer
 
 mcp = FastMCP("eil-knowledge")
-_PRINCIPAL = getpass.getuser()
+_VIEWER = Viewer.local()
 
 
 def _run(tool: str, args: dict, fn) -> str:
     with db.connect() as conn:
         result = fn(conn)
         count = len(result.get("results", result.get("edges", []))) if isinstance(result, dict) else 0
-        search.audit(conn, _PRINCIPAL, tool, args, count)
+        search.audit(conn, _VIEWER.principal, tool, args, count)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -31,7 +31,9 @@ def search_docs(query: str, limit: int = 8) -> str:
     """Search indexed org knowledge (Confluence, Jira, notes). Returns compact
     results: ids, titles, snippets. Use get_doc(id) to read a full document.
     Ticket keys (e.g. PAY-981) are resolved directly with their linked context."""
-    return _run("search_docs", {"query": query}, lambda c: search.search_docs(c, query, limit))
+    return _run(
+        "search_docs", {"query": query}, lambda c: search.search_docs(c, _VIEWER, query, limit)
+    )
 
 
 @mcp.tool()
@@ -40,7 +42,7 @@ def get_doc(id: str, section: int = 0) -> str:
     results). Large documents are windowed; pass section=1,2,... for more."""
     return _run(
         "get_doc", {"id": id, "section": section},
-        lambda c: search.get_doc(c, id, section) or {"error": f"not found: {id}"},
+        lambda c: search.get_doc(c, _VIEWER, id, section) or {"error": f"not found: {id}"},
     )
 
 
@@ -63,7 +65,7 @@ def search_code(query: str, limit: int = 10) -> str:
 def expand(id: str) -> str:
     """Link-graph neighborhood of a document: tickets, pages, and notes that
     reference or are referenced by it. Zero-cost way to gather related context."""
-    return _run("expand", {"id": id}, lambda c: search.expand(c, id))
+    return _run("expand", {"id": id}, lambda c: search.expand(c, _VIEWER, id))
 
 
 def main() -> None:

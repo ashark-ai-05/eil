@@ -98,6 +98,17 @@ def ingest_jira(fixture: FixtureOpt = None, tenant: str = "default") -> None:
             cursor_of=lambda p: p["fields"].get("updated"))
 
 
+@ingest_app.command("obsidian")
+def ingest_obsidian(
+    vault: Annotated[Path, typer.Option(exists=True, file_okay=False, help="Vault root directory")],
+    tenant: str = "default",
+) -> None:
+    """Ingest an Obsidian vault (markdown files; curated quality tier)."""
+    from eil.ingest.obsidian import walk_vault
+
+    _ingest("obsidian", lambda d, tenant: d, walk_vault(vault, tenant), tenant)
+
+
 @app.command()
 def serve() -> None:
     """Run the MCP server on stdio (wire this into Amp / Claude Code)."""
@@ -112,8 +123,11 @@ def search(query: str, limit: int = 8) -> None:
     from eil import db
     from eil import search as s
 
+    viewer = s.Viewer.local()
     with db.connect() as conn:
-        typer.echo(json.dumps(s.search_docs(conn, query, limit), indent=2, ensure_ascii=False))
+        typer.echo(
+            json.dumps(s.search_docs(conn, viewer, query, limit), indent=2, ensure_ascii=False)
+        )
 
 
 if __name__ == "__main__":
