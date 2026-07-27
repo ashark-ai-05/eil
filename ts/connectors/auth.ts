@@ -6,6 +6,8 @@
  * credentials — a PAT inherits your permissions.
  */
 
+import { getSecret } from "./keychain.js";
+
 export type Fetcher = typeof fetch;
 
 export interface DcClient {
@@ -21,7 +23,12 @@ export function makeClient(
   fetcher: Fetcher = fetch,
 ): DcClient {
   const url = (baseUrl ?? required(`EIL_${prefix}_URL`)).replace(/\/+$/, "");
-  const tok = token ?? required(`EIL_${prefix}_TOKEN`);
+  const tok = token ?? getSecret(`EIL_${prefix}_TOKEN`) ?? process.env[`EIL_${prefix}_TOKEN`];
+  if (!tok) {
+    throw new Error(
+      `no ${prefix} token — run \`eil auth login ${prefix.toLowerCase()}\` or set EIL_${prefix}_TOKEN`,
+    );
+  }
   const user = process.env[`EIL_${prefix}_USER`];
   const headers = user
     ? { Authorization: `Basic ${Buffer.from(`${user}:${tok}`).toString("base64")}` }
