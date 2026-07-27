@@ -15,8 +15,7 @@ import os
 from collections.abc import Iterator
 from typing import Any
 
-import httpx
-
+from eil.connectors.auth import make_client
 from eil.connectors.htmlmd import html_to_markdown
 
 PAGE_SIZE = 50
@@ -30,12 +29,7 @@ def cql_ts(iso_cursor: str) -> str:
 class ConfluenceClient:
     def __init__(self, base_url: str | None = None, token: str | None = None) -> None:
         self.base_url = (base_url or os.environ["EIL_CONFLUENCE_URL"]).rstrip("/")
-        token = token or os.environ["EIL_CONFLUENCE_TOKEN"]
-        self.http = httpx.Client(
-            base_url=self.base_url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
-        )
+        self.http = make_client("CONFLUENCE", self.base_url, token)
 
     def updated_since(self, cursor: str | None) -> Iterator[dict[str, Any]]:
         """Yield page dicts for content modified since the cursor (ISO date)."""

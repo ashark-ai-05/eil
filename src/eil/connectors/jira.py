@@ -15,8 +15,7 @@ import os
 from collections.abc import Iterator
 from typing import Any
 
-import httpx
-
+from eil.connectors.auth import make_client
 from eil.connectors.confluence import cql_ts
 
 PAGE_SIZE = 50
@@ -26,12 +25,7 @@ FIELDS = "summary,description,status,issuetype,project,reporter,created,updated,
 class JiraClient:
     def __init__(self, base_url: str | None = None, token: str | None = None) -> None:
         self.base_url = (base_url or os.environ["EIL_JIRA_URL"]).rstrip("/")
-        token = token or os.environ["EIL_JIRA_TOKEN"]
-        self.http = httpx.Client(
-            base_url=self.base_url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
-        )
+        self.http = make_client("JIRA", self.base_url, token)
 
     def updated_since(self, cursor: str | None) -> Iterator[dict[str, Any]]:
         jql = "order by updated asc"
