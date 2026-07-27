@@ -67,10 +67,11 @@ export function securityKeychain(run: Runner): Keychain {
     available: () => run("security", ["help"]).status === 0,
     get: (a) => {
       const r = run("security", ["find-generic-password", "-a", a, "-s", SERVICE, "-w"]);
-      return r.status === 0 ? r.stdout.replace(/\n$/, "") : null;
+      return r.status === 0 && r.stdout !== "" ? r.stdout.replace(/\n$/, "") : null;
     },
     set: (a, s) => {
-      run("security", ["add-generic-password", "-a", a, "-s", SERVICE, "-U", "-w", s]);
+      const r = run("security", ["add-generic-password", "-a", a, "-s", SERVICE, "-U", "-w", s]);
+      if (r.status !== 0) throw new Error(`keychain write failed for ${a}`);
     },
     delete: (a) => {
       run("security", ["delete-generic-password", "-a", a, "-s", SERVICE]);
@@ -87,7 +88,12 @@ export function secretToolKeychain(run: Runner): Keychain {
       return r.status === 0 && r.stdout !== "" ? r.stdout.replace(/\n$/, "") : null;
     },
     set: (a, s) => {
-      run("secret-tool", ["store", `--label=${SERVICE} ${a}`, "service", SERVICE, "account", a], s);
+      const r = run(
+        "secret-tool",
+        ["store", `--label=${SERVICE} ${a}`, "service", SERVICE, "account", a],
+        s,
+      );
+      if (r.status !== 0) throw new Error(`keychain write failed for ${a}`);
     },
     delete: (a) => {
       run("secret-tool", ["clear", "service", SERVICE, "account", a]);

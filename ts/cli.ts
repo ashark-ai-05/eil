@@ -357,7 +357,12 @@ auth
       console.log("no token provided");
       process.exit(1);
     }
-    setSecret(account, token);
+    try {
+      setSecret(account, token);
+    } catch (err: any) {
+      console.log(`could not store ${account}: ${err.message}`);
+      process.exit(1);
+    }
     console.log(`stored ${account} in the ${backend.name} keychain`);
   });
 
@@ -382,7 +387,12 @@ auth
   .action(async (source) => {
     const account = await requireAccount(source);
     const { deleteSecret } = await import("./connectors/keychain.js");
-    deleteSecret(account);
+    try {
+      deleteSecret(account);
+    } catch (err: any) {
+      console.log(`could not remove ${account}: ${err.message}`);
+      process.exit(1);
+    }
     console.log(`removed ${account} from the keychain`);
   });
 

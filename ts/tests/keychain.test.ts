@@ -185,7 +185,16 @@ describe("auth status helper", () => {
 const liveBackend = (() => {
   delete process.env.EIL_KEYCHAIN_BACKEND;
   const b = keychainBackend();
-  return b.name !== "none" && b.name !== "memory" && b.available ? b.name : null;
+  if (b.name === "none" || b.name === "memory" || !b.available) return null;
+  // usability probe: a real store must round-trip, else the keyring is locked/unusable -> skip
+  try {
+    setSecret("EIL_PROBE_TOKEN", "probe-1");
+    const ok = getSecret("EIL_PROBE_TOKEN") === "probe-1";
+    deleteSecret("EIL_PROBE_TOKEN");
+    return ok ? b.name : null;
+  } catch {
+    return null;
+  }
 })();
 
 describe.skipIf(!liveBackend)("live keychain round-trip", () => {

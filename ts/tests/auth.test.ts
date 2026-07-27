@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeClient } from "../connectors/auth.js";
 import { deleteSecret, setSecret } from "../connectors/keychain.js";
 
@@ -9,6 +9,14 @@ afterEach(() => {
 });
 
 describe("DC auth factory", () => {
+  beforeEach(() => {
+    process.env.EIL_KEYCHAIN_BACKEND = "memory";
+  });
+
+  afterEach(() => {
+    delete process.env.EIL_KEYCHAIN_BACKEND;
+  });
+
   it("defaults to Bearer PAT", () => {
     delete process.env.EIL_JIRA_USER;
     const client = makeClient("JIRA", "https://jira.example.com", "pat-123");
