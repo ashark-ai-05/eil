@@ -70,3 +70,57 @@ describe("HttpEmbedder", () => {
     delete process.env.EIL_EMBED_MODEL;
   });
 });
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll } from "vitest";
+import { backfill } from "../embed/backfill.js";
+import type { Embedder } from "../embed/index.js";
+
+const dir = mkdtempSync(join(tmpdir(), "eil-embed-"));
+beforeAll(async () => {
+  process.env.EIL_DATABASE_URL = `pglite://${dir}`;
+  const { connect, migrate } = await import("../db.js");
+  const { upsertDocument } = await import("../store.js");
+  const c = await connect();
+  await migrate(c);
+  await upsertDocument(c, {
+    id: "jira:issue:PAY-1",
+    tenant: "default",
+    source: "jira",
+    title: "Login fails",
+    hierarchy: [],
+    aclGroups: [],
+    qualityTier: "authored",
+    body: "Users cannot authenticate after the deploy.",
+    links: [],
+  } as any);
+  await c.end();
+}, 30000);
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+const stub: Embedder = {
+  id: "stub:v1",
+  embed: async (t) => t.map(() => Float32Array.from([1, 0, 0])),
+};
+
+describe("backfill", () => {
+  it("embeds NULL chunks and is embed-once", async () => {
+    const { connect } = await import("../db.js");
+    const c = await connect();
+    try {
+      const first = await backfill(c, stub, {});
+      expect(first.embedded).toBeGreaterThan(0);
+      const row = await c.query(
+        "SELECT embedding, embed_model FROM chunks WHERE doc_id = 'jira:issue:PAY-1' ORDER BY seq LIMIT 1",
+      );
+      expect(row.rows[0].embedding).not.toBeNull();
+      expect(row.rows[0].embed_model).toBe("stub:v1");
+      const second = await backfill(c, stub, {});
+      expect(second.embedded).toBe(0); // already current
+    } finally {
+      await c.end();
+    }
+  });
+});
