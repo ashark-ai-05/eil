@@ -58,7 +58,7 @@ pnpm eil ingest jira --fixture tests/fixtures/jira_issue.json
 pnpm eil search "how do payment retries work"
 pnpm eil search "PAY-981"      # entity route: catalog + link graph, zero search
 pnpm eil ingest obsidian --vault ~/path/to/vault   # your notes, curated tier
-pnpm test                       # 72 tests; DB suites use your local Postgres
+pnpm test                       # 86 tests; DB suites use your local Postgres
 ```
 
 Non-default Postgres? Set `EIL_DATABASE_URL` (12-factor: all endpoints via
@@ -193,6 +193,12 @@ on older instances). Then `pnpm eil ingest confluence` (no --fixture) syncs
 incrementally from the stored cursor. You can only ingest what you can read —
 service accounts exist only on kube, after the ACL gate.
 
+**Deletions.** Cursor sync sees updates, not removals. Add `--reconcile` to a
+run (`pnpm eil ingest jira --reconcile`) to fetch the source's full id listing
+and tombstone catalog docs that no longer exist there. It's a heavier call, so
+run it periodically rather than every sync. (Obsidian reconciles automatically:
+the vault walk already *is* a full listing.)
+
 ## Testing on the work machine — step by step
 
 Windows work machine → do everything inside **WSL2** (native Windows is not a
@@ -227,7 +233,7 @@ git clone eil.bundle eil && cd eil && git remote remove origin
 ```sh
 pnpm install
 pnpm eil db migrate
-pnpm test                       # 72 tests; DB suites run against your local PG
+pnpm test                       # 86 tests; DB suites run against your local PG
 pnpm eil ingest confluence --fixture tests/fixtures/confluence_page.json
 pnpm eil ingest jira --fixture tests/fixtures/jira_issue.json
 pnpm eil search "PAY-981"       # entity route + link graph must work
@@ -284,6 +290,7 @@ unchanged content is a no-op.
 ```sh
 pnpm eil search "<something you know is on the wiki>"
 pnpm eil search "<a real ticket key>"          # entity route + linked context
+pnpm eil audit --drift 20                      # sync faithful? sample + live-compare
 ```
 
 Spot-check conversion quality: `get_doc` a page you know well and compare with
@@ -307,6 +314,32 @@ Log real queries in `docs/golden-queries.md` (query → expected doc id) as you
 use it; run `pnpm eil eval` to baseline recall on real data; `pnpm eil report`
 shows adoption, zero-result rate, and the two-phase ratio — that data schedules
 everything that gets built next (Zoekt, embeddings, nothing).
+
+## Data-trust auditing
+
+A cache of org knowledge is only useful if you can trust it's faithful and
+complete. `pnpm eil audit` answers that in two independent ways:
+
+```sh
+pnpm eil audit                  # integrity invariants only (cheap, offline)
+pnpm eil audit --strict         # same, but exit non-zero if any invariant fails
+pnpm eil audit --drift 20       # also re-fetch 20 sampled docs live and compare
+```
+
+- **Integrity** — structural invariants a healthy catalog must satisfy, all
+  cheap SQL over the facts already stored: no chunkless (unsearchable) docs, no
+  unowned (ACL-invisible) docs, no FTS index holes, plus soft counters for
+  empty bodies and HTML-conversion residue, and a stale-cursor tripwire
+  (connector rot > 24h). `--strict` makes the hard invariants a CI gate — the
+  pipeline runs `eil audit --strict` and asserts `"ok": true` on every push.
+- **Drift** — the only check internal consistency can't give you: `--drift <n>`
+  samples N Confluence/Jira docs, re-fetches each **live with your personal
+  credentials**, and compares content hashes. It reports `drifted` (catalog
+  differs from source), `gone` (a 404 — a deletion `--reconcile` hasn't caught
+  yet), and `skipped` (source env not configured). Silent sync bugs surface
+  here and nowhere else.
+
+Output is a single JSON report — pipe it into monitoring or read it by eye.
 
 ## Observability
 
@@ -338,5 +371,7 @@ which is how the TS port was verified.
 - [x] Live connectors (cursor CQL/JQL sync), Obsidian, Bitbucket search v0, ELK logs
 - [x] LLM provider layer: maas | amp | copilot; usage in `llm_calls`
 - [x] Metrics schema + views + eval trend + HTML report + Grafana provisioning
+- [x] Data-trust audit: integrity invariants (CI-gated) + live drift sampling
+- [x] Zero-install PGlite backend + embedded-postgres no-admin concurrency tier
 - [ ] Golden-query log growth from real usage (`docs/golden-queries.md`)
 - [ ] Per-user tokens + HTTP MCP transport (phase 2 — the kube rollout gate)
