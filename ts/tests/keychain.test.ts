@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  deleteSecret,
   detectWsl,
   getSecret,
+  keychainBackend,
   memoryKeychain,
   secretToolKeychain,
   securityKeychain,
@@ -175,5 +177,22 @@ describe("auth status helper", () => {
     expect(resolvedSource("EIL_JIRA_TOKEN", {}, kc)).toBe("keychain");
     expect(resolvedSource("EIL_CONFLUENCE_TOKEN", { EIL_CONFLUENCE_TOKEN: "y" }, kc)).toBe("env");
     expect(resolvedSource("EIL_ELK_TOKEN", {}, kc)).toBe("missing");
+  });
+});
+
+// Live round-trip against the real OS keychain. Skips unless a real backend is
+// present (mirrors the DB suites skipping without Postgres). Never runs on CI Linux.
+const liveBackend = (() => {
+  delete process.env.EIL_KEYCHAIN_BACKEND;
+  const b = keychainBackend();
+  return b.name !== "none" && b.name !== "memory" && b.available ? b.name : null;
+})();
+
+describe.skipIf(!liveBackend)("live keychain round-trip", () => {
+  it("stores, reads, and deletes a real secret", () => {
+    setSecret("EIL_SMOKE_TOKEN", "round-trip-42");
+    expect(getSecret("EIL_SMOKE_TOKEN")).toBe("round-trip-42");
+    deleteSecret("EIL_SMOKE_TOKEN");
+    expect(getSecret("EIL_SMOKE_TOKEN")).toBeNull();
   });
 });
