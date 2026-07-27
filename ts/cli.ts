@@ -12,17 +12,14 @@ const program = new Command("eil").description("Enterprise Intelligence Layer CL
 
 function promptHidden(label: string): Promise<string> {
   return new Promise((resolve) => {
+    process.stdout.write(`${label}: `);
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const out = process.stdout;
-    // Mute echo: intercept writes while reading the answer.
-    const mutedWrite = (rl as any)._writeToOutput;
-    (rl as any)._writeToOutput = (s: string) => {
-      if (s.includes(label)) out.write(s);
-    };
-    rl.question(`${label}: `, (answer) => {
-      (rl as any)._writeToOutput = mutedWrite;
-      out.write("\n");
+    // Unconditionally suppress ALL echo while the secret is typed — no redraw,
+    // backspace, or arrow-key path can leak it to the terminal.
+    (rl as any)._writeToOutput = () => {};
+    rl.question("", (answer) => {
       rl.close();
+      process.stdout.write("\n");
       resolve(answer.trim());
     });
   });
@@ -342,17 +339,25 @@ program
 
 const auth = program.command("auth").description("Manage connector tokens in the OS keychain");
 
+// Resolves `source` to its keychain account name, or prints the error and exits(1)
+// if `source` isn't recognized. Shared by `login` and `logout`.
+async function requireAccount(source: string): Promise<string> {
+  const { SOURCES } = await import("./connectors/keychain.js");
+  const account = SOURCES[source];
+  if (!account) {
+    console.log(`unknown source '${source}'. valid: ${Object.keys(SOURCES).join(", ")}`);
+    process.exit(1);
+  }
+  return account;
+}
+
 auth
   .command("login <source>")
   .description("Store a connector token in the OS keychain (jira|confluence|bitbucket|elk)")
   .option("--stdin", "read the token from stdin instead of an interactive prompt")
   .action(async (source, opts) => {
-    const { SOURCES, keychainBackend, setSecret } = await import("./connectors/keychain.js");
-    const account = SOURCES[source];
-    if (!account) {
-      console.log(`unknown source '${source}'. valid: ${Object.keys(SOURCES).join(", ")}`);
-      process.exit(1);
-    }
+    const account = await requireAccount(source);
+    const { keychainBackend, setSecret } = await import("./connectors/keychain.js");
     const backend = keychainBackend();
     if (!backend.available) {
       console.log(
@@ -390,12 +395,8 @@ auth
   .command("logout <source>")
   .description("Remove a connector token from the OS keychain")
   .action(async (source) => {
-    const { SOURCES, deleteSecret } = await import("./connectors/keychain.js");
-    const account = SOURCES[source];
-    if (!account) {
-      console.log(`unknown source '${source}'. valid: ${Object.keys(SOURCES).join(", ")}`);
-      process.exit(1);
-    }
+    const account = await requireAccount(source);
+    const { deleteSecret } = await import("./connectors/keychain.js");
     deleteSecret(account);
     console.log(`removed ${account} from the keychain`);
   });
