@@ -119,14 +119,58 @@ export class HttpEmbedder implements Embedder {
 }
 
 /** Per-call name > EIL_EMBED_PROVIDER env > http default. */
+/** In-process embeddings via Transformers.js (ONNX) — no network at query time,
+ *  data never leaves the machine. The model (default all-MiniLM-L6-v2, 384-dim)
+ *  downloads once from the HF hub and is cached; set EIL_EMBED_CACHE to a local
+ *  dir to run air-gapped. `@huggingface/transformers` is an optional dependency,
+ *  loaded lazily so the core install stays lean. */
+export class LocalEmbedder implements Embedder {
+  readonly id: string;
+  private readonly model: string;
+  private pipe: Promise<any> | null = null;
+  constructor() {
+    this.model = process.env.EIL_EMBED_MODEL ?? "Xenova/all-MiniLM-L6-v2";
+    this.id = `local:${this.model}`;
+  }
+  private async pipeline(): Promise<any> {
+    if (!this.pipe) {
+      this.pipe = (async () => {
+        let mod: any;
+        try {
+          const name = "@huggingface/transformers"; // variable specifier: optional dep
+          mod = await import(name);
+        } catch {
+          throw new Error(
+            "local embedder needs @huggingface/transformers — add it with:\n  pnpm add @huggingface/transformers",
+          );
+        }
+        if (process.env.EIL_EMBED_CACHE) {
+          mod.env.cacheDir = process.env.EIL_EMBED_CACHE;
+          mod.env.allowRemoteModels = !process.env.EIL_EMBED_OFFLINE;
+        }
+        return mod.pipeline("feature-extraction", this.model);
+      })();
+    }
+    return this.pipe;
+  }
+  async embed(texts: string[]): Promise<Float32Array[]> {
+    const pipe = await this.pipeline();
+    const out = await pipe(texts, { pooling: "mean", normalize: true });
+    const rows = out.tolist() as number[][];
+    return rows.map((r) => Float32Array.from(r));
+  }
+}
+
 export function getEmbedder(name?: string): Embedder {
-  const selected = name ?? process.env.EIL_EMBED_PROVIDER ?? "http";
+  const selected = name ?? process.env.EIL_EMBED_PROVIDER ?? "local";
   switch (selected) {
+    case "local":
+      return new LocalEmbedder();
     case "fake":
       return new FakeEmbedder();
     case "http":
       return new HttpEmbedder();
     default:
-      throw new Error(`unknown embed provider: '${selected}' (expected http | fake)`);
+      throw new Error(`unknown embed provider: '${selected}' (expected local | http | fake)`);
   }
 }

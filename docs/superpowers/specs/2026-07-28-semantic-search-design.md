@@ -22,6 +22,11 @@ work PC and needs semantic (meaning-based) retrieval, fused with the existing FT
    (PGlite, embedded, system) with **zero install rights** — no `CREATE EXTENSION`
    on the work PC. Brute-force is fine at personal Jira scale (thousands of
    chunks, <100ms); pgvector/HNSW is a documented drop-in acceleration later.
+**Update (post-build, per user):** the default provider is now `local` — an
+in-process Transformers.js (ONNX) embedder (`all-MiniLM-L6-v2`, 384-dim), added
+as an optional dependency and lazy-loaded. `http` and `fake` remain. The vec arm
+also gained an `embed_model` match guard so a model switch is self-correcting.
+
 2. **Pluggable embedder** (mirrors the existing `EIL_LLM_PROVIDER` layer in
    `ts/llm/index.ts`): an `Embedder` interface selected by `EIL_EMBED_PROVIDER`.
    v1 ships:

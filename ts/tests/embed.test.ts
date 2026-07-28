@@ -221,19 +221,21 @@ describe("vec arm fusion", () => {
     const { searchDocs } = await import("../search.js");
     const { backfill } = await import("../embed/backfill.js");
     const throwing: Embedder = {
-      id: "boom",
+      // id MUST match the stored chunks' embed_model so the model-filtered guard
+      // passes and `embed()` is actually reached (and throws). A non-matching id
+      // would short-circuit at the guard and never exercise the catch path.
+      id: "stub:v1",
       embed: async () => {
         throw new Error("no endpoint");
       },
     };
     const c = await connect();
     try {
-      // Self-contained: guarantee at least one embedded chunk exists so the
-      // vec arm's "nothing embedded" guard passes and `throwing.embed()` is
-      // actually invoked. Without this, the test could pass vacuously via
-      // the empty-embeddings early return, never reaching the catch path —
-      // e.g. if run in isolation before any other test seeds embeddings.
-      await backfill(c, stub, {});
+      // Self-contained: guarantee at least one chunk embedded under THIS id exists
+      // so the vec arm's model-filtered guard passes and `throwing.embed()` is
+      // actually invoked. Without this the test could pass vacuously via the
+      // guard early-return, never reaching the catch path.
+      await backfill(c, stub, {}); // stub.id === "stub:v1" === throwing.id
       const embedded = await c.query("SELECT 1 FROM chunks WHERE embedding IS NOT NULL LIMIT 1");
       expect(embedded.rows.length).toBeGreaterThan(0); // sanity: guard will pass
 

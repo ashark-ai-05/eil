@@ -404,27 +404,41 @@ Output is a single JSON report — pipe it into monitoring or read it by eye.
 ## Semantic search (vector arm)
 
 Search fuses lexical FTS with a **semantic (vector) arm** via reciprocal-rank
-fusion — so "login is broken" can find "authentication failure." It's
-**off until you embed**, then automatic; nothing changes for pure-FTS setups.
+fusion — so "money keeps getting stuck when I send it" finds "Parked payments
+not alerting after retry exhaustion" with no shared keywords. It's **off until
+you embed**, then automatic; nothing changes for pure-FTS setups.
+
+The default embedder runs **fully in-process** via Transformers.js (ONNX) — no
+network at query time, your content never leaves the machine, ideal for a
+locked-down work PC:
 
 ```sh
-# point at any OpenAI-compatible embeddings endpoint (internal gateway keeps
-# data in-org); falls back to EIL_MAAS_BASE_URL if EIL_EMBED_BASE_URL is unset
-export EIL_EMBED_BASE_URL=https://your-gateway/v1
-export EIL_EMBED_MODEL=nomic-embed-text
-pnpm eil embed backfill        # embed existing chunks (embed-once)
+pnpm eil embed backfill        # embeds with a local model (all-MiniLM-L6-v2, 384-dim)
 pnpm eil search "why do payments get stuck"   # now fuses FTS + vector
 ```
+
+The model (~90MB) downloads once from the HF hub and is cached. For an
+air-gapped machine, pre-place it and set `EIL_EMBED_CACHE=/path/to/models`
+(with `EIL_EMBED_OFFLINE=1` to forbid any remote fetch). `@huggingface/transformers`
+is an **optional dependency** (auto-installed unless your `pnpm install` blocks
+native builds; otherwise `pnpm add @huggingface/transformers`).
 
 - **Extension-free**: embeddings are packed float32 in a `bytea` column, cosine
   runs in-process — works on every Postgres tier (incl. zero-install PGlite)
   with no `CREATE EXTENSION` and no admin. Brute-force is fine at personal scale;
   pgvector/HNSW is a drop-in upgrade later.
-- **Pluggable embedder** via `EIL_EMBED_PROVIDER` (`http` default | `fake` for
-  offline trials). Re-run `embed backfill` after ingesting more; `--reembed`
-  after changing the model.
-- **Degrades safely**: if the endpoint is down or nothing is embedded yet,
-  search silently stays lexical-only.
+- **Pluggable embedder** via `EIL_EMBED_PROVIDER`:
+  - `local` (default) — in-process ONNX; `EIL_EMBED_MODEL` picks the model.
+  - `http` — any OpenAI-compatible `/embeddings` endpoint (internal gateway,
+    data stays in-org): `EIL_EMBED_BASE_URL` (falls back to `EIL_MAAS_BASE_URL`),
+    `EIL_EMBED_MODEL`, `EIL_EMBED_API_KEY`.
+  - `fake` — deterministic, no-network, for offline pipeline trials/CI.
+- **Self-correcting on model change**: the vec arm only compares against chunks
+  embedded by the *current* model, so switching `EIL_EMBED_MODEL` degrades to
+  FTS-only until you `embed backfill --reembed`. Re-run `embed backfill` after
+  ingesting more (embed-once skips unchanged chunks).
+- **Degrades safely**: if the model/endpoint is unavailable or nothing is
+  embedded yet, search silently stays lexical-only.
 
 ## Observability
 

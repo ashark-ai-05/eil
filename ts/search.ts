@@ -228,15 +228,26 @@ async function vecArm(
   byDoc: Map<string, SearchResult & { updated: Date | null }>,
   embedder?: Embedder,
 ): Promise<string[] | null> {
-  const has = await client.query("SELECT 1 FROM chunks WHERE embedding IS NOT NULL LIMIT 1");
-  if (has.rows.length === 0) return null; // nothing embedded -> pure FTS
-  const emb = embedder ?? getEmbedder(); // may throw if misconfigured -> caught by caller
+  // Build the embedder first (construction is cheap — the local model loads
+  // lazily on embed(), not here). May throw if a provider is misconfigured ->
+  // caught by the caller -> FTS-only.
+  const emb = embedder ?? getEmbedder();
+  // Only cosine against chunks embedded by the SAME model — a query embedded with
+  // model A vs chunks stored under model B (different dim/space) yields a finite
+  // but meaningless score. Matching on embed_model makes a model switch
+  // self-correcting: it degrades to FTS-only until `embed backfill --reembed`,
+  // and lets us skip embedding the query when nothing matches.
+  const has = await client.query(
+    "SELECT 1 FROM chunks WHERE embedding IS NOT NULL AND embed_model = $1 LIMIT 1",
+    [emb.id],
+  );
+  if (has.rows.length === 0) return null; // nothing embedded with this model -> pure FTS
   const qv = (await emb.embed([query]))[0]!;
   const res = await client.query(
     `SELECT c.doc_id, c.text, c.embedding, d.title, d.url, d.quality_tier, d.updated_at
      FROM chunks c JOIN documents d ON d.id = c.doc_id
-     WHERE c.embedding IS NOT NULL AND ${visibleSql(1, 2, 3)}`,
-    [viewer.principal, viewer.groups, tenantOf(viewer)],
+     WHERE c.embedding IS NOT NULL AND c.embed_model = $4 AND ${visibleSql(1, 2, 3)}`,
+    [viewer.principal, viewer.groups, tenantOf(viewer), emb.id],
   );
   const best = new Map<string, { score: number; row: any }>();
   for (const row of res.rows) {
