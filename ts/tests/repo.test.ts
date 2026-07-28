@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { GitCloneSource } from "../connectors/reposource.js";
 import { chunk } from "../core/chunker.js";
 import { detectSource, normalizeCode, repoKey } from "../ingest/code.js";
 import { RepoFilter, globToRegExp } from "../ingest/repofilter.js";
@@ -101,5 +106,48 @@ describe("code doc model", () => {
     expect(detectSource("https://bb/scm/x/y.git")).toBe("git");
     expect(detectSource("git@github.com:o/r.git")).toBe("git");
     expect(detectSource("PAY/retry")).toBe("bitbucket");
+  });
+});
+
+describe("GitCloneSource (real git)", () => {
+  const root = mkdtempSync(join(tmpdir(), "eil-git-"));
+  const origin = join(root, "origin");
+  const cache = join(root, "cache");
+  const g = (args: string[]) => execFileSync("git", ["-C", origin, ...args], { encoding: "utf-8" });
+  let c1 = "";
+  beforeAll(() => {
+    mkdirSync(join(origin, "src"), { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main", origin]);
+    g(["config", "user.email", "t@t"]);
+    g(["config", "user.name", "t"]);
+    writeFileSync(join(origin, "src/a.ts"), "l1\nl2\n");
+    writeFileSync(join(origin, "src/b.ts"), "keep\n");
+    g(["add", "-A"]);
+    g(["commit", "-qm", "c1"]);
+    c1 = g(["rev-parse", "HEAD"]).trim();
+    writeFileSync(join(origin, "src/a.ts"), "l1\nl2\nl3\n");
+    rmSync(join(origin, "src/b.ts"));
+    writeFileSync(join(origin, "src/c.ts"), "new\n");
+    g(["add", "-A"]);
+    g(["commit", "-qm", "c2"]);
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("clones, lists, reads, and diffs A/M/D", async () => {
+    const src = new GitCloneSource({ ref: origin, branch: "main", cacheDir: cache });
+    const head = await src.headSha();
+    expect(head).toMatch(/^[0-9a-f]{40}$/);
+    const files: string[] = [];
+    for await (const p of src.listFiles()) files.push(p);
+    expect(files).toContain("src/a.ts");
+    expect(files).toContain("src/c.ts");
+    expect(files).not.toContain("src/b.ts"); // deleted at head
+    expect(await src.readFile("src/a.ts")).toBe("l1\nl2\nl3\n");
+    const changes: Record<string, string> = {};
+    for await (const ch of src.changedSince(c1)) changes[ch.path] = ch.status;
+    expect(changes["src/a.ts"]).toBe("M");
+    expect(changes["src/b.ts"]).toBe("D");
+    expect(changes["src/c.ts"]).toBe("A");
+    await src.dispose();
   });
 });
