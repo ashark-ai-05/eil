@@ -3,6 +3,12 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./tools": "./ts/tools.ts",
+    "./search": "./ts/search.ts",
+    "./db": "./ts/db.ts",
+    "./embed": "./ts/embed/index.ts"
+  },
   "description": "Enterprise Intelligence Layer \u2014 knowledge plane (TypeScript)",
   "scripts": {
     "eil": "tsx ts/cli.ts",
