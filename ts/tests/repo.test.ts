@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chunk } from "../core/chunker.js";
+import { RepoFilter, globToRegExp } from "../ingest/repofilter.js";
 
 const codeDoc = (body: string) =>
   ({
@@ -42,5 +43,32 @@ describe("code chunker", () => {
     const chunks = chunk(prose);
     expect(chunks[0]!.headingPath).toContain("T"); // section breadcrumb, not L-range
     expect(chunks[0]!.headingPath).not.toMatch(/› L\d/);
+  });
+});
+
+describe("repofilter", () => {
+  it("globs with **, *, ?", () => {
+    expect(globToRegExp("**/*.ts").test("a/b/c.ts")).toBe(true);
+    expect(globToRegExp("**/*.ts").test("a/b/c.js")).toBe(false);
+    expect(globToRegExp("**/vendor/**").test("x/vendor/y/z.ts")).toBe(true);
+    expect(globToRegExp("src/*.ts").test("src/a.ts")).toBe(true);
+    expect(globToRegExp("src/*.ts").test("src/a/b.ts")).toBe(false); // * doesn't cross /
+  });
+  it("acceptPath honors includes then excludes", () => {
+    const f = new RepoFilter({ includes: ["**/*.ts"], excludes: ["**/generated/**"] });
+    expect(f.acceptPath("src/a.ts")).toBe(true);
+    expect(f.acceptPath("src/a.js")).toBe(false); // not included
+    expect(f.acceptPath("src/generated/a.ts")).toBe(false); // excluded
+  });
+  it("no includes = accept all except excludes", () => {
+    const f = new RepoFilter({ excludes: ["**/*.lock"] });
+    expect(f.acceptPath("a/b.ts")).toBe(true);
+    expect(f.acceptPath("a/b.lock")).toBe(false);
+  });
+  it("acceptContent rejects binary and oversize", () => {
+    const f = new RepoFilter({ maxBytes: 100 });
+    expect(f.acceptContent("clean text")).toBe(true);
+    expect(f.acceptContent("has\0nul")).toBe(false); // binary
+    expect(f.acceptContent("x".repeat(101))).toBe(false); // oversize
   });
 });
