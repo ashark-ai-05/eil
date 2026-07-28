@@ -1,0 +1,69 @@
+export type CodeIndexKind = "path" | "symbol" | "literal" | "import" | "export" | "test";
+export interface CodeIndexEntry {
+  kind: CodeIndexKind;
+  value: string;
+  rawValue: string;
+  lineStart: number;
+  lineEnd: number;
+  symbolKind?: string;
+  language: string;
+  extractorVersion: string;
+}
+export const EXTRACTOR_VERSION = "regex-v1";
+export function detectLanguage(path: string): string | null {
+  const ext = path.toLowerCase().split(".").pop();
+  return (
+    (
+      {
+        ts: "typescript",
+        tsx: "tsx",
+        js: "javascript",
+        jsx: "jsx",
+        py: "python",
+        go: "go",
+        rs: "rust",
+      } as Record<string, string>
+    )[ext ?? ""] ?? null
+  );
+}
+const add = (
+  out: CodeIndexEntry[],
+  kind: CodeIndexKind,
+  raw: string,
+  line: number,
+  language: string,
+  symbolKind?: string,
+) =>
+  out.push({
+    kind,
+    value: raw.toLowerCase(),
+    rawValue: raw,
+    lineStart: line,
+    lineEnd: line,
+    ...(symbolKind ? { symbolKind } : {}),
+    language,
+    extractorVersion: EXTRACTOR_VERSION,
+  });
+export function extractCodeIndex(path: string, content: string): CodeIndexEntry[] {
+  const language = detectLanguage(path);
+  if (!language) return [];
+  const out: CodeIndexEntry[] = [];
+  add(out, "path", path, 1, language);
+  const testPath = /(^|\/)(__tests__\/|.*\.(test|spec)\.)/.test(path);
+  for (const [i, line] of content.split("\n").entries()) {
+    const n = i + 1;
+    for (const m of line.matchAll(
+      /\b(?:function|class|interface|type|const|let|var|def|func|struct|enum)\s+([A-Za-z_$][\w$]*)/g,
+    ))
+      add(out, "symbol", m[1]!, n, language, m[0]!.split(/\s+/)[0]);
+    for (const m of line.matchAll(
+      /\bimport\s+(?:.+?\s+from\s+)?["']([^"']+)["']|\brequire\(["']([^"']+)["']\)/g,
+    ))
+      add(out, "import", m[1] ?? m[2]!, n, language);
+    if (/\bexport\b/.test(line)) add(out, "export", line.trim(), n, language);
+    for (const m of line.matchAll(/["']([^"']{2,})["']/g)) add(out, "literal", m[1]!, n, language);
+    if (testPath || /\b(describe|it|test|pytest|Test[A-Z])\s*\(?/.test(line))
+      add(out, "test", path, n, language);
+  }
+  return out;
+}
