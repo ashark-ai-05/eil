@@ -417,11 +417,23 @@ pnpm eil embed backfill        # embeds with a local model (all-MiniLM-L6-v2, 38
 pnpm eil search "why do payments get stuck"   # now fuses FTS + vector
 ```
 
-The model (~90MB) downloads once from the HF hub and is cached. For an
-air-gapped machine, pre-place it and set `EIL_EMBED_CACHE=/path/to/models`
-(with `EIL_EMBED_OFFLINE=1` to forbid any remote fetch). `@huggingface/transformers`
-is an **optional dependency** (auto-installed unless your `pnpm install` blocks
-native builds; otherwise `pnpm add @huggingface/transformers`).
+The model (~90MB) downloads once from the HF hub and is cached.
+`@huggingface/transformers` is an **optional dependency** (auto-installed unless
+your `pnpm install` blocks native builds; otherwise `pnpm add @huggingface/transformers`).
+
+**Air-gapped / corporate network that blocks huggingface.co?** Pre-download the
+model on a machine that *can* reach the hub, carry it over, and run offline:
+
+```sh
+# on an unblocked machine (repo checked out):
+EIL_EMBED_CACHE=./eil-models pnpm eil embed fetch-model   # writes ./eil-models/Xenova/...
+# copy ./eil-models to the locked-down box, then there:
+export EIL_EMBED_CACHE=/path/to/eil-models
+export EIL_EMBED_OFFLINE=1        # forbid ANY network fetch
+pnpm eil embed backfill          # loads from the cache, never touches the hub
+```
+(`EIL_EMBED_OFFLINE=1` works with or without `EIL_EMBED_CACHE` — set it whenever
+the model is already local.)
 
 - **Extension-free**: embeddings are packed float32 in a `bytea` column, cosine
   runs in-process — works on every Postgres tier (incl. zero-install PGlite)

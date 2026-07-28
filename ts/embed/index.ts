@@ -144,10 +144,11 @@ export class LocalEmbedder implements Embedder {
             "local embedder needs @huggingface/transformers — add it with:\n  pnpm add @huggingface/transformers",
           );
         }
-        if (process.env.EIL_EMBED_CACHE) {
-          mod.env.cacheDir = process.env.EIL_EMBED_CACHE;
-          mod.env.allowRemoteModels = !process.env.EIL_EMBED_OFFLINE;
-        }
+        // Air-gapped/corporate use: point at a pre-downloaded model dir and/or
+        // forbid any network fetch. Independent — EIL_EMBED_OFFLINE works even
+        // without EIL_EMBED_CACHE (e.g. model already in the default cache).
+        if (process.env.EIL_EMBED_CACHE) mod.env.cacheDir = process.env.EIL_EMBED_CACHE;
+        if (process.env.EIL_EMBED_OFFLINE) mod.env.allowRemoteModels = false;
         return mod.pipeline("feature-extraction", this.model);
       })();
     }
