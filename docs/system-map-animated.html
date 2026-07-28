@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EIL — System Map (animated, proposed)</title>
+<style>
+  :root {
+    --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd;
+    --ok:#5ccb8e; --warn:#ef7d6b; --new:#a78bfa;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --r:10px; color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524;
+      --ok:#1f9d63; --warn:#c0442f; --new:#7c5cd6;
+      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+  }
+  :root[data-theme="dark"]{ --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd;
+    --ok:#5ccb8e; --warn:#ef7d6b; --new:#a78bfa; --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc; color-scheme:dark; }
+  :root[data-theme="light"]{ --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+    --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524;
+    --ok:#1f9d63; --warn:#c0442f; --new:#7c5cd6; --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--ink); color:var(--text); font-family:var(--mono); font-size:15px; line-height:1.5;
+    -webkit-font-smoothing:antialiased; letter-spacing:-0.01em;
+    background-image: radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--new) 8%, transparent), transparent 60%),
+      radial-gradient(110% 70% at 6% 108%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
+    background-attachment:fixed; }
+  .wrap { max-width:1400px; margin:0 auto; padding:clamp(20px,3vw,40px) clamp(14px,3vw,30px) 60px; }
+  header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+  .word { font-size:19px; font-weight:700; letter-spacing:0.02em; }
+  .word span { color:var(--muted); font-weight:500; }
+  .tag { color:var(--muted); font-size:13px; margin:8px 0 0; max-width:84ch; letter-spacing:0; line-height:1.6; }
+  .tag b { color:var(--text); font-weight:600; }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .btn { font-family:var(--mono); font-size:11px; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted);
+    background:var(--panel); border:1px solid var(--line); padding:8px 12px; border-radius:7px; cursor:pointer; white-space:nowrap; }
+  .btn:hover { color:var(--text); border-color:var(--muted); }
+  .btn.on { color:var(--new); border-color:color-mix(in oklab, var(--new) 50%, var(--line)); background:var(--panel-2); }
+  .btn:focus-visible { outline:2px solid var(--lex); outline-offset:2px; }
+  nav.xref { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0 0; font-size:11.5px; }
+  nav.xref a { color:var(--faint); text-decoration:none; border-bottom:1px dashed var(--line); }
+  nav.xref a:hover { color:var(--lex); border-color:var(--lex); }
+
+  .stage { margin-top:24px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+    box-shadow:var(--shadow); overflow:hidden; }
+  .stagehead { display:flex; align-items:center; gap:12px; padding:11px 15px; border-bottom:1px solid var(--line);
+    font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--faint); flex-wrap:wrap; }
+  .stagehead .now { margin-left:auto; color:var(--new); letter-spacing:0.04em; text-transform:none; font-size:12px; }
+  svg { display:block; width:100%; height:auto; }
+
+  .nlab { font:600 12px var(--mono); fill:var(--text); letter-spacing:-0.02em; }
+  .nsub { font:10.5px var(--mono); fill:var(--muted); letter-spacing:0; }
+  .nmet { font:10px var(--mono); fill:var(--ok); letter-spacing:0.02em; }
+  .nbad { font:10px var(--mono); fill:var(--warn); letter-spacing:0.02em; }
+  .plab { font:600 10px var(--mono); fill:var(--faint); letter-spacing:0.14em; }
+  .box  { fill:var(--panel-2); stroke:var(--line); stroke-width:1; rx:8; }
+  .box.new  { stroke:var(--new); }
+  .box.chg  { stroke:var(--vec); }
+  .box.keep { stroke:var(--line); }
+  .edge { stroke:var(--line); stroke-width:1.6; fill:none; marker-end:url(#arrow); }
+  .lane { fill:none; stroke:var(--line-soft); stroke-width:1; stroke-dasharray:3 5; }
+
+  /* --- the animation: a packet travelling the pipeline ------------------- */
+  .pkt { r:4.5; opacity:0; }
+  .pkt.lex { fill:var(--lex); } .pkt.vec { fill:var(--vec); } .pkt.ing { fill:var(--ok); }
+  .running .pkt { animation: ride var(--dur, 9s) linear infinite; }
+  @keyframes ride { 0% { opacity:0 } 4% { opacity:1 } 92% { opacity:1 } 100% { opacity:0 } }
+  .running .glow { animation: pulse var(--dur, 9s) linear infinite; }
+  .glow { opacity:0; }
+  @keyframes pulse { 0%,100% { opacity:0 } 45%,60% { opacity:.5 } }
+  .running .dash { stroke-dasharray:5 6; animation: march 1.1s linear infinite; }
+  @keyframes march { to { stroke-dashoffset:-22; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .running .pkt, .running .glow, .running .dash { animation:none !important; }
+    .pkt { opacity:1; }
+  }
+
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin:20px 0 0; padding:11px 14px; background:var(--panel);
+    border:1px solid var(--line); border-radius:var(--r); font-size:11.5px; align-items:center; }
+  .key { display:flex; align-items:center; gap:7px; color:var(--muted); }
+  .dot { width:9px; height:9px; border-radius:3px; flex:none; }
+  .d-new{ background:var(--new);} .d-chg{ background:var(--vec);} .d-keep{ background:var(--line); border:1px solid var(--muted);}
+  .d-lex{ background:var(--lex); border-radius:50%;} .d-vec{ background:var(--vec); border-radius:50%;} .d-ing{ background:var(--ok); border-radius:50%;}
+
+  .notes { margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:13px 15px; box-shadow:var(--shadow); }
+  .card h4 { margin:0 0 7px; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--faint); font-weight:600; }
+  .card p { margin:0; font-size:12px; color:var(--muted); letter-spacing:0; line-height:1.6; }
+  .card p b { color:var(--text); }
+  .card code { font-size:11px; color:var(--lex); background:color-mix(in oklab, var(--lex) 10%, transparent); padding:1px 4px; border-radius:4px; }
+  footer { margin-top:38px; padding-top:15px; border-top:1px solid var(--line-soft); font-size:11px; color:var(--faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <div class="word">EIL <span>— system map, <b style="color:var(--new)">animated · proposed</b></span></div>
+    <p class="tag">The same pipeline as <b>system-map.html</b>, redrawn for the design in
+      <b>docs/superpowers/specs/2026-07-29-knowledge-plane-design.md</b>. Packets ride the real paths: an
+      <b style="color:var(--ok)">ingest</b> pass writes the catalog, then a query fans out to the
+      <b style="color:var(--lex)">lexical</b> and <b style="color:var(--vec)">vector</b> arms and fuses.
+      The original map is untouched and still describes what ships today.</p>
+  </div>
+  <div class="toolbar">
+    <button class="btn on" id="playBtn" type="button">pause</button>
+    <button class="btn" id="speedBtn" type="button">1×</button>
+    <button class="btn" id="themeBtn" type="button">theme</button>
+  </div>
+</header>
+
+<nav class="xref">
+  <a href="system-map.html">system-map.html (current, unchanged)</a>
+  <a href="knowledge-plane-proposed.html">knowledge-plane-proposed.html</a>
+  <a href="architecture-schematic.html">architecture-schematic.html</a>
+</nav>
+
+<div class="legend">
+  <span class="key"><span class="dot d-new"></span> new</span>
+  <span class="key"><span class="dot d-chg"></span> changed</span>
+  <span class="key"><span class="dot d-keep"></span> unchanged</span>
+  <span style="width:1px;height:16px;background:var(--line)"></span>
+  <span class="key"><span class="dot d-ing"></span> ingest pass</span>
+  <span class="key"><span class="dot d-lex"></span> lexical arm</span>
+  <span class="key"><span class="dot d-vec"></span> vector arm</span>
+  <span class="key" style="margin-left:auto;color:var(--faint)">green figures were measured on this machine</span>
+</div>
+
+<!-- ══════════════════ INGEST ══════════════════ -->
+<section class="stage">
+  <div class="stagehead"><span>Ingest</span><span style="color:var(--muted);letter-spacing:0">spec §5</span>
+    <span class="now">a document arrives</span></div>
+  <svg viewBox="0 0 1360 232" role="img" aria-label="Ingest pipeline: sources through job queue, fetch, normalize, secret scan, chunk and embed into Postgres">
+    <defs>
+      <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 L8 4 L0 8 z" fill="var(--line)"/>
+      </marker>
+      <path id="ingPath" d="M150 96 H262 M262 96 H414 M414 96 H566 M566 96 H718 M718 96 H870 M870 96 H1022 M1022 96 H1200"/>
+    </defs>
+
+    <path class="lane" d="M40 96 H1320"/>
+
+    <g><rect class="box keep" x="30" y="66" width="120" height="60"/>
+      <text class="nlab" x="46" y="90">Sources</text>
+      <text class="nsub" x="46" y="106">Confluence · Jira</text>
+      <text class="nsub" x="46" y="119">git · Obsidian</text></g>
+
+    <g><rect class="box new" x="182" y="60" width="152" height="72"/>
+      <text class="nlab" x="198" y="84">ingest_jobs</text>
+      <text class="nsub" x="198" y="99">SKIP LOCKED, attempts</text>
+      <text class="nsub" x="198" y="112">next_attempt_at</text>
+      <text class="nmet" x="198" y="126">durable, no server</text></g>
+
+    <g><rect class="box chg" x="366" y="60" width="152" height="72"/>
+      <text class="nlab" x="382" y="84">Fetch</text>
+      <text class="nsub" x="382" y="99">full-jitter backoff</text>
+      <text class="nsub" x="382" y="112">30-min poll overlap</text>
+      <text class="nbad" x="382" y="126">was: one 429 livelocks</text></g>
+
+    <g><rect class="box chg" x="550" y="60" width="152" height="72"/>
+      <text class="nlab" x="566" y="84">Normalize</text>
+      <text class="nsub" x="566" y="99">hash covers metadata</text>
+      <text class="nsub" x="566" y="112">code updated_at, links</text>
+      <text class="nbad" x="566" y="126">was: ACL change = no-op</text></g>
+
+    <g><rect class="box new" x="734" y="60" width="152" height="72"/>
+      <text class="nlab" x="750" y="84">Secret scan</text>
+      <text class="nsub" x="750" y="99">detect → quarantine</text>
+      <text class="nsub" x="750" y="112">redact on serve</text>
+      <text class="nmet" x="750" y="126">skips chunk+embed</text></g>
+
+    <g><rect class="box chg" x="918" y="60" width="152" height="72"/>
+      <text class="nlab" x="934" y="84">Chunk</text>
+      <text class="nsub" x="934" y="99">text stored clean</text>
+      <text class="nsub" x="934" y="112">no code overlap</text>
+      <text class="nbad" x="934" y="126">was: 9–16% snippet lost</text></g>
+
+    <g><rect class="box chg" x="1102" y="60" width="168" height="72"/>
+      <text class="nlab" x="1118" y="84">Embed</text>
+      <text class="nsub" x="1118" y="99">per-chunk reuse</text>
+      <text class="nsub" x="1118" y="112">window-matched size</text>
+      <text class="nbad" x="1118" y="126">was: ⅔ of chunk dropped</text></g>
+
+    <path class="edge dash" d="M150 96 H180"/><path class="edge dash" d="M334 96 H364"/>
+    <path class="edge dash" d="M518 96 H548"/><path class="edge dash" d="M702 96 H732"/>
+    <path class="edge dash" d="M886 96 H916"/><path class="edge dash" d="M1070 96 H1100"/>
+
+    <text class="plab" x="734" y="170">QUARANTINED ↴ never chunked, so no tsv, no vector, no snippet can leak it</text>
+    <path class="edge" d="M810 132 V158 H1270 V132" stroke="var(--warn)" stroke-dasharray="4 4"/>
+
+    <circle class="pkt ing" cx="0" cy="0"><animateMotion dur="9s" repeatCount="indefinite"
+      path="M150 96 H1200"/></circle>
+  </svg>
+</section>
+
+<!-- ══════════════════ STORE ══════════════════ -->
+<section class="stage">
+  <div class="stagehead"><span>Store — one Postgres</span><span style="color:var(--muted);letter-spacing:0">spec §4</span>
+    <span class="now">everything is a row you can query</span></div>
+  <svg viewBox="0 0 1360 210" role="img" aria-label="Postgres tables: documents, chunks, code index, BM25 stats, IVF centroids, ACL tuples, audit and eval">
+    <rect class="box keep" x="30" y="24" width="1300" height="160" fill="none" stroke="var(--line-soft)"/>
+    <text class="plab" x="46" y="46">POSTGRES — PGLITE ON A LAPTOP, SERVER IN THE ORG. NO EXTENSION REQUIRED.</text>
+
+    <g><rect class="box chg" x="46" y="60" width="176" height="66"/>
+      <text class="nlab" x="60" y="83">documents</text>
+      <text class="nsub" x="60" y="98">acl_groups: one</text>
+      <text class="nsub" x="60" y="111">indexable ?| check</text></g>
+
+    <g><rect class="box chg" x="238" y="60" width="196" height="66"/>
+      <text class="nlab" x="252" y="83">chunks</text>
+      <text class="nsub" x="252" y="98">tsv · +tsv_code · +len</text>
+      <text class="nsub" x="252" y="111">+sig varbit · +cluster_id</text></g>
+
+    <g><rect class="box new" x="450" y="60" width="168" height="66"/>
+      <text class="nlab" x="464" y="83">lexeme_stats</text>
+      <text class="nsub" x="464" y="98">df + avg length</text>
+      <text class="nmet" x="464" y="112">408 kB / 20k chunks</text></g>
+
+    <g><rect class="box new" x="634" y="60" width="160" height="66"/>
+      <text class="nlab" x="648" y="83">ivf_centroids</text>
+      <text class="nsub" x="648" y="98">keyed by embed_model</text>
+      <text class="nsub" x="648" y="111">spaces cannot mix</text></g>
+
+    <g><rect class="box chg" x="810" y="60" width="160" height="66"/>
+      <text class="nlab" x="824" y="83">code_index</text>
+      <text class="nsub" x="824" y="98">+match_class</text>
+      <text class="nsub" x="824" y="111">exact | subtoken | path</text></g>
+
+    <g><rect class="box new" x="986" y="60" width="160" height="66"/>
+      <text class="nlab" x="1000" y="83">acl_tuples</text>
+      <text class="nsub" x="1000" y="98">nesting, inheritance</text>
+      <text class="nsub" x="1000" y="111">+ revocations</text></g>
+
+    <g><rect class="box chg" x="1162" y="60" width="152" height="66"/>
+      <text class="nlab" x="1176" y="83">audit_log</text>
+      <text class="nsub" x="1176" y="98">+duration +ok +route</text>
+      <text class="nmet" x="1176" y="112">shipped — step 0</text></g>
+
+    <g><rect class="box new" x="46" y="138" width="240" height="34"/>
+      <text class="nlab" x="60" y="160">retrieval_events · eval_queries · eval_qrels</text></g>
+    <g><rect class="box new" x="302" y="138" width="184" height="34"/>
+      <text class="nlab" x="316" y="160">sync_state · ingest_jobs</text></g>
+    <text class="nsub" x="504" y="160">metrics stay SQL views over durable facts — never sampled, never a dashboard's interpretation</text>
+
+    <circle class="glow" cx="1238" cy="93" r="26" fill="var(--new)"/>
+  </svg>
+</section>
+
+<!-- ══════════════════ RETRIEVE ══════════════════ -->
+<section class="stage">
+  <div class="stagehead"><span>Retrieve</span><span style="color:var(--muted);letter-spacing:0">spec §6</span>
+    <span class="now">a query fans out, then fuses</span></div>
+  <svg viewBox="0 0 1360 300" role="img" aria-label="Query routing into lexical, code and vector arms, fused by reciprocal rank fusion and returned over MCP">
+    <g><rect class="box keep" x="30" y="118" width="126" height="60"/>
+      <text class="nlab" x="44" y="142">Router</text>
+      <text class="nsub" x="44" y="157">entity · docs</text>
+      <text class="nsub" x="44" y="170">symbol · path</text></g>
+
+    <!-- lexical arm -->
+    <g><rect class="box chg" x="212" y="18" width="208" height="72"/>
+      <text class="nlab" x="228" y="42">Prose — BM25</text>
+      <text class="nsub" x="228" y="57">IDF-prune, then score</text>
+      <text class="nsub" x="228" y="70">k1=1.2 · b=0.75</text>
+      <text class="nbad" x="228" y="84">was: ts_rank, no IDF</text></g>
+
+    <!-- code arm -->
+    <g><rect class="box chg" x="212" y="114" width="208" height="72"/>
+      <text class="nlab" x="228" y="138">Code — Zoekt scorer</text>
+      <text class="nsub" x="228" y="153">subtokens, one function</text>
+      <text class="nsub" x="228" y="166">MAX over matches</text>
+      <text class="nbad" x="228" y="180">was: exact match, no rank</text></g>
+
+    <!-- vector arm: the funnel -->
+    <g><rect class="box chg" x="212" y="210" width="208" height="76"/>
+      <text class="nlab" x="228" y="234">Vector — funnel</text>
+      <text class="nsub" x="228" y="249">IVF probe → Hamming</text>
+      <text class="nsub" x="228" y="262">→ exact rescore</text>
+      <text class="nmet" x="228" y="277">298.5 µs → 1.30 µs/chunk</text></g>
+
+    <g><rect class="box new" x="452" y="210" width="176" height="76"/>
+      <text class="nlab" x="466" y="234">nprobe</text>
+      <text class="nsub" x="466" y="249">calibrated, not guessed</text>
+      <text class="nsub" x="466" y="262">gate: recall@10 ≥ 0.98</text>
+      <text class="nmet" x="466" y="277">oversample fixed at 8×</text></g>
+
+    <g><rect class="box chg" x="672" y="106" width="188" height="88"/>
+      <text class="nlab" x="686" y="130">RRF fusion</text>
+      <text class="nsub" x="686" y="145">rank-based, so arm</text>
+      <text class="nsub" x="686" y="158">scores never compared</text>
+      <text class="nsub" x="686" y="171">k swept {10,20,30,60}</text>
+      <text class="nmet" x="686" y="186">MaxP already present</text></g>
+
+    <g><rect class="box chg" x="892" y="106" width="170" height="88"/>
+      <text class="nlab" x="906" y="130">Rank modifier</text>
+      <text class="nsub" x="906" y="145">tier × recency</text>
+      <text class="nsub" x="906" y="158">rebalanced vs RRF</text>
+      <text class="nbad" x="906" y="172">2.4× vs 1.6%/rank</text>
+      <text class="nsub" x="906" y="186" fill="var(--new)">may be worth 0</text></g>
+
+    <g><rect class="box new" x="1094" y="106" width="222" height="88"/>
+      <text class="nlab" x="1108" y="130">MCP result</text>
+      <text class="nsub" x="1108" y="145">ids · snippets · citations</text>
+      <text class="nsub" x="1108" y="158">top_score · score_gap</text>
+      <text class="nsub" x="1108" y="171">arms_contributing</text>
+      <text class="nmet" x="1108" y="186">≤ 4k tokens · trace_id</text></g>
+
+    <path class="edge dash" d="M156 148 C186 148 182 54 210 54"/>
+    <path class="edge dash" d="M156 150 H210"/>
+    <path class="edge dash" d="M156 152 C186 152 182 248 210 248"/>
+    <path class="edge dash" d="M420 248 H450"/>
+    <path class="edge dash" d="M420 54  C520 54 560 130 670 138"/>
+    <path class="edge dash" d="M420 150 H670"/>
+    <path class="edge dash" d="M628 248 C660 248 640 170 670 162"/>
+    <path class="edge dash" d="M860 150 H890"/>
+    <path class="edge dash" d="M1062 150 H1092"/>
+
+    <text class="plab" x="672" y="222">EVERY ARM CARRIES THE SAME FAIL-CLOSED PREDICATE — acl ∧ tenant ∧ ¬tombstoned ∧ ¬quarantined</text>
+    <text class="plab" x="672" y="242" fill="var(--faint)">NO LLM ON THIS PATH. SAME QUERY + SAME CORPUS ⇒ SAME ORDER, TIES INCLUDED.</text>
+
+    <circle class="pkt lex" cx="0" cy="0"><animateMotion dur="9s" repeatCount="indefinite"
+      path="M156 150 C186 150 182 54 300 54 C520 54 560 130 760 150 H980 H1200"/></circle>
+    <circle class="pkt vec" cx="0" cy="0"><animateMotion dur="9s" repeatCount="indefinite" begin="0.9s"
+      path="M156 150 C186 150 182 248 300 248 H540 C660 248 640 170 760 150 H980 H1200"/></circle>
+    <circle class="pkt lex" cx="0" cy="0" style="fill:var(--fuse)"><animateMotion dur="9s" repeatCount="indefinite" begin="1.8s"
+      path="M156 150 H300 H540 H760 H980 H1200"/></circle>
+  </svg>
+</section>
+
+<div class="notes">
+  <div class="card"><h4>Why the vector packet detours</h4>
+    <p>It probes IVF clusters first, ranks survivors by Hamming distance on <code>sig</code>, then rescores only
+      those exactly. Measured <b>298.5 µs → 1.30 µs per chunk</b> and <b>30 MB → 1035 kB</b> of storage.
+      The detour is the whole scale story.</p></div>
+  <div class="card"><h4>nprobe, not oversample</h4>
+    <p>Measured: 8× and 16× oversample are <b>identical at every nprobe</b>. Once survivors are rescored exactly,
+      binary quantization costs nothing — all loss is clusters not probed. So oversample is fixed and
+      <b>nprobe is an output of calibration</b> with a ≥0.98 gate, never a constant in the code.</p></div>
+  <div class="card"><h4>What already shipped</h4>
+    <p><code>audit_log</code> now carries <code>duration_ms · ok · error · route · executor · trace_id</code>,
+      failures are audited rather than silently dropped, and <code>retrieval_events</code> records query → ranked ids.
+      That is step 0 — <b>and it is what produces the real queries the eval harness replays</b>.</p></div>
+  <div class="card"><h4>The one thing not drawn</h4>
+    <p>Evaluation. It has no packet because it is not on the request path — it is the gate <i>around</i> it.
+      Recall@50 and Recall@10 as a pair, nDCG@10, paired permutation test. <b>Nothing downstream of it merges at
+      p ≥ 0.05.</b></p></div>
+</div>
+
+<footer>
+  Animated proposal · 2026-07-29 · <b>system-map.html</b> is unchanged and remains the description of what ships today.
+  Respects <code>prefers-reduced-motion</code>. Spec: <b>docs/superpowers/specs/2026-07-29-knowledge-plane-design.md</b>.
+</footer>
+
+</div>
+<script>
+  const root = document.documentElement;
+  const stages = () => document.querySelectorAll('svg');
+  let running = true, speed = 1;
+  const SPEEDS = [1, 2, 0.5];
+
+  function apply() {
+    document.querySelectorAll('section.stage svg').forEach(svg => {
+      svg.classList.toggle('running', running);
+      svg.querySelectorAll('animateMotion').forEach(a => {
+        a.setAttribute('dur', (9 / speed) + 's');
+        running ? a.beginElement?.() : null;
+      });
+      svg.style.setProperty('--dur', (9 / speed) + 's');
+    });
+    // pausing SMIL properly: unpauseAnimations/pauseAnimations live on the <svg>
+    document.querySelectorAll('section.stage svg').forEach(s =>
+      running ? s.unpauseAnimations?.() : s.pauseAnimations?.());
+  }
+
+  document.getElementById('playBtn').addEventListener('click', (e) => {
+    running = !running;
+    e.target.textContent = running ? 'pause' : 'play';
+    e.target.classList.toggle('on', running);
+    apply();
+  });
+  document.getElementById('speedBtn').addEventListener('click', (e) => {
+    speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+    e.target.textContent = speed + '×';
+    apply();
+  });
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    const cur = root.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    running = false;
+    const b = document.getElementById('playBtn');
+    b.textContent = 'play'; b.classList.remove('on');
+  }
+  apply();
+</script>
+</body>
+</html>
