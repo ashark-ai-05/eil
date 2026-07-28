@@ -225,7 +225,19 @@ export async function ingestRepo(
         } else await ingestOne(ch.path);
       }
     } else {
-      for await (const path of source.listFiles()) await ingestOne(path);
+      const listed: string[] = [];
+      for await (const path of source.listFiles()) {
+        listed.push(`code:${key}:${path}`);
+        await ingestOne(path);
+      }
+      const removed = await (await import("../store.js")).reconcileCodeRepo(
+        client,
+        key,
+        listed,
+        tenant,
+      );
+      out.deleted += removed.length;
+      for (const id of removed) console.log(`  - ${id} (quarantined after full resync)`);
     }
     await setCursor(client, ckey, head, tenant);
     console.log(

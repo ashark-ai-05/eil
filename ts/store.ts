@@ -85,6 +85,19 @@ export async function reconcile(
   }
 }
 
+export async function reconcileCodeRepo(
+  client: Db,
+  repo: string,
+  ids: string[],
+  tenant = "default",
+): Promise<string[]> {
+  const res = await client.query(
+    "UPDATE documents SET tombstoned_at = now(), quarantine_until = now() + interval '7 days' WHERE tenant = $1 AND source = 'code' AND code_repo = $2 AND tombstoned_at IS NULL AND NOT (id = ANY($3::text[])) RETURNING id",
+    [tenant, repo, ids],
+  );
+  return res.rows.map((r) => r.id as string);
+}
+
 /**
  * Insert or update a document and its chunks/links. Returns true if content
  * changed. Owns its transaction: FOR UPDATE only serializes concurrent
