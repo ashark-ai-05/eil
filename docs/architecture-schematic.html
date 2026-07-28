@@ -6,170 +6,143 @@
 <title>EIL — Knowledge Plane Schematic</title>
 <style>
   :root {
-    --ink: #090e18; --ink-2: #0c1322; --panel: #10192b; --panel-2: #131e33;
-    --line: #223148; --line-soft: #1a2740; --text: #cbd7e9; --muted: #6f819e; --faint: #46587a;
-    --lex: #5cc2ef; --vec: #efab54; --fuse: #eef4fd; --ok: #5ccb8e;
+    --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e; --warn:#ef7d6b;
     --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --r: 10px; color-scheme: dark;
+    --r:10px; color-scheme:dark;
   }
   @media (prefers-color-scheme: light) {
     :root { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
-      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63;
-      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme: light; }
+      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63; --warn:#c0442f;
+      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
   }
-  :root[data-theme="dark"] { --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
-    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e;
-    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc; color-scheme: dark; }
-  :root[data-theme="light"] { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
-    --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63;
-    --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme: light; }
+  :root[data-theme="dark"]{ --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e; --warn:#ef7d6b;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc; color-scheme:dark; }
+  :root[data-theme="light"]{ --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+    --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63; --warn:#c0442f;
+    --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
 
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0; background: var(--ink); color: var(--text);
-    font-family: var(--mono); font-size: 15px; line-height: 1.5;
-    -webkit-font-smoothing: antialiased; letter-spacing: -0.01em;
-    background-image:
-      radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--lex) 8%, transparent), transparent 60%),
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--ink); color:var(--text); font-family:var(--mono); font-size:15px; line-height:1.5;
+    -webkit-font-smoothing:antialiased; letter-spacing:-0.01em;
+    background-image: radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--lex) 8%, transparent), transparent 60%),
       radial-gradient(110% 70% at 6% 108%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
-    background-attachment: fixed;
-  }
-  .wrap { max-width: 840px; margin: 0 auto; padding: clamp(20px,4vw,44px) clamp(16px,4vw,36px) 60px; }
-  .toggle { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    background-attachment:fixed; }
+  .wrap { max-width:820px; margin:0 auto; padding:clamp(20px,4vw,44px) clamp(16px,4vw,36px) 60px; }
+  .toggle { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 
-  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
-  .mark { display: flex; align-items: center; gap: 12px; }
-  .glyph { width: 32px; height: 32px; flex: none; }
-  .word { font-size: 19px; font-weight: 700; letter-spacing: 0.02em; }
-  .word span { color: var(--muted); font-weight: 500; }
-  .tag { color: var(--muted); font-size: 13px; margin-top: 4px; max-width: 60ch; letter-spacing: 0; line-height: 1.55; }
-  .tag b { color: var(--text); font-weight: 600; }
-  .toolbar { display: flex; align-items: center; gap: 10px; }
-  .stat { font-size: 11px; color: var(--faint); letter-spacing: 0.04em; text-align: right; line-height: 1.7; }
-  .stat b { color: var(--ok); font-weight: 600; }
-  button.theme { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--muted); background: var(--panel); border: 1px solid var(--line); padding: 8px 12px; border-radius: 7px; cursor: pointer; transition: color .15s, border-color .15s; }
-  button.theme:hover { color: var(--text); border-color: var(--muted); }
-  .hint { font-size: 11.5px; color: var(--faint); letter-spacing: 0.02em; margin: 16px 0 14px; }
-  .hint b { color: var(--lex); font-weight: 600; }
+  header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+  .mark { display:flex; align-items:center; gap:12px; }
+  .glyph { width:32px; height:32px; flex:none; }
+  .word { font-size:19px; font-weight:700; letter-spacing:0.02em; }
+  .word span { color:var(--muted); font-weight:500; }
+  .tag { color:var(--muted); font-size:13px; margin-top:4px; max-width:58ch; letter-spacing:0; line-height:1.55; }
+  .tag b { color:var(--text); font-weight:600; }
+  .toolbar { display:flex; align-items:center; gap:10px; }
+  .stat { font-size:11px; color:var(--faint); letter-spacing:0.04em; text-align:right; line-height:1.7; }
+  .stat b { color:var(--ok); font-weight:600; }
+  button.theme { font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted);
+    background:var(--panel); border:1px solid var(--line); padding:8px 12px; border-radius:7px; cursor:pointer; transition:color .15s, border-color .15s; }
+  button.theme:hover { color:var(--text); border-color:var(--muted); }
+  .hint { font-size:11.5px; color:var(--faint); letter-spacing:0.02em; margin:16px 0 14px; }
+  .hint b { color:var(--lex); font-weight:600; }
 
-  /* ---------- vertical pipeline ---------- */
-  .pipe { position: relative; }
-  .row { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+  /* vertical pipeline */
+  .pipe { position:relative; }
+  .row { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); }
   .row.acc { border-color: color-mix(in oklab, var(--ok) 36%, var(--line)); }
-  .row-h { display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer; user-select: none; border-radius: var(--r); flex-wrap: wrap; }
-  .row-h:hover { background: var(--panel-2); }
-  .row-h .n { font-size: 11px; color: var(--faint); letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
-  .row-h .t { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text); }
-  .row-h .sub { font-size: 12px; color: var(--muted); letter-spacing: 0; }
-  .row-h .cv { margin-left: auto; color: var(--faint); font-size: 13px; transition: transform .2s, color .15s; }
-  .summary { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 16px 14px; }
-  .detail { display: none; padding: 4px 16px 16px; }
-  .detail p { margin: 0 0 11px; font-size: 12.5px; color: var(--muted); line-height: 1.55; max-width: 80ch; }
-  .detail p em { color: var(--text); font-style: normal; }
-  .detail p .kx { color: var(--lex); } .detail p .kv { color: var(--vec); } .detail p .kf { color: var(--text); font-weight: 600; }
-  .detail .file { font-size: 11px; color: var(--faint); margin-bottom: 9px; }
+  .row-h { display:flex; align-items:center; gap:12px; padding:13px 16px; cursor:pointer; user-select:none; border-radius:var(--r); flex-wrap:wrap; }
+  .row-h:hover { background:var(--panel-2); }
+  .row-h .n { font-size:11px; color:var(--faint); letter-spacing:0.1em; font-variant-numeric:tabular-nums; }
+  .row-h .t { font-size:13px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:var(--text); }
+  .row-h .sub { font-size:12px; color:var(--muted); letter-spacing:0; }
+  .row-h .cv { margin-left:auto; color:var(--faint); font-size:13px; transition:transform .2s, color .15s; }
 
-  .chip { font-size: 11.5px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; letter-spacing: 0; display: inline-flex; align-items: center; gap: 7px; }
-  .chip b { color: var(--text); font-weight: 600; }
-  .chip.lex { border-color: color-mix(in oklab, var(--lex) 45%, var(--line)); }
-  .chip.vec { border-color: color-mix(in oklab, var(--vec) 45%, var(--line)); }
-  .chip.ok  { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
-  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
-  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--muted); }
-  .dot.lex { background: var(--lex); box-shadow: 0 0 8px var(--lex); }
-  .dot.vec { background: var(--vec); box-shadow: 0 0 8px var(--vec); }
-  .dot.ok  { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .detail { display:none; padding:2px 16px 16px; }
+  .diagram svg { display:block; width:100%; max-width:400px; height:auto; }
+  svg text { font-family:var(--mono); }
+  .cap { font-size:12px; color:var(--muted); margin-top:9px; line-height:1.5; max-width:72ch; letter-spacing:0; }
+  .cap b { color:var(--text); font-weight:600; } .cap .kx { color:var(--lex); } .cap .kv { color:var(--vec); } .cap .ko { color:var(--ok); }
 
-  /* fusion mini-graphic in the Search row */
-  .fusewrap { padding: 2px 16px 12px; }
-  .fuse svg { display: block; width: 100%; max-width: 340px; height: auto; }
+  .dot { width:6px; height:6px; border-radius:50%; flex:none; background:var(--muted); }
+  .dot.lex { background:var(--lex); box-shadow:0 0 8px var(--lex); }
+  .dot.vec { background:var(--vec); box-shadow:0 0 8px var(--vec); }
+  .dot.ok { background:var(--ok); box-shadow:0 0 8px var(--ok); }
 
   /* down connectors */
-  .vconn { display: flex; justify-content: center; padding: 2px 0; }
-  .vconn svg { overflow: visible; }
-  .vrail { stroke: var(--faint); stroke-width: 2; }
-  .vhead { stroke: var(--faint); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .vconn { display:flex; justify-content:center; padding:2px 0; }
+  .vconn svg { overflow:visible; }
+  .vrail { stroke:var(--faint); stroke-width:2; }
+  .vhead { stroke:var(--faint); stroke-width:2; fill:none; stroke-linecap:round; stroke-linejoin:round; }
 
-  /* loop-back: from Observability up into Ingest/Index */
-  .loopback { display: flex; align-items: center; gap: 12px; justify-content: center; padding: 8px 0 2px; }
-  .loopback svg { overflow: visible; }
-  .lbrail { stroke: var(--lex); stroke-width: 2; fill: none; }
-  .lbhead { stroke: var(--lex); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-  .loopback .txt { font-size: 12px; color: var(--lex); letter-spacing: 0.01em; }
-  .loopback .txt b { font-weight: 700; }
-  /* subtle return spine on the right, robust to in-place expansion */
-  .pipe::after { content: ""; position: absolute; right: -14px; top: 96px; bottom: 118px;
-    border-right: 2px dashed color-mix(in oklab, var(--lex) 40%, var(--line)); border-radius: 2px; pointer-events: none; }
-  @media (max-width: 700px) { .pipe::after { display: none; } }
+  /* loop-back */
+  .loopback { display:flex; align-items:center; gap:11px; justify-content:center; padding:9px 0 3px; }
+  .loopback svg { overflow:visible; }
+  .lbrail { stroke:var(--lex); stroke-width:2; fill:none; stroke-linecap:round; }
+  .lbhead { stroke:var(--lex); stroke-width:2; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .loopback .txt { font-size:12px; color:var(--lex); letter-spacing:0.01em; }
+  .loopback .txt b { font-weight:700; }
+  .pipe::after { content:""; position:absolute; right:-14px; top:96px; bottom:126px;
+    border-right:2px dashed color-mix(in oklab, var(--lex) 38%, var(--line)); border-radius:2px; pointer-events:none; }
+  @media (max-width:700px){ .pipe::after { display:none; } }
 
-  /* ---------- pure-CSS in-place reveal ---------- */
-  #s1:checked ~ .pipe [data-r="1"] .detail, #s2:checked ~ .pipe [data-r="2"] .detail,
-  #s3:checked ~ .pipe [data-r="3"] .detail, #s4:checked ~ .pipe [data-r="4"] .detail,
-  #s5:checked ~ .pipe [data-r="5"] .detail, #s6:checked ~ .pipe [data-r="6"] .detail,
-  #s7:checked ~ .pipe [data-r="7"] .detail, #sg:checked ~ .pipe [data-r="g"] .detail
-    { display: block; animation: reveal .26s ease both; }
-  #s1:checked ~ .pipe [data-r="1"] .cv, #s2:checked ~ .pipe [data-r="2"] .cv,
-  #s3:checked ~ .pipe [data-r="3"] .cv, #s4:checked ~ .pipe [data-r="4"] .cv,
-  #s5:checked ~ .pipe [data-r="5"] .cv, #s6:checked ~ .pipe [data-r="6"] .cv,
-  #s7:checked ~ .pipe [data-r="7"] .cv, #sg:checked ~ .pipe [data-r="g"] .cv
-    { transform: rotate(180deg); color: var(--lex); }
-  #s1:checked ~ .pipe [data-r="1"] .row-h, #s2:checked ~ .pipe [data-r="2"] .row-h,
-  #s3:checked ~ .pipe [data-r="3"] .row-h, #s4:checked ~ .pipe [data-r="4"] .row-h,
-  #s5:checked ~ .pipe [data-r="5"] .row-h, #s6:checked ~ .pipe [data-r="6"] .row-h,
-  #s7:checked ~ .pipe [data-r="7"] .row-h, #sg:checked ~ .pipe [data-r="g"] .row-h
-    { background: var(--panel-2); }
-  #s1:focus-visible ~ .pipe [data-r="1"] .row-h, #s2:focus-visible ~ .pipe [data-r="2"] .row-h,
-  #s3:focus-visible ~ .pipe [data-r="3"] .row-h, #s4:focus-visible ~ .pipe [data-r="4"] .row-h,
-  #s5:focus-visible ~ .pipe [data-r="5"] .row-h, #s6:focus-visible ~ .pipe [data-r="6"] .row-h,
-  #s7:focus-visible ~ .pipe [data-r="7"] .row-h, #sg:focus-visible ~ .pipe [data-r="g"] .row-h
-    { outline: 2px solid var(--lex); outline-offset: 2px; }
-  @keyframes reveal { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+  /* pure-CSS in-place reveal */
+  #s1:checked ~ .pipe [data-r="1"] .detail, #s2:checked ~ .pipe [data-r="2"] .detail, #s3:checked ~ .pipe [data-r="3"] .detail,
+  #s4:checked ~ .pipe [data-r="4"] .detail, #s5:checked ~ .pipe [data-r="5"] .detail, #s6:checked ~ .pipe [data-r="6"] .detail,
+  #s7:checked ~ .pipe [data-r="7"] .detail, #sg:checked ~ .pipe [data-r="g"] .detail { display:block; animation:reveal .26s ease both; }
+  #s1:checked ~ .pipe [data-r="1"] .cv, #s2:checked ~ .pipe [data-r="2"] .cv, #s3:checked ~ .pipe [data-r="3"] .cv,
+  #s4:checked ~ .pipe [data-r="4"] .cv, #s5:checked ~ .pipe [data-r="5"] .cv, #s6:checked ~ .pipe [data-r="6"] .cv,
+  #s7:checked ~ .pipe [data-r="7"] .cv, #sg:checked ~ .pipe [data-r="g"] .cv { transform:rotate(180deg); color:var(--lex); }
+  #s1:checked ~ .pipe [data-r="1"] .row-h, #s2:checked ~ .pipe [data-r="2"] .row-h, #s3:checked ~ .pipe [data-r="3"] .row-h,
+  #s4:checked ~ .pipe [data-r="4"] .row-h, #s5:checked ~ .pipe [data-r="5"] .row-h, #s6:checked ~ .pipe [data-r="6"] .row-h,
+  #s7:checked ~ .pipe [data-r="7"] .row-h, #sg:checked ~ .pipe [data-r="g"] .row-h { background:var(--panel-2); }
+  #s1:focus-visible ~ .pipe [data-r="1"] .row-h, #s2:focus-visible ~ .pipe [data-r="2"] .row-h, #s3:focus-visible ~ .pipe [data-r="3"] .row-h,
+  #s4:focus-visible ~ .pipe [data-r="4"] .row-h, #s5:focus-visible ~ .pipe [data-r="5"] .row-h, #s6:focus-visible ~ .pipe [data-r="6"] .row-h,
+  #s7:focus-visible ~ .pipe [data-r="7"] .row-h, #sg:focus-visible ~ .pipe [data-r="g"] .row-h { outline:2px solid var(--lex); outline-offset:2px; }
+  @keyframes reveal { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:none; } }
+  .row.gov .row-h .t { color:var(--ok); }
 
-  /* governance base */
-  .row.gov .row-h .t { color: var(--ok); }
+  .legend { display:flex; gap:20px 30px; flex-wrap:wrap; margin-top:26px; padding-top:20px; border-top:1px solid var(--line-soft); }
+  .legend .grp { display:flex; flex-direction:column; gap:5px; }
+  .legend h4 { margin:0 0 3px; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:var(--faint); font-weight:600; }
+  .legend .li { font-size:12px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .legend .li b { color:var(--text); font-weight:600; }
+  .foot { margin-top:26px; font-size:11px; color:var(--faint); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .foot code { color:var(--muted); }
 
-  .legend { display: flex; gap: 20px 30px; flex-wrap: wrap; margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
-  .legend .grp { display: flex; flex-direction: column; gap: 5px; }
-  .legend h4 { margin: 0 0 3px; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
-  .legend .li { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .legend .li b { color: var(--text); font-weight: 600; }
-  .foot { margin-top: 26px; font-size: 11px; color: var(--faint); letter-spacing: 0.02em; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  .foot code { color: var(--muted); }
-
-  /* ---------- subtle motion ---------- */
-  @keyframes dash { to { stroke-dashoffset: -1000; } }
+  /* motion */
+  @keyframes dash { to { stroke-dashoffset:-1000; } }
+  @keyframes floaty { 0%,100%{ opacity:.35 } 50%{ opacity:1 } }
+  @keyframes travel { 0%{ opacity:0; transform:translate(0,0) } 14%{ opacity:1 } 82%{ opacity:1 } 100%{ opacity:0; transform:translate(var(--tx,40px), var(--ty,0)) } }
+  @keyframes draw { from { stroke-dashoffset:var(--len,200); } to { stroke-dashoffset:0; } }
   @media (prefers-reduced-motion: no-preference) {
-    .signal { stroke-dasharray: 6 10; animation: dash 14s linear infinite; }
-    .vrail  { stroke-dasharray: 3 6; animation: dash 9s linear infinite; }
-    .lbrail { stroke-dasharray: 5 7; animation: dash 16s linear infinite; }
-    .pulse  { animation: pulseMove 3.2s ease-in-out infinite; }
-    @keyframes pulseMove { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
+    .signal { stroke-dasharray:6 9; animation:dash 13s linear infinite; }
+    .vrail { stroke-dasharray:3 6; animation:dash 9s linear infinite; }
+    .lbrail { stroke-dasharray:5 7; animation:dash 15s linear infinite; }
+    .pulse { animation:floaty 2.6s ease-in-out infinite; }
+    .pkt { animation:travel 3.6s cubic-bezier(.6,0,.4,1) infinite; }
+    .spark { stroke-dasharray:var(--len,200); animation:draw 4.5s ease-in-out infinite alternate; }
   }
-  @media (max-width: 560px) { body { font-size: 14px; } }
+  @media (max-width:560px){ body { font-size:14px; } }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <input type="checkbox" class="toggle" id="s1" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="s2" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="s3" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="s4" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="s5" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="s6" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="s7" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="sg" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s1" aria-hidden="true"><input type="checkbox" class="toggle" id="s2" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s3" aria-hidden="true"><input type="checkbox" class="toggle" id="s4" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s5" aria-hidden="true"><input type="checkbox" class="toggle" id="s6" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s7" aria-hidden="true"><input type="checkbox" class="toggle" id="sg" aria-hidden="true">
 
   <header>
     <div>
       <div class="mark">
         <svg class="glyph" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-          <rect x="1" y="1" width="38" height="38" rx="9" stroke="var(--line)" />
+          <rect x="1" y="1" width="38" height="38" rx="9" stroke="var(--line)"/>
           <path d="M11 14h18M11 20h18M11 26h11" stroke="var(--lex)" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="27.5" cy="26" r="2.6" fill="var(--vec)"/>
-        </svg>
+          <circle cx="27.5" cy="26" r="2.6" fill="var(--vec)"/></svg>
         <div class="word"><b>EIL</b> <span>· knowledge plane</span></div>
       </div>
       <p class="tag">Deterministic, <b>token-free</b> retrieval over org knowledge — local-first on Postgres, served to agents via MCP.</p>
@@ -180,162 +153,260 @@
     </div>
   </header>
 
-  <p class="hint">▾ <b>click any stage</b> to expand it in place. the cycle closes at the bottom — agents' usage steers what gets indexed.</p>
+  <p class="hint">▾ <b>click any stage</b> to expand its diagram in place. the cycle closes at the bottom.</p>
 
   <div class="pipe">
 
+    <!-- 01 SOURCES -->
     <section class="row" data-r="1">
       <label class="row-h" for="s1"><span class="n">01</span><span class="t">Sources</span><span class="sub">what you can already read</span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="summary"><span class="chip">Confluence · CQL</span><span class="chip">Jira · JQL</span><span class="chip">Git repos</span><span class="chip">Obsidian · ELK</span></div>
-      <div class="detail">
-        <div class="file">ts/connectors/</div>
-        <p>Each source is a small connector you drive with <em>your own credentials</em> — you can only index what you're already allowed to read.</p>
-        <div class="chips"><span class="chip"><b>ConfluenceClient</b> · updatedSince(cursor, scope)</span><span class="chip"><b>GitCloneSource</b> / <b>BitbucketApiSource</b></span><span class="chip">Bearer PAT / Basic</span></div>
-      </div>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 128" fill="none" aria-hidden="true">
+          <g font-size="9.5">
+            <rect x="2" y="6" width="96" height="22" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="12" y="20" fill="var(--muted)">Confluence</text>
+            <rect x="2" y="35" width="96" height="22" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="12" y="49" fill="var(--muted)">Jira</text>
+            <rect x="2" y="64" width="96" height="22" rx="6" fill="var(--panel-2)" stroke="var(--lex)"/><text x="12" y="78" fill="var(--lex)">Git repos ▚</text>
+            <rect x="2" y="93" width="96" height="22" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="12" y="107" fill="var(--muted)">Notes · Logs</text>
+          </g>
+          <path class="signal" d="M98 17 C 190 17, 210 64, 288 64" stroke="var(--faint)" stroke-width="1.6"/>
+          <path class="signal" d="M98 46 C 190 46, 210 64, 288 64" stroke="var(--faint)" stroke-width="1.6"/>
+          <path class="signal" d="M98 75 C 190 75, 210 64, 288 64" stroke="var(--lex)" stroke-width="1.6"/>
+          <path class="signal" d="M98 104 C 190 104, 210 64, 288 64" stroke="var(--faint)" stroke-width="1.6"/>
+          <g transform="translate(292,42)">
+            <ellipse cx="26" cy="4" rx="26" ry="7" fill="var(--panel)" stroke="var(--line)"/>
+            <path d="M0 4 v36 a26 7 0 0 0 52 0 v-36" fill="var(--panel)" stroke="var(--line)"/>
+            <ellipse cx="26" cy="4" rx="26" ry="7" fill="none" stroke="var(--line)"/>
+            <text x="26" y="28" fill="var(--text)" font-size="9.5" text-anchor="middle">catalog</text>
+          </g>
+          <circle class="pkt" style="--tx:190px;--ty:-11px" cx="98" cy="75" r="3" fill="var(--lex)"/>
+        </svg>
+        <p class="cap">Confluence, Jira, <b>git repos</b>, notes, logs — each a connector you drive with <b>your own credentials</b>, so you only index what you can already read.</p>
+      </div></div>
     </section>
     <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
+    <!-- 02 INGEST (incl. code) -->
     <section class="row" data-r="2">
-      <label class="row-h" for="s2"><span class="n">02</span><span class="t">Ingest</span><span class="sub">incremental · scoped · deletable</span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="summary"><span class="chip">connectors</span><span class="chip">cursor sync</span><span class="chip">normalize → doc</span><span class="chip">reconcile</span></div>
-      <div class="detail">
-        <div class="file">ts/ingest/pipeline.ts</div>
-        <p>Per-doc transaction, content-hash gated so unchanged docs are no-ops. The <em>cursor advances only on success</em>; edits update, deletions tombstone. Scope it tight or wide.</p>
-        <div class="chips"><span class="chip"><b>ingestDocs()</b> · <b>ingestRepo()</b></span><span class="chip">--space / --project / --repo / --query</span><span class="chip"><b>sync_cursors</b> · timestamp / commit-SHA</span></div>
-      </div>
+      <label class="row-h" for="s2"><span class="n">02</span><span class="t">Ingest</span><span class="sub">only what changed</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 140" fill="none" aria-hidden="true">
+          <!-- connector lane -->
+          <text x="2" y="14" fill="var(--muted)" font-size="9">connector · CQL / JQL</text>
+          <line x1="6" y1="30" x2="150" y2="30" stroke="var(--line)" stroke-width="6" stroke-linecap="round"/>
+          <line class="signal" x1="6" y1="30" x2="112" y2="30" stroke="var(--lex)" stroke-width="2"/>
+          <g transform="translate(112,22)"><path d="M0 0 h12 v16 h-12z" fill="var(--lex)" opacity=".25"/><path d="M0 0 v16 M12 0 v16" stroke="var(--lex)" stroke-width="1.5"/><text x="6" y="-3" fill="var(--lex)" font-size="8" text-anchor="middle">cursor</text></g>
+          <g font-size="8" fill="var(--muted)"><rect x="126" y="24" width="9" height="12" rx="2" fill="var(--panel-2)" stroke="var(--line)"/><rect x="138" y="24" width="9" height="12" rx="2" fill="var(--panel-2)" stroke="var(--line)"/></g>
+          <!-- git repo lane (code ingestion) -->
+          <text x="2" y="66" fill="var(--lex)" font-size="9">git repo · clone + diff</text>
+          <g transform="translate(6,74)">
+            <rect x="0" y="0" width="26" height="30" rx="4" fill="var(--panel-2)" stroke="var(--lex)"/>
+            <path d="M6 8h14M6 14h14M6 20h9" stroke="var(--lex)" stroke-width="1.4" stroke-linecap="round"/>
+          </g>
+          <line class="signal" x1="34" y1="89" x2="118" y2="89" stroke="var(--lex)" stroke-width="2"/>
+          <g font-size="8" font-weight="700">
+            <rect x="120" y="74" width="20" height="13" rx="3" fill="color-mix(in oklab,var(--ok) 22%,transparent)" stroke="var(--ok)"/><text x="130" y="83" fill="var(--ok)" text-anchor="middle">A</text>
+            <rect x="120" y="90" width="20" height="13" rx="3" fill="color-mix(in oklab,var(--vec) 22%,transparent)" stroke="var(--vec)"/><text x="130" y="99" fill="var(--vec)" text-anchor="middle">M</text>
+            <rect x="120" y="106" width="20" height="13" rx="3" fill="color-mix(in oklab,var(--warn) 22%,transparent)" stroke="var(--warn)"/><text x="130" y="115" fill="var(--warn)" text-anchor="middle">D</text>
+          </g>
+          <!-- merge -> normalize -> chunk -> catalog -->
+          <path class="signal" d="M150 30 C 175 30, 175 70, 200 70" stroke="var(--faint)" stroke-width="1.6"/>
+          <path class="signal" d="M150 92 C 175 92, 175 70, 200 70" stroke="var(--faint)" stroke-width="1.6"/>
+          <g font-size="9" text-anchor="middle">
+            <rect x="200" y="58" width="60" height="24" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="230" y="73" fill="var(--text)">normalize</text>
+            <path class="signal" d="M260 70 h22" stroke="var(--faint)" stroke-width="1.6"/>
+            <rect x="282" y="58" width="48" height="24" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="306" y="73" fill="var(--text)">chunk</text>
+            <path class="signal" d="M330 70 h22" stroke="var(--faint)" stroke-width="1.6"/>
+            <rect x="352" y="58" width="44" height="24" rx="6" fill="var(--panel-2)" stroke="var(--ok)"/><text x="374" y="73" fill="var(--ok)">upsert</text>
+          </g>
+          <circle class="pkt" style="--tx:106px" cx="6" cy="30" r="3" fill="var(--lex)"/>
+        </svg>
+        <p class="cap"><b>Incremental by construction.</b> Connectors sync from a saved <span class="kx">cursor</span>; <b>git repos</b> re-index by <b>git&nbsp;diff</b> — <span class="ko">A</span>dded / <span class="kv">M</span>odified / <span style="color:var(--warn)">D</span>eleted. Unchanged files are no-ops; deletions tombstone.</p>
+      </div></div>
     </section>
     <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
+    <!-- 03 INDEX -->
     <section class="row" data-r="3">
-      <label class="row-h" for="s3"><span class="n">03</span><span class="t">Index</span><span class="sub">one Postgres · no extension</span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="summary"><span class="chip">chunker</span><span class="chip lex"><span class="dot lex"></span>full-text</span><span class="chip vec"><span class="dot vec"></span>vectors</span><span class="chip">ACL</span></div>
-      <div class="detail">
-        <div class="file">migrations/0001–0007</div>
-        <p>Full-text and vector live <em>side by side on the chunk</em>; the ACL lives on the doc. No <span class="kv">pgvector</span> — embeddings are packed float32 in <code>bytea</code>, cosine runs in-process, so it works on zero-install PGlite too.</p>
-        <div class="chips"><span class="chip lex">chunks.tsv · GENERATED tsvector</span><span class="chip vec">chunks.embedding · bytea f32 · 384d</span><span class="chip">ACL: ingested_by = $p OR acl_groups ?| $g</span></div>
-      </div>
+      <label class="row-h" for="s3"><span class="n">03</span><span class="t">Index</span><span class="sub">one Postgres, no extension</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 120" fill="none" aria-hidden="true">
+          <!-- doc with lock -->
+          <g transform="translate(4,34)"><rect x="0" y="0" width="40" height="52" rx="5" fill="var(--panel-2)" stroke="var(--line)"/>
+            <path d="M8 12h24M8 20h24M8 28h16" stroke="var(--faint)" stroke-width="1.4" stroke-linecap="round"/>
+            <g transform="translate(20,40)"><rect x="-7" y="0" width="14" height="10" rx="2" fill="var(--panel)" stroke="var(--ok)"/><path d="M-4 0 v-3 a4 4 0 0 1 8 0 v3" fill="none" stroke="var(--ok)" stroke-width="1.3"/></g></g>
+          <text x="24" y="100" fill="var(--muted)" font-size="8.5" text-anchor="middle">doc · ACL</text>
+          <!-- chunks -->
+          <path class="signal" d="M44 60 h26" stroke="var(--faint)" stroke-width="1.6"/>
+          <g font-size="8" text-anchor="middle">
+            <rect x="72" y="20" width="40" height="20" rx="4" fill="var(--panel-2)" stroke="var(--line)"/><text x="92" y="33" fill="var(--muted)">chunk</text>
+            <rect x="72" y="50" width="40" height="20" rx="4" fill="var(--panel-2)" stroke="var(--line)"/><text x="92" y="63" fill="var(--muted)">chunk</text>
+            <rect x="72" y="80" width="40" height="20" rx="4" fill="var(--panel-2)" stroke="var(--line)"/><text x="92" y="93" fill="var(--muted)">chunk</text>
+          </g>
+          <!-- each chunk -> tsvector + vector -->
+          <g stroke-width="1.6" fill="none">
+            <path class="signal" d="M112 26 C 150 26, 160 30, 200 30" stroke="var(--lex)"/>
+            <path class="signal" d="M112 34 C 150 34, 160 74, 200 74" stroke="var(--vec)"/>
+          </g>
+          <g font-size="9">
+            <rect x="200" y="18" width="140" height="26" rx="6" fill="color-mix(in oklab,var(--lex) 12%,transparent)" stroke="var(--lex)"/>
+            <text x="210" y="30" fill="var(--lex)">full-text · tsvector</text>
+            <g stroke="var(--lex)" stroke-width="2" stroke-linecap="round"><line x1="210" y1="37" x2="222" y2="37"/><line x1="226" y1="37" x2="248" y2="37"/><line x1="252" y1="37" x2="262" y2="37"/><line x1="266" y1="37" x2="286" y2="37"/></g>
+            <rect x="200" y="62" width="140" height="26" rx="6" fill="color-mix(in oklab,var(--vec) 12%,transparent)" stroke="var(--vec)"/>
+            <text x="210" y="74" fill="var(--vec)">vector · bytea f32</text>
+            <g fill="var(--vec)"><circle cx="214" cy="81" r="2"/><circle cx="222" cy="81" r="2"/><circle cx="230" cy="81" r="2"/><circle cx="238" cy="81" r="2"/><circle cx="246" cy="81" r="2"/><circle cx="254" cy="81" r="2"/><circle cx="262" cy="81" r="2"/></g>
+          </g>
+          <text x="352" y="55" fill="var(--faint)" font-size="8.5" text-anchor="middle">GIN +</text><text x="352" y="66" fill="var(--faint)" font-size="8.5" text-anchor="middle">cosine</text>
+        </svg>
+        <p class="cap">Each doc → chunks; every chunk gets a <span class="kx">full-text tsvector</span> and a <span class="kv">local vector</span>, side by side — no pgvector needed. The <span class="ko">ACL</span> lives on the doc.</p>
+      </div></div>
     </section>
     <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
+    <!-- 04 SEARCH -->
     <section class="row" data-r="4">
-      <label class="row-h" for="s4"><span class="n">04</span><span class="t">Search</span><span class="sub">two arms, fused by <code>rrf()</code></span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="fusewrap">
-        <figure class="fuse" style="margin:0">
-          <svg viewBox="0 0 340 96" fill="none" aria-hidden="true">
-            <text x="6" y="52" fill="var(--muted)" font-size="9" font-family="var(--mono)">query</text>
-            <circle cx="36" cy="48" r="3" fill="var(--text)"/>
-            <path class="signal" d="M39 48 C 80 48, 80 22, 150 22" stroke="var(--lex)" stroke-width="2" fill="none"/>
-            <path class="signal" d="M39 48 C 80 48, 80 74, 150 74" stroke="var(--vec)" stroke-width="2" fill="none"/>
-            <rect x="150" y="10" width="96" height="24" rx="6" fill="color-mix(in oklab, var(--lex) 16%, transparent)" stroke="var(--lex)"/>
-            <text x="160" y="25" fill="var(--lex)" font-size="10" font-family="var(--mono)">FTS · ts_rank</text>
-            <rect x="150" y="62" width="96" height="24" rx="6" fill="color-mix(in oklab, var(--vec) 16%, transparent)" stroke="var(--vec)"/>
-            <text x="160" y="77" fill="var(--vec)" font-size="10" font-family="var(--mono)">VECTOR · cosine</text>
-            <path class="signal" d="M246 22 C 280 22, 280 48, 300 48" stroke="var(--lex)" stroke-width="2" fill="none"/>
-            <path class="signal" d="M246 74 C 280 74, 280 48, 300 48" stroke="var(--vec)" stroke-width="2" fill="none"/>
-            <circle class="pulse" cx="300" cy="48" r="5.5" fill="var(--fuse)"/>
-            <text x="335" y="52" fill="var(--fuse)" font-size="11" font-weight="700" font-family="var(--mono)" text-anchor="end">rrf()</text>
-          </svg>
-        </figure>
-      </div>
-      <div class="detail">
-        <div class="file">ts/search.ts · core/fusion.ts</div>
-        <p>The <span class="kx">lexical</span> and <span class="kv">semantic</span> arms each rank; <span class="kf">rrf()</span> fuses them, then tier/recency and the ACL predicate finish the sort. The vector arm is best-effort — it degrades cleanly to FTS-only.</p>
-        <div class="chips"><span class="chip"><b>rrf({ fts, vec })</b></span><span class="chip">modifier(tier, recency)</span><span class="chip">entity route · <code>PAY-981</code> → link graph</span></div>
-      </div>
+      <label class="row-h" for="s4"><span class="n">04</span><span class="t">Search</span><span class="sub">two arms, fused</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 108" fill="none" aria-hidden="true">
+          <text x="4" y="58" fill="var(--muted)" font-size="9">query</text>
+          <circle cx="40" cy="54" r="3.5" fill="var(--text)"/>
+          <path class="signal" d="M44 54 C 84 54, 84 26, 150 26" stroke="var(--lex)" stroke-width="2"/>
+          <path class="signal" d="M44 54 C 84 54, 84 82, 150 82" stroke="var(--vec)" stroke-width="2"/>
+          <rect x="150" y="14" width="96" height="24" rx="6" fill="color-mix(in oklab,var(--lex) 16%,transparent)" stroke="var(--lex)"/><text x="160" y="29" fill="var(--lex)" font-size="10">FTS · ts_rank</text>
+          <rect x="150" y="70" width="96" height="24" rx="6" fill="color-mix(in oklab,var(--vec) 16%,transparent)" stroke="var(--vec)"/><text x="160" y="85" fill="var(--vec)" font-size="10">VECTOR · cosine</text>
+          <path class="signal" d="M246 26 C 278 26, 278 54, 300 54" stroke="var(--lex)" stroke-width="2"/>
+          <path class="signal" d="M246 82 C 278 82, 278 54, 300 54" stroke="var(--vec)" stroke-width="2"/>
+          <circle class="pulse" cx="300" cy="54" r="6" fill="var(--fuse)"/>
+          <text x="300" y="40" fill="var(--fuse)" font-size="10" font-weight="700" text-anchor="middle">rrf()</text>
+          <path class="signal" d="M307 54 h20" stroke="var(--fuse)" stroke-width="2"/>
+          <g fill="none" stroke="var(--fuse)" stroke-width="2" stroke-linecap="round" opacity=".9">
+            <line x1="332" y1="40" x2="392" y2="40"/><line x1="332" y1="54" x2="380" y2="54"/><line x1="332" y1="68" x2="368" y2="68"/></g>
+          <text x="332" y="86" fill="var(--faint)" font-size="8">ranked · ACL-filtered</text>
+        </svg>
+        <p class="cap">A query runs two ways at once — <span class="kx">exact terms</span> and <span class="kv">meaning</span>. <span class="cap" style="color:var(--text);font-weight:600">rrf()</span> fuses the rankings into one list; tier, recency and ACL finish the sort. Vector arm is best-effort → degrades to FTS-only.</p>
+      </div></div>
     </section>
     <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
+    <!-- 05 SERVE -->
     <section class="row" data-r="5">
-      <label class="row-h" for="s5"><span class="n">05</span><span class="t">Serve</span><span class="sub">MCP · two-phase · zero tokens</span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="summary"><span class="chip"><span class="dot ok"></span>MCP server</span><span class="chip">5 tools</span><span class="chip">audited</span></div>
-      <div class="detail">
-        <div class="file">ts/tools.ts · mcp-server.ts</div>
-        <p>A standard stdio MCP server, every call audited. <em>Two-phase</em>: search returns ids + snippets, the agent fetches only what it needs — deterministic, zero tokens spent searching.</p>
-        <div class="chips"><span class="chip ok"><b>search_docs · get_doc · expand · search_code · fetch_logs</b></span><span class="chip">eil tools · JSON manifest</span><span class="chip">in-proc callTool / REGISTRY</span></div>
-      </div>
+      <label class="row-h" for="s5"><span class="n">05</span><span class="t">Serve</span><span class="sub">MCP · two-phase</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 108" fill="none" aria-hidden="true">
+          <rect x="4" y="34" width="70" height="40" rx="7" fill="var(--panel-2)" stroke="var(--ok)"/><text x="39" y="58" fill="var(--ok)" font-size="10" text-anchor="middle">agent</text>
+          <rect x="326" y="34" width="70" height="40" rx="7" fill="var(--panel-2)" stroke="var(--line)"/><text x="361" y="52" fill="var(--text)" font-size="9.5" text-anchor="middle">EIL</text><text x="361" y="64" fill="var(--muted)" font-size="8" text-anchor="middle">MCP</text>
+          <!-- phase 1 -->
+          <text x="200" y="20" fill="var(--faint)" font-size="8" text-anchor="middle">phase 1</text>
+          <path class="signal" d="M74 40 h248" stroke="var(--lex)" stroke-width="1.8"/><path class="vhead" d="M316 36l6 4-6 4" stroke="var(--lex)"/>
+          <text x="200" y="36" fill="var(--lex)" font-size="8.5" text-anchor="middle">search_docs(q)</text>
+          <path class="signal" d="M322 52 h-248" stroke="var(--muted)" stroke-width="1.6"/><path class="vhead" d="M80 48l-6 4 6 4" stroke="var(--muted)"/>
+          <text x="200" y="66" fill="var(--muted)" font-size="8.5" text-anchor="middle">ids + snippets</text>
+          <!-- phase 2 -->
+          <text x="200" y="86" fill="var(--faint)" font-size="8" text-anchor="middle">phase 2</text>
+          <path class="signal" d="M74 96 h248" stroke="var(--fuse)" stroke-width="1.8"/><path class="vhead" d="M316 92l6 4-6 4" stroke="var(--fuse)"/>
+          <text x="200" y="93" fill="var(--fuse)" font-size="8.5" text-anchor="middle">get_doc(id) → content</text>
+          <circle class="pkt" style="--tx:248px" cx="74" cy="40" r="3" fill="var(--lex)"/>
+        </svg>
+        <p class="cap"><b>Two calls, deterministic.</b> Search returns ids + snippets; the agent fetches only what it needs — five tools (<code>search_docs · get_doc · expand · search_code · fetch_logs</code>), every call audited, <b>zero tokens spent searching</b>.</p>
+      </div></div>
     </section>
     <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
+    <!-- 06 AGENTS -->
     <section class="row acc" data-r="6">
       <label class="row-h" for="s6"><span class="n">06</span><span class="t">Agents</span><span class="sub">the consumers</span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="summary"><span class="chip"><span class="dot ok"></span>Amp</span><span class="chip">Claude Code</span><span class="chip">work connector</span></div>
-      <div class="detail">
-        <p>Agents pull ranked, ACL-filtered context in two cheap calls — <code>search → get_doc</code>. What they ask, and what returns nothing, becomes the signal for the loop below.</p>
-        <div class="chips"><span class="chip">two-phase pull · zero search tokens</span><span class="chip">any MCP client</span></div>
-      </div>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 96" fill="none" aria-hidden="true">
+          <g font-size="9" text-anchor="middle">
+            <rect x="6" y="16" width="86" height="26" rx="7" fill="var(--panel-2)" stroke="var(--ok)"/><text x="49" y="33" fill="var(--ok)">Amp</text>
+            <rect x="6" y="50" width="86" height="26" rx="7" fill="var(--panel-2)" stroke="var(--line)"/><text x="49" y="67" fill="var(--text)">Claude Code</text>
+          </g>
+          <path class="signal" d="M92 29 C 150 29, 160 46, 210 46" stroke="var(--faint)" stroke-width="1.6"/>
+          <path class="signal" d="M92 63 C 150 63, 160 46, 210 46" stroke="var(--faint)" stroke-width="1.6"/>
+          <rect x="210" y="30" width="94" height="32" rx="7" fill="var(--panel-2)" stroke="var(--lex)"/><text x="257" y="45" fill="var(--lex)" font-size="9" text-anchor="middle">EIL tools</text><text x="257" y="56" fill="var(--muted)" font-size="8" text-anchor="middle">search → get_doc</text>
+          <path class="signal" d="M304 46 h30" stroke="var(--fuse)" stroke-width="1.8"/><path class="vhead" d="M328 42l6 4-6 4" stroke="var(--fuse)"/>
+          <text x="368" y="43" fill="var(--fuse)" font-size="9" text-anchor="middle">grounded</text><text x="368" y="54" fill="var(--muted)" font-size="8" text-anchor="middle">answer</text>
+          <circle class="pkt" style="--tx:118px;--ty:17px" cx="92" cy="29" r="3" fill="var(--ok)"/>
+        </svg>
+        <p class="cap">Amp, Claude Code, the work connector — any MCP client. They <b>pull ranked, ACL-filtered context</b> and answer grounded. What they ask (and what returns nothing) becomes the signal for the loop below.</p>
+      </div></div>
     </section>
     <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
+    <!-- 07 OBSERVABILITY -->
     <section class="row" data-r="7">
       <label class="row-h" for="s7"><span class="n">07</span><span class="t">Observability</span><span class="sub">usage → what to build next</span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="summary"><span class="chip">metrics views</span><span class="chip">eval recall</span><span class="chip">report</span></div>
-      <div class="detail">
-        <div class="file">observability/ · migrations/0005</div>
-        <p>Metrics are SQL views over the facts — the <span class="kf">vw_*</span> views <em>are</em> the definitions. <code>eil eval</code> tracks recall, <code>eil report</code> shows adoption / zero-result / two-phase ratio, and that decides what's indexed or built next.</p>
-        <div class="chips"><span class="chip"><b>metrics.vw_*</b> views</span><span class="chip">eil eval · recall@k</span><span class="chip">eil report · Grafana</span></div>
-      </div>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 104" fill="none" aria-hidden="true">
+          <text x="6" y="16" fill="var(--muted)" font-size="9">recall@k · trend</text>
+          <rect x="6" y="22" width="150" height="66" rx="6" fill="var(--panel-2)" stroke="var(--line)"/>
+          <g stroke="var(--line-soft)" stroke-width="1"><line x1="16" y1="40" x2="146" y2="40"/><line x1="16" y1="58" x2="146" y2="58"/><line x1="16" y1="76" x2="146" y2="76"/></g>
+          <polyline class="spark" style="--len:170" points="16,78 40,70 64,72 88,54 112,48 136,34" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle class="pulse" cx="136" cy="34" r="3" fill="var(--ok)"/>
+          <g font-size="9"><text x="176" y="34" fill="var(--muted)">▸ metrics.vw_* views</text><text x="176" y="52" fill="var(--muted)">▸ eil eval · recall</text><text x="176" y="70" fill="var(--muted)">▸ eil report · adoption</text><text x="176" y="88" fill="var(--muted)">▸ zero-result · two-phase</text></g>
+        </svg>
+        <p class="cap"><b>Metrics are SQL views over the facts</b> — the <span class="ko">vw_*</span> views <em style="font-style:normal;color:var(--text)">are</em> the definitions. Recall trend + adoption decide what gets indexed or built next — which feeds back into ingest.</p>
+      </div></div>
     </section>
 
-    <!-- the loop closes here, back up into ingest/index -->
+    <!-- loop-back -->
     <div class="loopback">
-      <svg width="34" height="30" viewBox="0 0 34 30" fill="none" aria-hidden="true">
-        <path class="lbrail" d="M31 28 C 31 6, 4 6, 4 8"/>
-        <path class="lbhead" d="M0 12 L4 5 L8 12"/>
-      </svg>
+      <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true">
+        <path class="lbrail" d="M27 27 C 27 6, 5 6, 5 8"/>
+        <path class="lbhead" d="M1 12 L5 5 L9 12"/></svg>
       <span class="txt"><b>↻ learning loop</b> — usage steers <b>02 Ingest</b> &amp; <b>03 Index</b></span>
     </div>
 
     <div class="vconn" style="opacity:.5"><svg width="22" height="20" viewBox="0 0 22 20" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="12"/><path class="vhead" d="M6 10l5 7 5-7"/></svg></div>
 
-    <!-- governance: under every stage -->
+    <!-- GOVERNANCE -->
     <section class="row gov" data-r="g">
       <label class="row-h" for="sg"><span class="n">◆</span><span class="t">Governance</span><span class="sub">under every stage</span><span class="cv" aria-hidden="true">⌄</span></label>
-      <div class="summary"><span class="chip"><span class="dot ok"></span>fail-closed ACL</span><span class="chip">audit log</span><span class="chip">personal creds</span><span class="chip">tenant isolation</span><span class="chip">data-trust</span></div>
-      <div class="detail">
-        <p>Access control isn't a stage — it's the ground the plane rests on. Every query uses the <em>same</em> predicate; an unstamped doc is owner-only, so a bug fails closed. Every tool and model call is a logged row.</p>
-        <div class="chips"><span class="chip">visibleSql · ingested_by / acl_groups</span><span class="chip">tool audit · llm_calls</span><span class="chip">eil audit --strict · integrity + drift</span><span class="chip">per-tenant</span></div>
-      </div>
+      <div class="detail"><div class="diagram">
+        <svg viewBox="0 0 400 96" fill="none" aria-hidden="true">
+          <text x="6" y="16" fill="var(--muted)" font-size="9">read request</text>
+          <circle cx="30" cy="48" r="3.5" fill="var(--text)"/>
+          <path class="signal" d="M34 48 h80" stroke="var(--faint)" stroke-width="1.8"/>
+          <!-- ACL gate -->
+          <rect x="116" y="20" width="58" height="56" rx="7" fill="color-mix(in oklab,var(--ok) 10%,transparent)" stroke="var(--ok)"/>
+          <text x="145" y="45" fill="var(--ok)" font-size="9" text-anchor="middle">ACL</text><text x="145" y="57" fill="var(--muted)" font-size="8" text-anchor="middle">gate</text>
+          <!-- pass -->
+          <path class="signal" d="M174 40 h56" stroke="var(--ok)" stroke-width="1.8"/><path class="vhead" d="M224 36l6 4-6 4" stroke="var(--ok)"/>
+          <rect x="234" y="28" width="150" height="24" rx="6" fill="color-mix(in oklab,var(--ok) 12%,transparent)" stroke="var(--ok)"/>
+          <text x="244" y="43" fill="var(--ok)" font-size="9">✓ visible — you own / in group</text>
+          <!-- block -->
+          <path d="M174 60 h44" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="3 4"/>
+          <g transform="translate(224,60)" stroke="var(--warn)" stroke-width="1.8"><line x1="-4" y1="-4" x2="4" y2="4"/><line x1="4" y1="-4" x2="-4" y2="4"/></g>
+          <text x="244" y="64" fill="var(--warn)" font-size="9">✗ blocked — fail-closed</text>
+        </svg>
+        <p class="cap">Not a stage — the ground the plane rests on. <b>Every read passes the same ACL gate</b>; an unstamped doc is owner-only, so a bug fails <em style="font-style:normal;color:var(--text)">closed</em>. Every tool &amp; model call is a logged, auditable row.</p>
+      </div></div>
     </section>
 
   </div>
 
   <div class="legend">
-    <div class="grp">
-      <h4>Signal</h4>
+    <div class="grp"><h4>Signal</h4>
       <div class="li"><span class="dot lex"></span><b>Lexical</b> — full-text, exact terms</div>
       <div class="li"><span class="dot vec"></span><b>Semantic</b> — meaning, local model</div>
-      <div class="li"><span class="dot" style="background:var(--fuse);box-shadow:0 0 8px var(--fuse)"></span><b>Fused</b> — reciprocal-rank fusion</div>
-    </div>
-    <div class="grp">
-      <h4>Guarantees</h4>
+      <div class="li"><span class="dot" style="background:var(--fuse);box-shadow:0 0 8px var(--fuse)"></span><b>Fused</b> — reciprocal-rank fusion</div></div>
+    <div class="grp"><h4>Guarantees</h4>
       <div class="li">Fail-closed ACL, everywhere</div>
       <div class="li">Deterministic — no LLM in the hot loop</div>
-      <div class="li">Incremental · hash-gated · tombstoned</div>
-    </div>
-    <div class="grp">
-      <h4>Runs on</h4>
+      <div class="li">Incremental · hash-gated · tombstoned</div></div>
+    <div class="grp"><h4>Runs on</h4>
       <div class="li">PGlite · embedded PG · system PG</div>
       <div class="li">org DSN · kube</div>
-      <div class="li">macOS · Linux · WSL2 — no Docker</div>
-    </div>
+      <div class="li">macOS · Linux · WSL2 — no Docker</div></div>
   </div>
 
-  <div class="foot">
-    <span>Enterprise Intelligence Layer — the knowledge plane</span>
-    <span><code>sources → … → agents ↻</code></span>
-  </div>
+  <div class="foot"><span>Enterprise Intelligence Layer — the knowledge plane</span><span><code>sources → … → agents ↻</code></span></div>
 </div>
 
 <script>
-  (function () {
-    var root = document.documentElement, btn = document.getElementById('themeBtn');
-    if (!btn) return;
-    function sysDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
-    btn.addEventListener('click', function () {
-      var cur = root.getAttribute('data-theme') || (sysDark() ? 'dark' : 'light');
-      root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
-    });
-  })();
+  (function(){ var root=document.documentElement, btn=document.getElementById('themeBtn'); if(!btn) return;
+    function sysDark(){ return window.matchMedia('(prefers-color-scheme: dark)').matches; }
+    btn.addEventListener('click', function(){ var cur=root.getAttribute('data-theme')||(sysDark()?'dark':'light');
+      root.setAttribute('data-theme', cur==='dark'?'light':'dark'); }); })();
 </script>
 
 </body>
