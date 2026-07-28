@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CanonicalDoc } from "../contracts/models.js";
 import { type Db, connect, migrate } from "../db.js";
-import { getDoc, viewerFromAuthenticatedClaims } from "../search.js";
+import { expand, getDoc, searchDocs, viewerFromAuthenticatedClaims } from "../search.js";
 import { getCursor, setCursor, upsertDocument } from "../store.js";
 import { callTool } from "../tools.js";
 
@@ -77,6 +77,78 @@ describe("tenant-scoped catalog identity", () => {
       { tenant: "alpha", n: 1 },
       { tenant: "bravo", n: 1 },
     ]);
+  });
+
+  // Regression: the focal-doc probe in expand() negated the WHOLE visibility
+  // conjunction, tenant included, so the OTHER tenant's row with the same id
+  // satisfied NOT(...) and expand short-circuited to zero edges for a viewer
+  // fully entitled to their own copy. getDoc kept working throughout, which is
+  // what made it silent. The entity route calls expand() for every jira:issue:*
+  // query, so this returned linked: [] on every Jira lookup.
+  it("expands a doc whose canonical id also exists in another tenant", async () => {
+    for (const t of ["alpha", "bravo"]) {
+      await upsertDocument(
+        client,
+        CanonicalDoc.parse({
+          id: "confluence:page:hub",
+          tenant: t,
+          source: "confluence",
+          title: `Hub ${t}`,
+          body: `hub body ${t}`,
+          aclGroups: ["readers"],
+          links: [`confluence:page:leaf-${t}`],
+        }),
+      );
+    }
+    const reader = viewerFromAuthenticatedClaims({
+      principal: "reader",
+      tenant: "alpha",
+      groups: ["readers"],
+    });
+    const out = await expand(client, reader, "confluence:page:hub");
+    expect(out.edges.map((e) => e.id)).toEqual(["confluence:page:leaf-alpha"]);
+  });
+
+  it("never surfaces another tenant's document through search or the vector arm", async () => {
+    const reader = viewerFromAuthenticatedClaims({
+      principal: "reader",
+      tenant: "alpha",
+      groups: ["readers"],
+    });
+    const res = (await searchDocs(client, reader, "runbook", 10)) as {
+      results: Array<{ id: string }>;
+    };
+    for (const r of res.results) {
+      const owner = await client.query(
+        "SELECT tenant FROM documents WHERE id = $1 AND tenant = $2",
+        [r.id, "alpha"],
+      );
+      expect(owner.rows).toHaveLength(1); // every hit belongs to the viewer's tenant
+    }
+    // and the bodies returned are alpha's, never bravo's
+    const doc12345 = await getDoc(client, reader, "confluence:page:12345");
+    expect(doc12345?.body).toBe("alpha-only runbook");
+  });
+
+  // Regression: (doc_id, seq) stopped being unique at migration 0009, so a
+  // tenant-blind UPDATE in backfill wrote one tenant's vector onto every
+  // same-id chunk in every other tenant.
+  it("writes embeddings only to the owning tenant's chunk", async () => {
+    const { FakeEmbedder } = await import("../embed/index.js");
+    const { backfill } = await import("../embed/backfill.js");
+    await backfill(client, new FakeEmbedder(8), {});
+    const rows = await client.query(
+      "SELECT c.tenant, c.embedding IS NOT NULL AS has FROM chunks c" +
+        " WHERE c.doc_id = $1 ORDER BY c.tenant",
+      ["confluence:page:12345"],
+    );
+    expect(rows.rows.map((r: any) => r.has)).toEqual([true, true]);
+    // distinct text per tenant must yield distinct vectors, not one overwriting the other
+    const vecs = await client.query(
+      "SELECT tenant, embedding FROM chunks WHERE doc_id = $1 ORDER BY tenant",
+      ["confluence:page:12345"],
+    );
+    expect(JSON.stringify(vecs.rows[0].embedding)).not.toBe(JSON.stringify(vecs.rows[1].embedding));
   });
 
   it("refuses caller-constructed viewer objects at the tool boundary", async () => {

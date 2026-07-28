@@ -9,14 +9,19 @@ export async function backfill(
   opts: { batch?: number; reembed?: boolean },
 ): Promise<{ embedded: number }> {
   const batch = opts.batch ?? 64;
+  // tenant is part of the chunk identity since migration 0009 — (doc_id, seq) is
+  // NO LONGER unique. Selecting and binding it is not cosmetic: the tenant-blind
+  // UPDATE wrote one tenant's vector onto every same-id chunk in every other
+  // tenant, so a query phrased against tenant B's wording could score and surface
+  // tenant A's document. Cross-tenant inference through the ranking channel.
   const rows = (
     await client.query(
       opts.reembed
-        ? "SELECT doc_id, seq, text FROM chunks ORDER BY doc_id, seq"
-        : "SELECT doc_id, seq, text FROM chunks WHERE embedding IS NULL OR embed_model IS DISTINCT FROM $1 ORDER BY doc_id, seq",
+        ? "SELECT tenant, doc_id, seq, text FROM chunks ORDER BY tenant, doc_id, seq"
+        : "SELECT tenant, doc_id, seq, text FROM chunks WHERE embedding IS NULL OR embed_model IS DISTINCT FROM $1 ORDER BY tenant, doc_id, seq",
       opts.reembed ? [] : [embedder.id],
     )
-  ).rows as Array<{ doc_id: string; seq: number; text: string }>;
+  ).rows as Array<{ tenant: string; doc_id: string; seq: number; text: string }>;
 
   let embedded = 0;
   for (let i = 0; i < rows.length; i += batch) {
@@ -24,8 +29,8 @@ export async function backfill(
     const vecs = await embedder.embed(slice.map((r) => r.text));
     for (let j = 0; j < slice.length; j++) {
       await client.query(
-        "UPDATE chunks SET embedding = $1, embed_model = $2 WHERE doc_id = $3 AND seq = $4",
-        [toVec(vecs[j]!), embedder.id, slice[j]!.doc_id, slice[j]!.seq],
+        "UPDATE chunks SET embedding = $1, embed_model = $2 WHERE tenant = $3 AND doc_id = $4 AND seq = $5",
+        [toVec(vecs[j]!), embedder.id, slice[j]!.tenant, slice[j]!.doc_id, slice[j]!.seq],
       );
       embedded += 1;
     }
