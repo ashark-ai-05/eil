@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Fetcher } from "../connectors/auth.js";
 import { BitbucketApiSource, GitCloneSource } from "../connectors/reposource.js";
+import type { RepoChange, RepoSource } from "../connectors/reposource.js";
 import { chunk } from "../core/chunker.js";
 import { detectSource, normalizeCode, repoKey } from "../ingest/code.js";
 import { RepoFilter, globToRegExp } from "../ingest/repofilter.js";
@@ -216,7 +217,11 @@ describe("ingestRepo orchestration", () => {
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  function fakeSource(head: string, files: Record<string, string>, changes?: any[]): any {
+  function fakeSource(
+    head: string,
+    files: Record<string, string>,
+    changes?: RepoChange[],
+  ): RepoSource {
     return {
       headSha: async () => head,
       async *listFiles() {
@@ -273,6 +278,13 @@ describe("ingestRepo orchestration", () => {
       const c2 = await connect();
       try {
         expect(await getCursor(c2, "code:org/repo")).toBe("sha2");
+        // The tombstone for src/a.ts must actually remove the row, not just
+        // increment the counter (tombstone() bumps out.deleted unconditionally
+        // even on a no-op/wrong-id delete, so check the DB directly).
+        const gone = await c2.query(
+          "SELECT 1 FROM documents WHERE id = 'code:org/repo:src/a.ts' AND tenant = 'default'",
+        );
+        expect(gone.rows.length).toBe(0);
       } finally {
         await c2.end();
       }

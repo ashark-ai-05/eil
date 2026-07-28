@@ -156,14 +156,14 @@ export async function ingestRepo(
   tenant: string,
 ): Promise<{ upserted: number; deleted: number; skipped: number }> {
   const { upsertDocument } = await import("../store.js");
-  const cursorKey = `code:${key}${subpath ? `:${subpath}` : ""}`;
+  const ckey = `code:${key}${subpath ? `:${subpath}` : ""}`;
   const client = await connect();
   const out = { upserted: 0, deleted: 0, skipped: 0 };
   try {
     const head = await source.headSha();
-    const cursor = await getCursor(client, cursorKey);
+    const cursor = await getCursor(client, ckey);
     if (cursor === head) {
-      console.log(`${cursorKey}: up to date (${head})`);
+      console.log(`${ckey}: up to date (${head})`);
       return out;
     }
 
@@ -209,13 +209,13 @@ export async function ingestRepo(
     } else {
       for await (const path of source.listFiles()) await ingestOne(path);
     }
-    await setCursor(client, cursorKey, head);
+    await setCursor(client, ckey, head);
     console.log(
-      `${cursorKey}: ${out.upserted} upserted, ${out.deleted} deleted, ${out.skipped} skipped -> ${head}`,
+      `${ckey}: ${out.upserted} upserted, ${out.deleted} deleted, ${out.skipped} skipped -> ${head}`,
     );
   } finally {
     await client.end();
+    await source.dispose();
   }
-  await source.dispose();
   return out;
 }
