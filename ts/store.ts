@@ -43,6 +43,9 @@ export interface ReconcileOutcome {
   tombstoned: string[];
 }
 
+/** Fraction of a source's live documents a single reconcile may quarantine. */
+export const MAX_RECONCILE_SHRINK = Number(process.env.EIL_RECONCILE_MAX_SHRINK ?? "0.5");
+
 /**
  * A failed/partial listing is recorded but cannot mutate catalog visibility.
  * A complete listing tombstones missing documents for a quarantine period;
@@ -65,6 +68,29 @@ export async function reconcile(
       );
       await client.query("COMMIT");
       return { status: "incomplete", tombstoned: [] };
+    }
+    // Shrink guard. `complete` only asserts the connector believed it reached the
+    // end of the listing — it cannot detect a Confluence DC deep-pagination cap
+    // returning a short page, a permissions change, or an unmounted Obsidian
+    // vault, all of which present as a valid, short, "complete" listing. Refuse
+    // rather than quarantine the corpus, and record the refusal. reconcile_runs
+    // already carried listed_count and an index for exactly this lookup; nothing
+    // read it until now.
+    const live = await client.query(
+      "SELECT count(*)::int AS n FROM documents WHERE source = $1 AND tenant = $2 AND tombstoned_at IS NULL",
+      [source, tenant],
+    );
+    const before = Number(live.rows[0]?.n ?? 0);
+    if (before > 0 && listing.ids.length < before * (1 - MAX_RECONCILE_SHRINK)) {
+      await client.query(
+        "INSERT INTO reconcile_runs (tenant, source, status, listed_count, actor) VALUES ($1, $2, 'incomplete', $3, $4)",
+        [tenant, source, listing.ids.length, actor ?? null],
+      );
+      await client.query("COMMIT");
+      const pct = Math.round(MAX_RECONCILE_SHRINK * 100);
+      throw new Error(
+        `reconcile refused for ${source}: listing has ${listing.ids.length} ids but ${before} are live (>${pct}% shrink). Re-run when the source is healthy, or set EIL_RECONCILE_MAX_SHRINK to override.`,
+      );
     }
     const res = await client.query(
       "UPDATE documents SET tombstoned_at = now(), quarantine_until = now() + interval '7 days'" +
@@ -134,7 +160,14 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
         hierarchy = EXCLUDED.hierarchy, acl_groups = EXCLUDED.acl_groups,
         acl_snapshot = EXCLUDED.acl_snapshot, acl_version = EXCLUDED.acl_version,
         quality_tier = EXCLUDED.quality_tier, content_hash = EXCLUDED.content_hash,
-        body = EXCLUDED.body, ingested_at = now(), ingested_by = EXCLUDED.ingested_by,
+        body = EXCLUDED.body, ingested_at = now(),
+        -- Ownership is NOT transferred by a re-ingest. Overwriting it meant any
+        -- later writer — a refresh_doc call, another user's sync, the service
+        -- account — silently re-owned the row, and since acl_groups is stamped
+        -- empty by every connector today, ingested_by is the ONLY thing granting
+        -- the original ingester access. They lost their own document. Keep the
+        -- first owner; only adopt a new one to heal an empty pre-0003 value.
+        ingested_by = COALESCE(NULLIF(documents.ingested_by, ''), EXCLUDED.ingested_by),
         tombstoned_at = NULL, quarantine_until = NULL, revision = documents.revision + 1
      RETURNING revision`,
     [

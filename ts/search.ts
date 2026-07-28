@@ -202,7 +202,8 @@ export async function expand(
   const restricted = await client.query(
     `SELECT 1 FROM documents d
       WHERE d.tenant = $4 AND d.id = $1
-        AND NOT (d.ingested_by = $2 OR d.acl_groups ?| $3::text[])`,
+        AND NOT ((d.ingested_by = $2 OR d.acl_groups ?| $3::text[])
+                 AND d.tombstoned_at IS NULL)`,
     [docId, viewer.principal, viewer.groups, viewer.tenant],
   );
   if (restricted.rows.length > 0) return { id: docId, edges: [], truncated: false };

@@ -5,9 +5,21 @@ ALTER TABLE documents ADD COLUMN acl_version text NOT NULL DEFAULT '';
 ALTER TABLE documents ADD COLUMN tombstoned_at timestamptz;
 ALTER TABLE documents ADD COLUMN quarantine_until timestamptz;
 
+-- acl_version MUST be byte-identical to what upsertInTx computes, which is
+-- sha256(JSON.stringify(aclGroups)). md5(acl_groups::text) matched neither the
+-- algorithm (32 hex chars vs 64) nor the serialization (jsonb::text renders
+-- ["a", "b"] with a space; JSON.stringify does not). A backfilled value could
+-- therefore NEVER equal the computed one, so every pre-existing document failed
+-- the hash gate on the next ingest even when nothing had changed — rewriting the
+-- whole catalog and, because the chunk re-insert omits the embedding column,
+-- silently wiping the entire vector index.
+-- string_agg over an empty array yields NULL, hence the coalesce to '[]'.
 UPDATE documents
 SET acl_snapshot = acl_groups,
-    acl_version = md5(acl_groups::text)
+    acl_version = encode(sha256(convert_to(coalesce('[' || (
+      SELECT string_agg(to_jsonb(e)::text, ',' ORDER BY ord)
+        FROM jsonb_array_elements_text(acl_groups) WITH ORDINALITY AS t(e, ord)
+    ) || ']', '[]'), 'UTF8')), 'hex')
 WHERE acl_version = '';
 
 CREATE TABLE document_revisions (

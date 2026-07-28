@@ -226,4 +226,112 @@ describe("pglite zero-install backend", () => {
       "DELETE FROM documents WHERE tenant = 'team-b' AND id = 'confluence:page:55555'",
     );
   });
+
+  // Regression: migration 0010 backfilled acl_version with md5(acl_groups::text)
+  // while upsertInTx computes sha256(JSON.stringify(aclGroups)). 32 hex chars vs
+  // 64, and jsonb::text renders ["a", "b"] with a space. The two could never be
+  // equal, so every pre-existing document failed the hash gate forever — and the
+  // chunk re-insert omits the embedding column, so the first post-deploy ingest
+  // silently wiped the whole vector index.
+  // Runs the REAL statement out of the migration file against a row that looks
+  // like it predates 0010, which is the only situation where the backfill runs.
+  // Asserting an inline copy of the SQL, or testing on a fresh DB where the app
+  // writes acl_version itself, both pass while the migration is broken.
+  it("migration 0010's acl_version backfill keeps the hash gate closed", async () => {
+    const sql = readFileSync(
+      new URL("../../migrations/0010_authorised_refresh_reconciliation.sql", import.meta.url),
+      "utf-8",
+    );
+    const backfill = sql
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("--")) // statements are preceded by comment blocks
+      .join("\n")
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.startsWith("UPDATE documents") && s.includes("acl_version ="));
+    expect(backfill).toBeTruthy();
+
+    const doc = normalizePage({ ...fixture("confluence_page.json"), id: "77001" });
+    expect(await upsertDocument(client, doc)).toBe(true);
+    await client.query(
+      "UPDATE chunks SET embedding = '{0.1,0.2}'::float4[], embed_model = 'test' WHERE doc_id = $1",
+      ["confluence:page:77001"],
+    );
+    // rewind this row to its pre-0010 shape, then let the migration backfill it
+    await client.query("UPDATE documents SET acl_version = '' WHERE id = $1", [
+      "confluence:page:77001",
+    ]);
+    await client.query(backfill as string);
+
+    // an unchanged re-ingest must be a no-op: no catalog churn, no vector loss
+    expect(await upsertDocument(client, doc)).toBe(false);
+    const kept = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1 AND embedding IS NOT NULL",
+      ["confluence:page:77001"],
+    );
+    expect(kept.rows[0].n).toBeGreaterThan(0);
+  });
+
+  // Regression: ON CONFLICT set ingested_by = EXCLUDED.ingested_by, so any later
+  // writer re-owned the row. acl_groups is stamped empty by every connector, so
+  // ingested_by is the only thing granting the original ingester access.
+  it("does not transfer ownership on re-ingest", async () => {
+    const doc = normalizePage({ ...fixture("confluence_page.json"), id: "77002" });
+    await upsertDocument(client, doc);
+    await client.query("UPDATE documents SET ingested_by = 'alice' WHERE id = $1", [
+      "confluence:page:77002",
+    ]);
+    await upsertDocument(client, { ...doc, body: `${doc.body}\n\nedited` });
+    const owner = await client.query("SELECT ingested_by FROM documents WHERE id = $1", [
+      "confluence:page:77002",
+    ]);
+    expect(owner.rows[0].ingested_by).toBe("alice");
+  });
+
+  // Regression: `complete` only asserts the connector thought it finished. A
+  // truncated listing, a permissions change, or an unmounted vault all present
+  // as a valid short "complete" listing and quarantined the entire corpus.
+  it("refuses a reconcile that would quarantine most of a source", async () => {
+    for (const id of ["77010", "77011", "77012", "77013"]) {
+      await upsertDocument(client, normalizePage({ ...fixture("confluence_page.json"), id }));
+    }
+    await expect(reconcile(client, "confluence", { ids: [], complete: true })).rejects.toThrow(
+      /reconcile refused/,
+    );
+    const live = await client.query(
+      "SELECT count(*)::int AS n FROM documents WHERE source = 'confluence' AND tombstoned_at IS NULL",
+    );
+    expect(live.rows[0].n).toBeGreaterThan(0); // corpus intact
+    const refusal = await client.query(
+      "SELECT status FROM reconcile_runs ORDER BY id DESC LIMIT 1",
+    );
+    expect(refusal.rows[0].status).toBe("incomplete"); // and it is audited
+  });
+
+  // Regression: freshFetch ran BEFORE the ACL check, so any eil-refresh holder
+  // could name an arbitrary id and have the server fetch it under its own PAT,
+  // and the two distinct error strings formed an existence oracle.
+  it("refuses to refresh a document the caller cannot read, without fetching", async () => {
+    process.env.EIL_CONFLUENCE_URL = "http://127.0.0.1:9"; // would fail loudly if called
+    const refresher = viewerFromAuthenticatedClaims({
+      principal: "nobody",
+      groups: ["eil-refresh"],
+      tenant: "default",
+    });
+    const missing = await callTool(
+      "refresh_doc",
+      { id: "confluence:page:does-not-exist" },
+      refresher,
+      client,
+    );
+    const unreadable = await callTool(
+      "refresh_doc",
+      { id: "confluence:page:12345" },
+      refresher,
+      client,
+    );
+    expect((missing as any).error).toBe("not found: confluence:page:does-not-exist");
+    expect((unreadable as any).error).toBe("not found: confluence:page:12345");
+    delete process.env.EIL_CONFLUENCE_URL;
+  });
 });
