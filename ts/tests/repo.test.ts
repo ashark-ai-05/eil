@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chunk } from "../core/chunker.js";
+import { detectSource, normalizeCode, repoKey } from "../ingest/code.js";
 import { RepoFilter, globToRegExp } from "../ingest/repofilter.js";
 
 const codeDoc = (body: string) =>
@@ -70,5 +71,35 @@ describe("repofilter", () => {
     expect(f.acceptContent("clean text")).toBe(true);
     expect(f.acceptContent("has\0nul")).toBe(false); // binary
     expect(f.acceptContent("x".repeat(101))).toBe(false); // oversize
+  });
+});
+
+describe("code doc model", () => {
+  it("normalizeCode builds a code CanonicalDoc", () => {
+    const d = normalizeCode(
+      "org/repo",
+      "src/pay/retry.ts",
+      "const x=1\n",
+      "https://h/browse/src/pay/retry.ts",
+      "default",
+    );
+    expect(d.id).toBe("code:org/repo:src/pay/retry.ts");
+    expect(d.source).toBe("code");
+    expect(d.title).toBe("src/pay/retry.ts");
+    expect(d.hierarchy).toEqual(["org/repo", "src", "pay"]);
+    expect(d.aclGroups).toEqual([]);
+    expect(d.url).toBe("https://h/browse/src/pay/retry.ts");
+    expect(d.body).toBe("const x=1\n");
+  });
+  it("repoKey derives org/repo, honors override, strips .git", () => {
+    expect(repoKey("https://bb.corp/scm/PAY/retry.git")).toBe("PAY/retry");
+    expect(repoKey("git@github.com:org/repo.git")).toBe("org/repo");
+    expect(repoKey("/home/me/work/myrepo")).toBe("myrepo");
+    expect(repoKey("anything", "custom")).toBe("custom");
+  });
+  it("detectSource routes by ref shape", () => {
+    expect(detectSource("https://bb/scm/x/y.git")).toBe("git");
+    expect(detectSource("git@github.com:o/r.git")).toBe("git");
+    expect(detectSource("PAY/retry")).toBe("bitbucket");
   });
 });
