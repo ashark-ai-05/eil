@@ -244,7 +244,8 @@ into the array as a `user:<principal>` token at materialization time, so the
 whole check becomes one indexable operation:
 
 ```sql
-(d.acl_groups ?| $1::text[] AND d.tenant = $2 AND d.tombstoned_at IS NULL)
+(d.acl_groups ?| $1::text[] AND d.tenant = $2
+   AND d.tombstoned_at IS NULL AND d.quarantined_at IS NULL)
 ```
 
 Worth benchmarking `text[]` + `&&` (GIN `array_ops`) against `jsonb` + `?|`
@@ -298,6 +299,12 @@ feed a materializer that stamps `acl_groups` inside the existing upsert
 transaction. Group grain by default; expand to `user:` grain **only** where an
 intersection forces it, and fail closed when an intersection cannot be reduced —
 otherwise a restricted page in a 5,000-member space becomes 5,000 array entries.
+
+**One invariant, because folding the owner in creates two sources of truth.**
+`ingested_by` stays as a column (audit, `docs_unowned`), and `acl_groups` gains a
+`user:<principal>` token. If they diverge the ACL is silently wrong, so
+`integrity()` grows a check: every non-tombstoned document must carry a
+`user:` token matching its `ingested_by`.
 
 **Namespace group tokens.** EIL has no namespace discipline today, so a
 Confluence group named `eng` and a Jira group named `eng` collide silently.
@@ -433,6 +440,9 @@ CREATE TABLE eval_qrels (            -- graded, keyed by STABLE DOCUMENT ID
   judged_by text NOT NULL,
   PRIMARY KEY (query_id, doc_id)
 );
+-- Retention applies here as much as to audit_log: a row per search, forever,
+-- is not a design. Ship a `eil prune --older-than` covering audit_log,
+-- retrieval_events and document_revisions together.
 CREATE TABLE retrieval_events (      -- implicit relevance + future learning signal
   trace_id text NOT NULL,
   at timestamptz NOT NULL DEFAULT now(),
@@ -574,7 +584,15 @@ served to agents through `get_doc`. Given that EIL's entire premise is feeding
 org knowledge to LLMs, this needs an explicit decision, not a default. Options
 are redact-at-ingest, detect-and-quarantine, both, or accepted-and-documented.
 
-### 5.6 Extraction gaps (ordered by retrieval value)
+### 5.6 Quarantine short-circuits the pipeline
+
+`upsertDocument` gains one early exit: if the scan produced findings, write the
+document row with `quarantined_at` set and **return before chunking**. That single
+placement is what makes §11.1 airtight — `tsv`, the embedding, `ts_headline`, and
+the vector snippet are all downstream of chunking, so none of them can ever hold
+the secret. Clearing the findings re-runs the normal path.
+
+### 5.7 Extraction gaps (ordered by retrieval value)
 
 1. **Git history** — commit messages are where the Jira-key↔code link physically
    lives, and `normalizeCode` hardcodes `links: []`, so that edge can never form.
@@ -712,9 +730,11 @@ projecting to ~200 ms on PGlite and ~70 ms native.
 
 ### 6.4 Fusion and ranking recalibration
 
-- **MaxP chunk→doc aggregation** — measured **+5 to +6 nDCG points** in the
-  literature, pure SQL, ~0 cost, and it structurally fixes cross-arm eviction.
-  The cheapest quality win available.
+- ~~MaxP chunk→doc aggregation~~ — **already implemented.** `ts/search.ts:171`
+  (`best AS SELECT DISTINCT ON (doc_id) … rank DESC`) and `:381` (same on score
+  in `vecArm`) are max-per-doc on both arms. An earlier draft of this spec listed
+  it as a new +5–6 point win; that was wrong, and it would have shipped a no-op
+  credited with a gain. No action.
 - **Sweep `RRF_K` over {10, 20, 30, 60}.** `k=60` gives only 2.6× spread across
   100 ranks; it is calibrated for long candidate lists, not per-arm top-20s.
 - **Rebalance the tier/recency modifier** so a metadata prior cannot outrank
@@ -729,10 +749,11 @@ projecting to ~200 ms on PGlite and ~70 ms native.
 - **A title arm at low weight.** The breadcrumb is currently *inside* chunk text,
   so title terms score at full content weight — precisely the failure Onyx names
   ("irrelevant titles normalized to a score of 1"). They weight title at 0.10.
-- **Widen the candidate pool.** `limit * 3` = 24 documents per arm at `limit=8`
-  is thin for RRF, which differentiates better on deep lists. Onyx retrieves
-  1000 before its final cut of 50. Use `max(50, limit*6)`; the cost is linear
-  and the cut already happens in Postgres.
+- **Widen the candidate pool — carefully.** `rn <= limit*3` is applied *per*
+  `(source_class, strict_hit)` partition, so the effective lexical pool is
+  already ~4× that, and naively raising it to `limit*6` yields 24×limit. Set the
+  target as a total (~150 candidates before fusion) and derive the per-partition
+  quota from it, rather than scaling the per-partition number.
 - Move to **convex combination** over RRF once ~40 labeled pairs exist; it beats
   RRF in- and out-of-domain in the reference work.
 
@@ -875,17 +896,26 @@ scanning, redaction, or entropy check anywhere; every committed `.pem`,
 `.env.example`, and credential-bearing Confluence page is served verbatim to
 agents via `get_doc`.
 
-**Recommendation: detect + quarantine + redact-on-serve.** Scan at ingest with a
-rule set (known credential shapes: AWS keys, PEM blocks, JWTs, `postgres://`
-URLs, plus a Shannon-entropy threshold on long tokens). Store the original body
-unchanged — you need it to remediate, and destroying it makes false positives
-unrecoverable — but stamp `secret_findings jsonb` on the document, exclude those
-documents from retrieval by default, redact matched spans in `get_doc` output,
-and surface the list in `eil audit`. That gives a remediation worklist rather
-than silent loss, and it fails closed.
+**DECIDED: detect + quarantine + redact-on-serve**, with one correction found in
+review.
 
-The cheaper option (accept + document) is defensible only if this index will
-never hold real production Confluence. Say which.
+Scan at ingest with a rule set (AWS keys, PEM blocks, JWTs, `postgres://` URLs,
+plus a Shannon-entropy threshold on long tokens). Stamp `secret_findings jsonb`
+and `quarantined_at` on the document. Keep `documents.body` unchanged — you need
+it to remediate, and destroying it makes a false positive unrecoverable.
+
+**The correction: a quarantined document must not be chunked or embedded at
+all.** "Redact on serve" alone is insufficient, because the secret also flows
+`documents.body` → `chunks.text` → `tsv`, and a tsvector is *searchable*: an
+attacker could search a fragment of an API key and confirm its presence from the
+hit alone. It would also reach `ts_headline` snippets, `vecArm`'s 240-char slice,
+and the embedding. Skipping chunk+embed closes every one of those paths at once
+and is cheaper than redacting each. On review-and-clear (false positive), the
+document chunks normally.
+
+So: no chunks, no vector, no snippet path; `get_doc` redacts the matched spans
+from the body; `eil audit` lists the worklist. Fails closed, and a false positive
+costs one review rather than lost content.
 
 ### 11.2 `ingested_by` and the empty ACL — **fix in step 1, scoped here**
 
@@ -967,6 +997,13 @@ re-run when the corpus doubles:
 6. Persist the curve to `metrics.ivf_calibration` and fail CI if a later run
    drops below the gate.
 
+**Rebuilding centroids is not free.** New centroids invalidate every
+`cluster_id`, so a rebuild is a full batched reassignment of the chunk table —
+at 20M rows, the same order of cost as the initial backfill. Budget it as a
+scheduled maintenance operation, not a background nicety, and keep the old
+centroid set until reassignment completes so queries never see a half-migrated
+partitioning.
+
 Oversample is fixed at 8× and is not a tuning knob (measured: no effect).
 
 ---
@@ -1021,8 +1058,7 @@ and synthetic-only conclusions are visibly flagged.
 ### Step 3 — cheap retrieval wins *(no migration)*
 
 Embedder singleton keyed on `.id` · `MAX_CHARS` matched to the embedder window ·
-drop `CODE_OVERLAP_LINES` · MaxP chunk→doc aggregation · structured filters in
-the tool schema · ±1 neighbour chunk on `get_doc` · confidence metadata in
+drop `CODE_OVERLAP_LINES` · structured filters in the tool schema · ±1 neighbour chunk on `get_doc` · confidence metadata in
 results · widen the candidate pool to `max(50, limit*6)`.
 
 **Acceptance:** every item is measured through step 2 and kept only if nDCG@10
@@ -1082,6 +1118,16 @@ Stated so nothing here is mistaken for settled:
 5. **Reranker headroom.** Unknown until `Recall@50 − Recall@10` is measured.
 6. **Whether `granite-embedding-small-english-r2` beats MiniLM *on this corpus*.**
    +9 BEIR is a benchmark claim, not a measurement here.
+7. **Chunk size cannot be settled by a synthetic-heavy eval.** A query generated
+   from chunk *C* echoes *C*, which flatters whatever chunker produced it. That
+   comparison needs real logged queries; if step 2's set is still
+   synthetic-dominated when step 5 arrives, **defer the chunk-size decision**
+   rather than answering it with an instrument that cannot.
+
+A note on `varbit` (§12): XOR across different widths raises
+`cannot XOR bit strings of different sizes`. That makes the `embed_model`
+predicate load-bearing rather than hygienic — omitting it produces a loud error,
+never a silent comparison across vector spaces. That is the failure mode we want.
 
 Every one of these is closed by step 2 existing. That is the argument for its
 position in the sequence.
