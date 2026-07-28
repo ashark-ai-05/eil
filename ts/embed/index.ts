@@ -1,7 +1,9 @@
 /**
  * Embeddings for the semantic (vector) retrieval arm. Extension-free: vectors
- * are packed float32 (bytea) and cosine runs in-process. Pluggable provider
- * mirrors ts/llm/index.ts (EIL_LLM_PROVIDER -> EIL_EMBED_PROVIDER).
+ * are stored unit-normalized as float4[] (migration 0008) so cosine reduces to
+ * a dot product Postgres can compute itself — scoring, best-chunk-per-doc and
+ * the top-N cut all run in SQL. Pluggable provider mirrors ts/llm/index.ts
+ * (EIL_LLM_PROVIDER -> EIL_EMBED_PROVIDER).
  */
 
 import { fileURLToPath } from "node:url";
@@ -12,29 +14,24 @@ export interface Embedder {
   embed(texts: string[]): Promise<Float32Array[]>;
 }
 
-export function packF32(v: Float32Array): Buffer {
-  const b = Buffer.allocUnsafe(v.length * 4);
-  for (let i = 0; i < v.length; i++) b.writeFloatLE(v[i]!, i * 4);
-  return b;
-}
-
-export function unpackF32(b: Buffer | Uint8Array | ArrayBuffer): Float32Array {
-  const buf = b instanceof ArrayBuffer ? new Uint8Array(b) : b;
-  const out = new Float32Array(buf.length >> 2);
-  for (let i = 0; i < out.length; i++) {
-    // Handle both Node.js Buffer (readFloatLE) and Uint8Array
-    const offset = i * 4;
-    if ("readFloatLE" in buf) {
-      out[i] = (buf as Buffer).readFloatLE(offset);
-    } else {
-      // Uint8Array: manually read 4 bytes as little-endian float32
-      const u8 = buf as Uint8Array;
-      const view = new DataView(u8.buffer, u8.byteOffset + offset, 4);
-      out[i] = view.getFloat32(0, true);
-    }
-  }
+/**
+ * Vectors are stored unit-normalized so that the SQL scorer can use a plain dot
+ * product instead of a full cosine. Cosine is scale-invariant, so normalizing on
+ * write changes no ranking — but it does mean every writer must go through here,
+ * including HttpEmbedder, whose gateway is not guaranteed to normalize.
+ */
+export function unitNorm(v: Float32Array): Float32Array {
+  let n = 0;
+  for (let i = 0; i < v.length; i++) n += v[i]! * v[i]!;
+  n = Math.sqrt(n);
+  if (n === 0) return v; // a zero vector stays zero; it scores 0 against anything
+  const out = new Float32Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = v[i]! / n;
   return out;
 }
+
+/** float4[] wire form for pg / PGlite — the storage format since migration 0008. */
+export const toVec = (v: Float32Array): number[] => Array.from(unitNorm(v));
 
 export function cosine(a: Float32Array, b: Float32Array): number {
   let dot = 0;

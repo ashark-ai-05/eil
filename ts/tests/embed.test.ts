@@ -1,12 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { FakeEmbedder, cosine, getEmbedder, packF32, unpackF32 } from "../embed/index.js";
+import { FakeEmbedder, cosine, getEmbedder, toVec, unitNorm } from "../embed/index.js";
 
-describe("packing", () => {
-  it("round-trips float32 vectors", () => {
-    const v = Float32Array.from([0.5, -1.25, 3.0, 0]);
-    const back = unpackF32(packF32(v));
-    expect([...back]).toEqual([...v]);
-    expect(packF32(v).length).toBe(16);
+describe("unitNorm / toVec", () => {
+  it("scales to unit length without changing direction", () => {
+    const v = Float32Array.from([3, 4, 0]); // length 5
+    const u = unitNorm(v);
+    expect(Math.hypot(...u)).toBeCloseTo(1, 6);
+    // direction preserved => cosine with the original is exactly 1
+    expect(cosine(v, u)).toBeCloseTo(1, 6);
+    expect(u[0]).toBeCloseTo(0.6, 6);
+    expect(u[1]).toBeCloseTo(0.8, 6);
+  });
+
+  it("leaves a zero vector alone rather than dividing by zero", () => {
+    const z = unitNorm(Float32Array.from([0, 0, 0]));
+    expect([...z]).toEqual([0, 0, 0]);
+  });
+
+  it("toVec emits a plain float4[]-compatible array", () => {
+    const out = toVec(Float32Array.from([3, 4, 0]));
+    expect(Array.isArray(out)).toBe(true);
+    expect(out.length).toBe(3);
+    expect(out[0]).toBeCloseTo(0.6, 6);
+  });
+
+  it("makes a dot product equal cosine — the premise of SQL-side scoring", () => {
+    const a = unitNorm(Float32Array.from([1, 2, 3]));
+    const b = unitNorm(Float32Array.from([-2, 0.5, 4]));
+    const dot = a.reduce((s, x, i) => s + x * b[i]!, 0);
+    expect(dot).toBeCloseTo(cosine(a, b), 6);
   });
 });
 

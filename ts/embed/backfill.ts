@@ -1,7 +1,7 @@
 /** Embed chunks for the semantic arm. Embed-once: only NULL/stale rows unless
  *  --reembed. Provider errors abort (no partial-silent). */
 import type { Db } from "../db.js";
-import { type Embedder, packF32 } from "./index.js";
+import { type Embedder, toVec } from "./index.js";
 
 export async function backfill(
   client: Db,
@@ -25,7 +25,7 @@ export async function backfill(
     for (let j = 0; j < slice.length; j++) {
       await client.query(
         "UPDATE chunks SET embedding = $1, embed_model = $2 WHERE doc_id = $3 AND seq = $4",
-        [packF32(vecs[j]!), embedder.id, slice[j]!.doc_id, slice[j]!.seq],
+        [toVec(vecs[j]!), embedder.id, slice[j]!.doc_id, slice[j]!.seq],
       );
       embedded += 1;
     }
