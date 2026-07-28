@@ -230,6 +230,37 @@ exact `--page`/`--issue` always re-fetch the named items (hash-gated, so
 unchanged docs are no-ops). `--reconcile` (deletion sweep) is **full-instance
 only** — a scoped listing can't safely decide what to delete outside its scope.
 
+### Repo / code ingestion
+
+Ingest codebases directly from **git** (local clone or remote URL) or **Bitbucket API**
+into the catalog as searchable `source="code"` docs. Auto-detects source type: local
+`.git/` → git clone; `bitbucket.` URL → Bitbucket API. Incremental via per-repo
+commit-SHA cursor with intrinsic deletions (diffs on new commits). Code-aware line-window
+chunker preserves context across function/class boundaries. Binary files and large blobs
+are skipped automatically; sparse selection via `--include`/`--exclude` globs or
+`--subpath` for monorepos.
+
+```sh
+# Ingest a single repo (git auto-clone or Bitbucket API)
+pnpm eil ingest repo https://github.com/user/repo.git
+pnpm eil ingest repo https://bitbucket.org/team/repo
+
+# Ingest a monorepo subpath (only code under apps/web/)
+pnpm eil ingest repo https://github.com/user/monorepo --subpath apps/web
+
+# Ingest with branch and file globs (e.g., TypeScript only)
+pnpm eil ingest repo https://github.com/user/repo --branch main --include '**/*.ts' --include '**/*.tsx'
+
+# Search code by content and link to Confluence/Jira via source
+pnpm eil search "payment handler"
+pnpm eil search "source:code transaction logic"
+```
+
+Each repo run stores a per-repo commit-SHA cursor: subsequent runs fetch only new
+commits (incremental). If a commit deletes or modifies a file, those changes are
+reflected in the catalog. Code is searchable via FTS (keywords, identifiers) and
+semantic search (vector embeddings after `pnpm eil embed backfill`).
+
 ### Storing tokens in the OS keychain (no env vars)
 
 Instead of exporting `EIL_<PREFIX>_TOKEN`, store each PAT in your operating
@@ -474,5 +505,6 @@ which is how the TS port was verified.
 - [x] Zero-install PGlite backend + embedded-postgres no-admin concurrency tier
 - [x] OS keychain auth: keychain-first token resolution (macOS/Windows/WSL2/libsecret) + `eil auth`
 - [x] Semantic search: extension-free vector arm (bytea float32 + cosine) fused with FTS via rrf; `eil embed backfill`, pluggable embedder
+- [x] Repo/code ingestion — git clone or Bitbucket API, subpath/branch/globs, code-aware chunking, per-repo commit-SHA incremental with deletions
 - [ ] Golden-query log growth from real usage (`docs/golden-queries.md`)
 - [ ] Per-user tokens + HTTP MCP transport (phase 2 — the kube rollout gate)
