@@ -7,6 +7,7 @@ import { userInfo } from "node:os";
 import { type CanonicalDoc, chunkHash, contentHash, sha256 } from "./contracts/models.js";
 import { chunk } from "./core/chunker.js";
 import type { Db } from "./db.js";
+import { extractCodeIndex } from "./ingest/codeindex.js";
 
 export async function getCursor(
   client: Db,
@@ -176,4 +177,38 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
     [doc.tenant, doc.id, write.rows[0].revision, doc.source, hash, aclSnapshot, aclVersion],
   );
   return true;
+}
+
+/** Rebuild the deterministic, derived code projection for one indexed file/ref. */
+export async function replaceCodeIndex(
+  client: Db,
+  doc: CanonicalDoc,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<void> {
+  const entries = extractCodeIndex(path, doc.body);
+  await client.query("DELETE FROM code_index WHERE tenant = $1 AND doc_id = $2", [
+    doc.tenant,
+    doc.id,
+  ]);
+  for (const e of entries)
+    await client.query(
+      "INSERT INTO code_index (tenant, doc_id, repo, path, ref, kind, value, raw_value, line_start, line_end, symbol_kind, language, extractor_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+      [
+        doc.tenant,
+        doc.id,
+        repo,
+        path,
+        ref,
+        e.kind,
+        e.value,
+        e.rawValue,
+        e.lineStart,
+        e.lineEnd,
+        e.symbolKind ?? null,
+        e.language,
+        e.extractorVersion,
+      ],
+    );
 }
