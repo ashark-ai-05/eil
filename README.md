@@ -408,32 +408,21 @@ fusion — so "money keeps getting stuck when I send it" finds "Parked payments
 not alerting after retry exhaustion" with no shared keywords. It's **off until
 you embed**, then automatic; nothing changes for pure-FTS setups.
 
-The default embedder runs **fully in-process** via Transformers.js (ONNX) — no
-network at query time, your content never leaves the machine, ideal for a
-locked-down work PC:
+The default embedder runs **fully in-process, fully offline** via Transformers.js
+(ONNX). The model (quantized `all-MiniLM-L6-v2`, 384-dim, ~23MB) is **vendored in
+the repo** under `models/`, so it travels with the code and **never calls the
+Hugging Face hub** — zero network, ideal for a locked-down / air-gapped work PC:
 
 ```sh
-pnpm eil embed backfill        # embeds with a local model (all-MiniLM-L6-v2, 384-dim)
+pnpm eil embed backfill        # embeds using the vendored local model — no download
 pnpm eil search "why do payments get stuck"   # now fuses FTS + vector
 ```
 
-The model (~90MB) downloads once from the HF hub and is cached.
-`@huggingface/transformers` is an **optional dependency** (auto-installed unless
-your `pnpm install` blocks native builds; otherwise `pnpm add @huggingface/transformers`).
-
-**Air-gapped / corporate network that blocks huggingface.co?** Pre-download the
-model on a machine that *can* reach the hub, carry it over, and run offline:
-
-```sh
-# on an unblocked machine (repo checked out):
-EIL_EMBED_CACHE=./eil-models pnpm eil embed fetch-model   # writes ./eil-models/Xenova/...
-# copy ./eil-models to the locked-down box, then there:
-export EIL_EMBED_CACHE=/path/to/eil-models
-export EIL_EMBED_OFFLINE=1        # forbid ANY network fetch
-pnpm eil embed backfill          # loads from the cache, never touches the hub
-```
-(`EIL_EMBED_OFFLINE=1` works with or without `EIL_EMBED_CACHE` — set it whenever
-the model is already local.)
+`@huggingface/transformers` (the ONNX runtime that runs the vendored model) is an
+**optional dependency** — auto-installed unless your `pnpm install` blocks native
+builds; otherwise `pnpm add @huggingface/transformers`. No hub access is needed at
+any point. (To swap models, set `EIL_EMBED_CACHE`/`EIL_EMBED_MODEL` and
+`EIL_EMBED_ALLOW_REMOTE=1` to allow a one-time hub fetch on a connected machine.)
 
 - **Extension-free**: embeddings are packed float32 in a `bytea` column, cosine
   runs in-process — works on every Postgres tier (incl. zero-install PGlite)
