@@ -5,8 +5,9 @@ The knowledge plane: deterministic, token-free retrieval over org knowledge
 sharing one language and (eventually) one contracts package with the
 work-side tool-discovery MCP connector.
 
-Design docs: `docs/eil-architecture.html` (full solution),
-`docs/knowledge-plane.html` (this plane + phased plan),
+Design docs: `docs/architecture-schematic.html` (visual pipeline overview —
+sources → ingest → index → search → serve), `docs/eil-architecture.html`
+(full solution), `docs/knowledge-plane.html` (this plane + phased plan),
 `docs/observability-plane.html` (metrics design).
 
 **Operating model: local-first.** Everything runs on a laptop with no Docker —
