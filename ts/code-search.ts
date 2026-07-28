@@ -1,6 +1,6 @@
 import type { Db } from "./db.js";
-import type { Viewer } from "./search.js";
 import type { CodeIndexKind } from "./ingest/codeindex.js";
+import type { Viewer } from "./search.js";
 
 export interface CodeSearchQuery {
   query: string;
@@ -28,8 +28,8 @@ export interface CodeContextPack {
 }
 const lineWindow = (body: string, start: number, end: number, context = 3) => {
   const lines = body.split("\n");
-  const from = Math.max(0, start - 1 - context),
-    to = Math.min(lines.length, end + context);
+  const from = Math.max(0, start - 1 - context);
+  const to = Math.min(lines.length, end + context);
   return lines.slice(from, to).join("\n");
 };
 /** Deterministic, ACL-filtered structural code lookup; no model/semantic arm. */
@@ -38,8 +38,8 @@ export async function searchCodeIndex(
   viewer: Viewer,
   q: CodeSearchQuery,
 ): Promise<{ executor: "code_index"; results: CodeCitation[]; context: CodeContextPack }> {
-  const limit = Math.min(q.limit ?? 8, 50),
-    value = q.query.toLowerCase();
+  const limit = Math.min(q.limit ?? 8, 50);
+  const value = q.query.toLowerCase();
   const clauses = [
     "ci.tenant = $1",
     "(d.ingested_by = $2 OR d.acl_groups ?| $3::text[])",
@@ -81,8 +81,8 @@ export async function searchCodeIndex(
       text: lineWindow(r.body, r.line_start, r.line_end),
     }),
   );
-  let total = 0,
-    truncated = false;
+  let total = 0;
+  let truncated = false;
   const bounded = citations.filter((c) => {
     if (total + c.text.length > 16000) {
       truncated = true;

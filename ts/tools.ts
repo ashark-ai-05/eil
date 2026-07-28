@@ -118,14 +118,17 @@ const expandSpec: ToolSpec = {
 const searchCodeSpec: ToolSpec = {
   name: "search_code",
   description:
-    "Search source code across Bitbucket repositories. Exact terms work best " +
-    "(no regex). Returns repo, path, and matching lines.",
-  schema: z.object({ query: z.string(), limit: z.number().int().default(10) }),
-  requiresEnv: ["EIL_BITBUCKET_URL", "EIL_BITBUCKET_TOKEN"],
-  handler: async (_c, _v, a) => {
-    const { BitbucketSearchClient } = await import("./connectors/bitbucket.js");
-    return new BitbucketSearchClient().searchCode(a.query, a.limit ?? 10);
-  },
+    "Search the locally indexed immutable repository corpus with deterministic, ACL-filtered path/symbol/literal/import/export/test citations.",
+  schema: z.object({
+    query: z.string(),
+    kind: z.enum(["path", "symbol", "literal", "import", "export", "test"]).optional(),
+    repo: z.string().optional(),
+    ref: z.string().optional(),
+    path: z.string().optional(),
+    limit: z.number().int().default(10),
+  }),
+  requiresEnv: [],
+  handler: async (c, v, a) => (await import("./code-search.js")).searchCodeIndex(c, v, a as any),
 };
 
 const fetchLogsSpec: ToolSpec = {

@@ -144,13 +144,10 @@ describe("tool registry (portability contract)", () => {
     expect(JSON.stringify(result)).not.toContain("123"); // no echo of caller values beyond field names
   });
 
-  it("env-gated tools fail closed without a database", async () => {
+  it("external tools fail closed without a database", async () => {
     for (const v of ["EIL_BITBUCKET_URL", "EIL_BITBUCKET_TOKEN", "EIL_ELK_URL", "EIL_ELK_TOKEN"]) {
       delete process.env[v];
     }
-    expect(((await callTool("search_code", { query: "x" })) as any).error).toContain(
-      "not configured",
-    );
     expect(((await callTool("fetch_logs", { query: "x" })) as any).error).toContain(
       "not configured",
     );
