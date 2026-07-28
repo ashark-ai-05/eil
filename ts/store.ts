@@ -8,16 +8,28 @@ import { type CanonicalDoc, chunkHash, contentHash } from "./contracts/models.js
 import { chunk } from "./core/chunker.js";
 import type { Db } from "./db.js";
 
-export async function getCursor(client: Db, source: string): Promise<string | null> {
-  const res = await client.query("SELECT cursor FROM sync_cursors WHERE source = $1", [source]);
+export async function getCursor(
+  client: Db,
+  source: string,
+  tenant = "default",
+): Promise<string | null> {
+  const res = await client.query(
+    "SELECT cursor FROM sync_cursors WHERE tenant = $1 AND source = $2",
+    [tenant, source],
+  );
   return res.rows[0]?.cursor ?? null;
 }
 
-export async function setCursor(client: Db, source: string, cursor: string): Promise<void> {
+export async function setCursor(
+  client: Db,
+  source: string,
+  cursor: string,
+  tenant = "default",
+): Promise<void> {
   await client.query(
-    "INSERT INTO sync_cursors (source, cursor) VALUES ($1, $2)" +
-      " ON CONFLICT (source) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()",
-    [source, cursor],
+    "INSERT INTO sync_cursors (tenant, source, cursor) VALUES ($1, $2, $3)" +
+      " ON CONFLICT (tenant, source) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()",
+    [tenant, source, cursor],
   );
 }
 
@@ -63,8 +75,8 @@ export async function upsertDocument(client: Db, doc: CanonicalDoc): Promise<boo
 async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
   const hash = contentHash(doc);
   const existing = await client.query(
-    "SELECT content_hash, ingested_by FROM documents WHERE id = $1 FOR UPDATE",
-    [doc.id],
+    "SELECT content_hash, ingested_by FROM documents WHERE tenant = $1 AND id = $2 FOR UPDATE",
+    [doc.tenant, doc.id],
   );
   const row = existing.rows[0];
   if (row && row.content_hash === hash && row.ingested_by) {
@@ -78,7 +90,7 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
         (id, tenant, source, title, url, author, created_at, updated_at,
          hierarchy, acl_groups, quality_tier, content_hash, body, ingested_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-     ON CONFLICT (id) DO UPDATE SET
+     ON CONFLICT (tenant, id) DO UPDATE SET
         title = EXCLUDED.title, url = EXCLUDED.url, author = EXCLUDED.author,
         created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
         hierarchy = EXCLUDED.hierarchy, acl_groups = EXCLUDED.acl_groups,
@@ -102,19 +114,19 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
       userInfo().username,
     ],
   );
-  await client.query("DELETE FROM chunks WHERE doc_id = $1", [doc.id]);
+  await client.query("DELETE FROM chunks WHERE tenant = $1 AND doc_id = $2", [doc.tenant, doc.id]);
   for (const c of chunk(doc)) {
     await client.query(
-      "INSERT INTO chunks (doc_id, seq, heading_path, text, content_hash)" +
-        " VALUES ($1, $2, $3, $4, $5)",
-      [c.docId, c.seq, c.headingPath, c.text, chunkHash(c)],
+      "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash)" +
+        " VALUES ($1, $2, $3, $4, $5, $6)",
+      [doc.tenant, c.docId, c.seq, c.headingPath, c.text, chunkHash(c)],
     );
   }
-  await client.query("DELETE FROM links WHERE src_id = $1", [doc.id]);
+  await client.query("DELETE FROM links WHERE tenant = $1 AND src_id = $2", [doc.tenant, doc.id]);
   for (const dst of doc.links) {
     await client.query(
-      "INSERT INTO links (src_id, dst_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-      [doc.id, dst],
+      "INSERT INTO links (tenant, src_id, dst_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      [doc.tenant, doc.id, dst],
     );
   }
   return true;

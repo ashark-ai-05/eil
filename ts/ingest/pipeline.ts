@@ -24,6 +24,7 @@ export async function ingestDocs(
   source: string,
   docs: AsyncIterable<CanonicalDoc> | Iterable<CanonicalDoc>,
   cursorOf?: (doc: CanonicalDoc) => string | null,
+  tenant = "default",
 ): Promise<void> {
   const { setCursor, upsertDocument } = await import("../store.js");
   const client = await connect();
@@ -48,7 +49,7 @@ export async function ingestDocs(
       if (value && (latest === null || value > latest)) latest = value;
     }
     outcome.target = retryFrom ?? latest;
-    if (outcome.target) await setCursor(client, source, outcome.target);
+    if (outcome.target) await setCursor(client, source, outcome.target, tenant);
   } finally {
     await client.end();
   }
@@ -104,20 +105,20 @@ export async function ingestConfluenceScope(
         if (withDesc) for await (const p of conf.descendants(id)) yield normalize(p, tenant);
       }
     })();
-    await ingestDocs("confluence", docs); // explicit fetch: no cursor
+    await ingestDocs("confluence", docs, undefined, tenant); // explicit fetch: no cursor
     return;
   }
   const key = cursorKey("confluence", scope);
   if (key === null) throw new Error(`unexpected non-cursor confluence scope: ${scope.kind}`);
   const client = await connect();
-  const cursor = await getCursor(client, key);
+  const cursor = await getCursor(client, key, tenant);
   await client.end();
   console.log(`scope ${key} from cursor: ${cursor ?? "(beginning)"}`);
   const pred = predicate(scope) ?? undefined;
   const docs = (async function* () {
     for await (const p of conf.updatedSince(cursor, pred)) yield normalize(p, tenant);
   })();
-  await ingestDocs(key, docs, (d) => d.updatedAt ?? null);
+  await ingestDocs(key, docs, (d) => d.updatedAt ?? null, tenant);
 }
 
 export async function ingestJiraScope(jira: JiraLike, scope: Scope, tenant: string): Promise<void> {
@@ -128,20 +129,20 @@ export async function ingestJiraScope(jira: JiraLike, scope: Scope, tenant: stri
     const docs = (async function* () {
       for (const k of keys) yield normalize(await jira.getIssue(k), tenant);
     })();
-    await ingestDocs("jira", docs); // explicit fetch: no cursor
+    await ingestDocs("jira", docs, undefined, tenant); // explicit fetch: no cursor
     return;
   }
   const key = cursorKey("jira", scope);
   if (key === null) throw new Error(`unexpected non-cursor jira scope: ${scope.kind}`);
   const client = await connect();
-  const cursor = await getCursor(client, key);
+  const cursor = await getCursor(client, key, tenant);
   await client.end();
   console.log(`scope ${key} from cursor: ${cursor ?? "(beginning)"}`);
   const pred = predicate(scope) ?? undefined;
   const docs = (async function* () {
     for await (const i of jira.updatedSince(cursor, pred)) yield normalize(i, tenant);
   })();
-  await ingestDocs(key, docs, (d) => d.updatedAt ?? null);
+  await ingestDocs(key, docs, (d) => d.updatedAt ?? null, tenant);
 }
 
 async function tombstone(client: Db, id: string, tenant: string): Promise<void> {
@@ -161,7 +162,7 @@ export async function ingestRepo(
   const out = { upserted: 0, deleted: 0, skipped: 0 };
   try {
     const head = await source.headSha();
-    const cursor = await getCursor(client, ckey);
+    const cursor = await getCursor(client, ckey, tenant);
     if (cursor === head) {
       console.log(`${ckey}: up to date (${head})`);
       return out;
@@ -226,7 +227,7 @@ export async function ingestRepo(
     } else {
       for await (const path of source.listFiles()) await ingestOne(path);
     }
-    await setCursor(client, ckey, head);
+    await setCursor(client, ckey, head, tenant);
     console.log(
       `${ckey}: ${out.upserted} upserted, ${out.deleted} deleted, ${out.skipped} skipped -> ${head}`,
     );

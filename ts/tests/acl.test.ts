@@ -12,8 +12,8 @@ import { type Viewer, expand, getDoc, searchDocs } from "../search.js";
 import { upsertDocument } from "../store.js";
 
 const ME = userInfo().username;
-const OUTSIDER: Viewer = { principal: ME, groups: ["grp-payments"] };
-const INSIDER: Viewer = { principal: ME, groups: ["grp-secret"] };
+const OUTSIDER: Viewer = { principal: ME, groups: ["grp-payments"], tenant: "default" };
+const INSIDER: Viewer = { principal: ME, groups: ["grp-secret"], tenant: "default" };
 
 const doc = (id: string, title: string, body: string, acl: string[], links: string[] = []) =>
   CanonicalDoc.parse({ id, source: "confluence", title, body, aclGroups: acl, links });
@@ -133,12 +133,20 @@ describe.skipIf(!available)("ACL red-team", () => {
 
   it("ingester always sees own documents", async () => {
     expect(
-      await getDoc(client, { principal: ME, groups: [] }, "confluence:page:open"),
+      await getDoc(
+        client,
+        { principal: ME, groups: [], tenant: "default" },
+        "confluence:page:open",
+      ),
     ).not.toBeNull();
   });
 
   it("empty acl is fail-closed for others", async () => {
-    const stranger: Viewer = { principal: "someone-else", groups: ["grp-payments"] };
+    const stranger: Viewer = {
+      principal: "someone-else",
+      groups: ["grp-payments"],
+      tenant: "default",
+    };
     expect(await getDoc(client, stranger, "confluence:page:open")).toBeNull();
   });
 
@@ -147,11 +155,19 @@ describe.skipIf(!available)("ACL red-team", () => {
     await upsertDocument(client, legacy);
     await client.query("UPDATE documents SET ingested_by = '' WHERE id = 'confluence:page:legacy'");
     expect(
-      await getDoc(client, { principal: ME, groups: [] }, "confluence:page:legacy"),
+      await getDoc(
+        client,
+        { principal: ME, groups: [], tenant: "default" },
+        "confluence:page:legacy",
+      ),
     ).toBeNull();
     expect(await upsertDocument(client, legacy)).toBe(true); // gate bypassed, not a no-op
     expect(
-      await getDoc(client, { principal: ME, groups: [] }, "confluence:page:legacy"),
+      await getDoc(
+        client,
+        { principal: ME, groups: [], tenant: "default" },
+        "confluence:page:legacy",
+      ),
     ).not.toBeNull();
   });
 
@@ -182,10 +198,20 @@ describe.skipIf(!available)("ACL red-team", () => {
         doc(`confluence:page:spoke${n}`, `Spoke ${n}`, "spoke", [], ["confluence:page:hub"]),
       );
     }
-    const limited = await expand(client, { principal: ME, groups: [] }, "confluence:page:hub", 2);
+    const limited = await expand(
+      client,
+      { principal: ME, groups: [], tenant: "default" },
+      "confluence:page:hub",
+      2,
+    );
     expect(limited.edges.some((e) => e.direction === "out")).toBe(true);
     expect(limited.truncated).toBe(true);
-    const full = await expand(client, { principal: ME, groups: [] }, "confluence:page:hub", 50);
+    const full = await expand(
+      client,
+      { principal: ME, groups: [], tenant: "default" },
+      "confluence:page:hub",
+      50,
+    );
     expect(full.truncated).toBe(false);
     expect(full.edges.filter((e) => e.direction === "in")).toHaveLength(3);
   });

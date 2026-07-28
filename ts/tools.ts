@@ -11,7 +11,15 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { type Db, connect } from "./db.js";
 // (freshFetch imports its connectors lazily — no cost unless fresh=true is used)
-import { type Viewer, audit, expand, getDoc, localViewer, searchDocs } from "./search.js";
+import {
+  type Viewer,
+  audit,
+  expand,
+  getDoc,
+  isTrustedViewer,
+  localViewer,
+  searchDocs,
+} from "./search.js";
 
 export interface ToolSpec<S extends z.ZodRawShape = z.ZodRawShape> {
   name: string;
@@ -42,7 +50,7 @@ const searchDocsSpec: ToolSpec = {
  * ACL-filtered read. Falls back to the catalog copy (with a note) when the
  * source is unsupported or its env isn't configured.
  */
-async function freshFetch(c: Db, id: string): Promise<string | null> {
+async function freshFetch(c: Db, viewer: Viewer, id: string): Promise<string | null> {
   try {
     if (id.startsWith("confluence:page:")) {
       if (!process.env.EIL_CONFLUENCE_URL) return "fresh unavailable: EIL_CONFLUENCE_URL not set";
@@ -50,7 +58,7 @@ async function freshFetch(c: Db, id: string): Promise<string | null> {
       const { normalize } = await import("./ingest/confluence.js");
       const { upsertDocument } = await import("./store.js");
       const page = await new ConfluenceClient().getPage(id.slice("confluence:page:".length));
-      await upsertDocument(c, normalize(page));
+      await upsertDocument(c, normalize(page, viewer.tenant));
       return null;
     }
     if (id.startsWith("jira:issue:")) {
@@ -59,7 +67,7 @@ async function freshFetch(c: Db, id: string): Promise<string | null> {
       const { normalize } = await import("./ingest/jira.js");
       const { upsertDocument } = await import("./store.js");
       const issue = await new JiraClient().getIssue(id.slice("jira:issue:".length));
-      await upsertDocument(c, normalize(issue));
+      await upsertDocument(c, normalize(issue, viewer.tenant));
       return null;
     }
     return `fresh unavailable: unsupported source for ${id}`;
@@ -81,7 +89,7 @@ const getDocSpec: ToolSpec = {
   }),
   requiresEnv: [],
   handler: async (c, v, a) => {
-    const freshNote = a.fresh ? await freshFetch(c, a.id) : null;
+    const freshNote = a.fresh ? await freshFetch(c, v, a.id) : null;
     const doc = await getDoc(c, v, a.id, a.section ?? 0);
     if (!doc) return { error: `not found: ${a.id}`, ...(freshNote ? { fresh: freshNote } : {}) };
     return freshNote
@@ -178,11 +186,14 @@ export async function callTool(
     return { error: `invalid arguments for ${name}`, issues: parsed.error.flatten().fieldErrors };
   }
   const v = viewer ?? localViewer();
+  if (!isTrustedViewer(v)) {
+    return { error: "untrusted viewer: construct context from verified authenticated claims" };
+  }
   const ownsClient = client === undefined;
   const c = client ?? (await connect());
   try {
     const result = (await spec.handler(c, v, parsed.data)) ?? {};
-    await audit(c, v.principal, name, args, resultCount(result));
+    await audit(c, v, name, args, resultCount(result));
     return result;
   } finally {
     if (ownsClient) await c.end();

@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Db, connect, migrate } from "../db.js";
 import { normalize as normalizePage } from "../ingest/confluence.js";
 import { normalize as normalizeIssue } from "../ingest/jira.js";
-import { type Viewer, getDoc, searchDocs } from "../search.js";
+import { type Viewer, getDoc, searchDocs, viewerFromAuthenticatedClaims } from "../search.js";
 import { upsertDocument } from "../store.js";
 import { callTool } from "../tools.js";
 
@@ -24,7 +24,11 @@ const fixture = (name: string) =>
   JSON.parse(readFileSync(new URL(`../../tests/fixtures/${name}`, import.meta.url), "utf-8"));
 
 const ME = userInfo().username;
-const VIEWER: Viewer = { principal: ME, groups: [] };
+const VIEWER: Viewer = viewerFromAuthenticatedClaims({
+  principal: ME,
+  groups: [],
+  tenant: "default",
+});
 
 let dataDir: string;
 let client: Db;
@@ -76,9 +80,17 @@ describe("pglite zero-install backend", () => {
   });
 
   it("jsonb ACL predicate fail-closes for strangers", async () => {
-    const stranger: Viewer = { principal: "someone-else", groups: ["grp-payments"] };
+    const stranger: Viewer = {
+      principal: "someone-else",
+      groups: ["grp-payments"],
+      tenant: "default",
+    };
     expect(await getDoc(client, stranger, "confluence:page:12345")).toBeNull();
-    const insider: Viewer = { principal: "someone-else", groups: ["grp-payments-eng"] };
+    const insider: Viewer = {
+      principal: "someone-else",
+      groups: ["grp-payments-eng"],
+      tenant: "default",
+    };
     expect(await getDoc(client, insider, "confluence:page:12345")).not.toBeNull();
   });
 
@@ -153,14 +165,16 @@ describe("pglite zero-install backend", () => {
     expect(report.skipped.length).toBeGreaterThanOrEqual(2); // both fixture docs skipped
   });
 
-  it("tenant-scoped viewer sees only its tenant; unscoped viewer sees all", async () => {
+  it("tenant-scoped viewer sees only its own tenant", async () => {
     const other = normalizePage({ ...fixture("confluence_page.json"), id: "55555" }, "team-b");
     await upsertDocument(client, other);
     const scoped: Viewer = { principal: ME, groups: [], tenant: "default" };
     expect(await getDoc(client, scoped, "confluence:page:55555")).toBeNull();
     const scopedB: Viewer = { principal: ME, groups: [], tenant: "team-b" };
     expect(await getDoc(client, scopedB, "confluence:page:55555")).not.toBeNull();
-    expect(await getDoc(client, VIEWER, "confluence:page:55555")).not.toBeNull(); // unscoped
-    await client.query("DELETE FROM documents WHERE id = 'confluence:page:55555'");
+    expect(await getDoc(client, VIEWER, "confluence:page:55555")).toBeNull();
+    await client.query(
+      "DELETE FROM documents WHERE tenant = 'team-b' AND id = 'confluence:page:55555'",
+    );
   });
 });

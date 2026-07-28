@@ -5,6 +5,7 @@
  */
 
 import { userInfo } from "node:os";
+import { z } from "zod";
 import { rrf } from "./core/fusion.js";
 import { modifier } from "./core/ranking.js";
 import { classify } from "./core/router.js";
@@ -15,34 +16,57 @@ export const SNIPPET_OPTS = "StartSel=**, StopSel=**, MaxWords=40, MinWords=10";
 export const GET_DOC_MAX_CHARS = 8_000;
 export const EXPAND_MAX_EDGES = 50;
 
-// Mandatory, fail-closed visibility: viewer ingested the doc OR shares an
-// acl_groups stamp, AND (when the viewer is tenant-scoped) the doc belongs
-// to that tenant. Only static $-indices ever reach SQL text.
+// Mandatory, fail-closed visibility: a request always has exactly one tenant.
+// Only static $-indices ever reach SQL text.
 const visibleSql = (principalIdx: number, groupsIdx: number, tenantIdx: number) =>
   `((d.ingested_by = $${principalIdx} OR d.acl_groups ?| $${groupsIdx}::text[])` +
-  ` AND ($${tenantIdx}::text IS NULL OR d.tenant = $${tenantIdx}))`;
+  ` AND d.tenant = $${tenantIdx})`;
 
 export interface Viewer {
   principal: string;
   groups: string[];
-  /** When set, reads are scoped to this tenant; unset = no tenant filter. */
-  tenant?: string;
+  tenant: string;
 }
 
-const tenantOf = (viewer: Viewer): string | null => viewer.tenant ?? null;
+/** Validated claims required at any shared/API boundary. Never accept a caller-
+ * constructed Viewer in such a boundary: tenant and group membership must come
+ * from a verified token/session before this function is called. */
+const AuthenticatedClaims = z.object({
+  principal: z.string().min(1),
+  tenant: z.string().min(1),
+  groups: z.array(z.string().min(1)).default([]),
+});
+export type AuthenticatedClaims = z.infer<typeof AuthenticatedClaims>;
 
-/** Local mode: OS user + optional EIL_USER_GROUPS / EIL_TENANT. On kube: token claims. */
+// A runtime capability prevents a shared host from passing a structurally
+// equivalent, caller-controlled object to callTool(). The host must verify its
+// token/session first, then construct this capability from the resulting claims.
+const trustedViewers = new WeakSet<Viewer>();
+function trustedViewer(claims: AuthenticatedClaims): Viewer {
+  const viewer: Viewer = {
+    principal: claims.principal,
+    tenant: claims.tenant,
+    groups: claims.groups,
+  };
+  trustedViewers.add(viewer);
+  return viewer;
+}
+export const viewerFromAuthenticatedClaims = (claims: unknown): Viewer =>
+  trustedViewer(AuthenticatedClaims.parse(claims));
+export const isTrustedViewer = (viewer: Viewer): boolean => trustedViewers.has(viewer);
+
+/** Local stdio/CLI mode only. Shared HTTP mode must call
+ * viewerFromAuthenticatedClaims() after token verification. */
 export function localViewer(): Viewer {
   const raw = process.env.EIL_USER_GROUPS ?? "";
-  const viewer: Viewer = {
+  return trustedViewer({
     principal: userInfo().username,
+    tenant: process.env.EIL_TENANT ?? "default",
     groups: raw
       .split(",")
       .map((g) => g.trim())
       .filter(Boolean),
-  };
-  if (process.env.EIL_TENANT) viewer.tenant = process.env.EIL_TENANT;
-  return viewer;
+  });
 }
 
 export interface SearchResult {
@@ -85,11 +109,11 @@ export async function searchDocs(
             ts_rank(c.tsv, websearch_to_tsquery('english', $1)) AS rank,
             ts_headline('english', c.text,
                         websearch_to_tsquery('english', $1), $2) AS snippet
-     FROM chunks c JOIN documents d ON d.id = c.doc_id
+     FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id
      WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND ${visibleSql(4, 5, 6)}
      ORDER BY rank DESC, c.doc_id, c.seq
      LIMIT $3`,
-    [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, tenantOf(viewer)],
+    [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, viewer.tenant],
   );
 
   const byDoc = new Map<string, SearchResult & { updated: Date | null }>();
@@ -140,7 +164,7 @@ export async function getDoc(
   const res = await client.query(
     `SELECT id, title, url, source, quality_tier, hierarchy, updated_at, body
      FROM documents d WHERE id = $1 AND ${visibleSql(2, 3, 4)}`,
-    [docId, viewer.principal, viewer.groups, tenantOf(viewer)],
+    [docId, viewer.principal, viewer.groups, viewer.tenant],
   );
   const row = res.rows[0];
   if (!row) return null;
@@ -171,7 +195,7 @@ export async function expand(
   // would otherwise slip past the destination-side ACL check below).
   const restricted = await client.query(
     `SELECT 1 FROM documents d WHERE d.id = $1 AND NOT ${visibleSql(2, 3, 4)}`,
-    [docId, viewer.principal, viewer.groups, tenantOf(viewer)],
+    [docId, viewer.principal, viewer.groups, viewer.tenant],
   );
   if (restricted.rows.length > 0) return { id: docId, edges: [], truncated: false };
 
@@ -181,16 +205,16 @@ export async function expand(
   // out-edges ('in' sorts before 'out').
   const res = await client.query(
     `(SELECT l.dst_id AS other, l.rel, 'out' AS direction, d.title
-      FROM links l LEFT JOIN documents d ON d.id = l.dst_id
-      WHERE l.src_id = $1 AND (d.id IS NULL OR ${visibleSql(2, 3, 4)})
+      FROM links l LEFT JOIN documents d ON d.tenant = l.tenant AND d.id = l.dst_id
+      WHERE l.tenant = $4 AND l.src_id = $1 AND (d.id IS NULL OR ${visibleSql(2, 3, 4)})
       ORDER BY other LIMIT $5)
      UNION ALL
      (SELECT l.src_id AS other, l.rel, 'in' AS direction, d.title
-      FROM links l LEFT JOIN documents d ON d.id = l.src_id
-      WHERE l.dst_id = $1 AND (d.id IS NULL OR ${visibleSql(2, 3, 4)})
+      FROM links l LEFT JOIN documents d ON d.tenant = l.tenant AND d.id = l.src_id
+      WHERE l.tenant = $4 AND l.dst_id = $1 AND (d.id IS NULL OR ${visibleSql(2, 3, 4)})
       ORDER BY other LIMIT $5)
      ORDER BY direction, other`,
-    [docId, viewer.principal, viewer.groups, tenantOf(viewer), limit],
+    [docId, viewer.principal, viewer.groups, viewer.tenant, limit],
   );
   const edges: Edge[] = res.rows.map((row) => ({
     id: row.other,
@@ -206,14 +230,14 @@ export async function expand(
 
 export async function audit(
   client: Db,
-  principal: string,
+  viewer: Viewer,
   tool: string,
   args: Record<string, unknown>,
   resultCount: number,
 ): Promise<void> {
   await client.query(
-    "INSERT INTO audit_log (principal, tool, args, result_count) VALUES ($1, $2, $3, $4)",
-    [principal, tool, JSON.stringify(args), resultCount],
+    "INSERT INTO audit_log (tenant, principal, tool, args, result_count) VALUES ($1, $2, $3, $4, $5)",
+    [viewer.tenant, viewer.principal, tool, JSON.stringify(args), resultCount],
   );
 }
 
@@ -256,7 +280,7 @@ async function vecArm(
        SELECT c.doc_id, c.seq,
               (SELECT sum(a::float8 * b::float8)
                  FROM unnest(c.embedding, $4::float4[]) AS t(a, b)) AS score
-         FROM chunks c JOIN documents d ON d.id = c.doc_id
+         FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id
         WHERE c.embedding IS NOT NULL AND c.embed_model = $5 AND ${visibleSql(1, 2, 3)}
      ), best AS (
        SELECT DISTINCT ON (doc_id) doc_id, seq, score
@@ -266,10 +290,10 @@ async function vecArm(
      )
      SELECT t.doc_id, t.score, ch.text, d.title, d.url, d.quality_tier, d.updated_at
        FROM top t
-       JOIN chunks ch ON ch.doc_id = t.doc_id AND ch.seq = t.seq
-       JOIN documents d ON d.id = t.doc_id
+       JOIN chunks ch ON ch.tenant = $3 AND ch.doc_id = t.doc_id AND ch.seq = t.seq
+       JOIN documents d ON d.tenant = $3 AND d.id = t.doc_id
       ORDER BY t.score DESC, t.doc_id`,
-    [viewer.principal, viewer.groups, tenantOf(viewer), qv, emb.id, limit * 3],
+    [viewer.principal, viewer.groups, viewer.tenant, qv, emb.id, limit * 3],
   );
   for (const row of res.rows) {
     if (!byDoc.has(row.doc_id)) {
