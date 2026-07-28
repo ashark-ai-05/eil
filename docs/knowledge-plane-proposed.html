@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EIL — Knowledge Plane (proposed)</title>
+<style>
+  :root {
+    --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd;
+    --ok:#5ccb8e; --warn:#ef7d6b; --new:#a78bfa;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --r:10px; color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524;
+      --ok:#1f9d63; --warn:#c0442f; --new:#7c5cd6;
+      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+  }
+  :root[data-theme="dark"]{ --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd;
+    --ok:#5ccb8e; --warn:#ef7d6b; --new:#a78bfa;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc; color-scheme:dark; }
+  :root[data-theme="light"]{ --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+    --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524;
+    --ok:#1f9d63; --warn:#c0442f; --new:#7c5cd6;
+    --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--ink); color:var(--text); font-family:var(--mono); font-size:15px; line-height:1.5;
+    -webkit-font-smoothing:antialiased; letter-spacing:-0.01em;
+    background-image: radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--new) 8%, transparent), transparent 60%),
+      radial-gradient(110% 70% at 6% 108%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
+    background-attachment:fixed; }
+  .wrap { max-width:1440px; margin:0 auto; padding:clamp(20px,3vw,40px) clamp(14px,3vw,30px) 64px; }
+
+  header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+  .word { font-size:19px; font-weight:700; letter-spacing:0.02em; }
+  .word span { color:var(--muted); font-weight:500; }
+  .tag { color:var(--muted); font-size:13px; margin:8px 0 0; max-width:82ch; letter-spacing:0; line-height:1.6; }
+  .tag b { color:var(--text); font-weight:600; }
+  .btn { font-family:var(--mono); font-size:11px; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted);
+    background:var(--panel); border:1px solid var(--line); padding:8px 12px; border-radius:7px; cursor:pointer;
+    user-select:none; white-space:nowrap; }
+  .btn:hover { color:var(--text); border-color:var(--muted); }
+
+  nav.xref { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0 0; font-size:11.5px; letter-spacing:0.02em; }
+  nav.xref a { color:var(--faint); text-decoration:none; border-bottom:1px dashed var(--line); padding-bottom:1px; }
+  nav.xref a:hover { color:var(--lex); border-color:var(--lex); }
+
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin:22px 0 0; padding:12px 14px; background:var(--panel);
+    border:1px solid var(--line); border-radius:var(--r); font-size:11.5px; letter-spacing:0.02em; align-items:center; }
+  .key { display:flex; align-items:center; gap:7px; color:var(--muted); }
+  .dot { width:9px; height:9px; border-radius:3px; flex:none; }
+  .d-new{ background:var(--new); } .d-chg{ background:var(--vec); }
+  .d-keep{ background:var(--line); border:1px solid var(--muted); } .d-cut{ background:var(--warn); }
+
+  h2.sec { font-size:12px; letter-spacing:0.16em; text-transform:uppercase; color:var(--faint);
+    margin:38px 0 14px; font-weight:600; display:flex; align-items:center; gap:12px; }
+  h2.sec::after { content:""; flex:1; height:1px; background:var(--line-soft); }
+
+  .planes { display:grid; grid-template-columns:repeat(3, minmax(300px,1fr)); gap:16px; }
+  @media (max-width:1080px){ .planes { grid-template-columns:1fr; } }
+
+  .plane { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow);
+    display:flex; flex-direction:column; overflow:hidden; }
+  .plane > h3 { margin:0; padding:13px 15px; font-size:11.5px; letter-spacing:0.14em; text-transform:uppercase;
+    border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .plane.ing > h3 { color:var(--ok); }  .plane.sto > h3 { color:var(--lex); }  .plane.ret > h3 { color:var(--vec); }
+  .plane > h3 em { font-style:normal; color:var(--faint); font-size:10px; letter-spacing:0.06em; }
+  .body { padding:12px; display:flex; flex-direction:column; gap:9px; }
+
+  .node { border:1px solid var(--line); border-left-width:3px; border-radius:8px; background:var(--panel-2);
+    padding:9px 11px; }
+  .node.n-new  { border-left-color:var(--new); }
+  .node.n-chg  { border-left-color:var(--vec); }
+  .node.n-keep { border-left-color:var(--line); }
+  .node.n-cut  { border-left-color:var(--warn); opacity:.72; }
+  .node b { display:block; font-size:13px; font-weight:600; color:var(--text); letter-spacing:0; }
+  .node p { margin:4px 0 0; font-size:11.5px; color:var(--muted); letter-spacing:0; line-height:1.55; }
+  .node code { font-size:11px; color:var(--lex); background:color-mix(in oklab, var(--lex) 10%, transparent);
+    padding:1px 4px; border-radius:4px; }
+  .node .m { display:inline-block; margin-top:5px; font-size:10.5px; letter-spacing:0.03em; color:var(--ok);
+    border:1px solid color-mix(in oklab, var(--ok) 35%, var(--line)); border-radius:5px; padding:1px 6px; }
+  .node .m.bad { color:var(--warn); border-color:color-mix(in oklab, var(--warn) 40%, var(--line)); }
+  .node .m.open { color:var(--new); border-color:color-mix(in oklab, var(--new) 40%, var(--line)); }
+  .flow { text-align:center; color:var(--faint); font-size:13px; line-height:1; margin:-2px 0; }
+
+  .band { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:14px 16px;
+    box-shadow:var(--shadow); }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+
+  table { width:100%; border-collapse:collapse; font-size:12px; letter-spacing:0; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+  th { color:var(--faint); font-weight:600; font-size:10.5px; letter-spacing:0.09em; text-transform:uppercase; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr.hi td { color:var(--ok); font-weight:600; }
+  tr.lo td { color:var(--warn); }
+  .scroll { overflow-x:auto; }
+
+  ol.seq { list-style:none; counter-reset:s; margin:0; padding:0; display:grid; gap:8px; }
+  ol.seq li { counter-increment:s; display:grid; grid-template-columns:26px 1fr; gap:11px; align-items:start;
+    font-size:12.5px; letter-spacing:0; color:var(--muted); }
+  ol.seq li::before { content:counter(s); grid-column:1; font-size:10.5px; color:var(--faint);
+    border:1px solid var(--line); border-radius:6px; text-align:center; padding:2px 0; line-height:1.35; }
+  ol.seq li b { color:var(--text); font-weight:600; }
+  ol.seq li.gate::before { color:var(--ok); border-color:color-mix(in oklab, var(--ok) 45%, var(--line)); }
+
+  .note { font-size:12px; color:var(--muted); letter-spacing:0; line-height:1.6; margin:12px 0 0; }
+  .note b { color:var(--text); }
+  footer { margin-top:44px; padding-top:16px; border-top:1px solid var(--line-soft); font-size:11px; color:var(--faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <div class="word">EIL <span>— knowledge plane, <b style="color:var(--new)">proposed</b></span></div>
+    <p class="tag">The ingest → store → retrieve flow as specified in
+      <b>docs/superpowers/specs/2026-07-29-knowledge-plane-design.md</b>.
+      Side-by-side companion to <b>system-map.html</b>, which is unchanged and still describes what ships today.
+      Every figure marked <span style="color:var(--ok)">green</span> was measured on this machine against real
+      PGlite and the real vendored ONNX model.</p>
+  </div>
+  <button class="btn" id="themeBtn" type="button">theme</button>
+</header>
+
+<nav class="xref">
+  <a href="system-map.html">system-map.html (current)</a>
+  <a href="architecture-schematic.html">architecture-schematic.html</a>
+  <a href="knowledge-plane.html">knowledge-plane.html</a>
+  <a href="observability-plane.html">observability-plane.html</a>
+</nav>
+
+<div class="legend">
+  <span class="key"><span class="dot d-new"></span> new</span>
+  <span class="key"><span class="dot d-chg"></span> changed</span>
+  <span class="key"><span class="dot d-keep"></span> unchanged — keep</span>
+  <span class="key"><span class="dot d-cut"></span> removed</span>
+  <span class="key" style="margin-left:auto;color:var(--faint)">§ references are sections of the spec</span>
+</div>
+
+<h2 class="sec">The three planes</h2>
+
+<div class="planes">
+
+  <!-- ─────────────── INGEST ─────────────── -->
+  <section class="plane ing">
+    <h3>Ingest <em>§5</em></h3>
+    <div class="body">
+      <div class="node n-keep"><b>Sources</b>
+        <p>Confluence · Jira · git / Bitbucket · Obsidian. Personal credentials — you can only index what you could already read.</p></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-new"><b>ingest_jobs + sync_state</b>
+        <p><code>FOR UPDATE SKIP LOCKED</code>, <code>attempts</code>, <code>next_attempt_at</code>. Durable execution without a server — Temporal's semantics, none of its operations.</p>
+        <span class="m">replaces manual CLI-only sync</span></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-chg"><b>Fetch</b>
+        <p>Full-jitter backoff <code>rand(0, min(60s, 2^n))</code>. 30-min poll overlap. Generator errors no longer discard cursor progress.</p>
+        <span class="m bad">today: one 429 can livelock a sync</span></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-chg"><b>Normalize → CanonicalDoc</b>
+        <p>Hash covers <b>metadata</b>, not just body. Code gets <code>updated_at</code> from the git commit. Ticket keys and imports become real <code>links</code>.</p>
+        <span class="m bad">today: ACL change with same body = permanent no-op</span></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-new"><b>Secret scan</b>
+        <p>Detect → quarantine → redact on serve. Body kept for remediation.</p>
+        <span class="m open">§11.1 — awaiting decision</span></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-chg"><b>Chunk</b>
+        <p>Prose by heading structure, code by line window. <code>text</code> stored <b>clean</b>; breadcrumb enrichment applied at index/embed time only.</p>
+        <span class="m bad">today: breadcrumb eats 9–16% of every vec snippet</span></div>
+      <div class="node n-cut"><b>Code chunk overlap</b>
+        <p><code>CODE_OVERLAP_LINES = 10</code> — measured ≤0.5pp for code, net-negative for prose.</p></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-chg"><b>Embed</b>
+        <p>Per-chunk reuse via the already-computed <code>chunks.content_hash</code>. Chunk size matched to the model window.</p>
+        <span class="m bad">today: 1-char edit re-embeds 100 chunks</span>
+        <span class="m bad">today: ⅔ of each chunk never reaches the vector</span></div>
+    </div>
+  </section>
+
+  <!-- ─────────────── STORE ─────────────── -->
+  <section class="plane sto">
+    <h3>Store — one Postgres <em>§4</em></h3>
+    <div class="body">
+      <div class="node n-chg"><b>documents</b>
+        <p>Owner folded into <code>acl_groups</code> as a <code>user:</code> token so the whole check is one indexable <code>?|</code>. Group tokens namespaced <code>&lt;source&gt;_&lt;name&gt;</code>.</p>
+        <span class="m bad">today: the OR across two columns defeats the GIN index</span></div>
+
+      <div class="node n-chg"><b>chunks</b>
+        <p><code>tsv</code> (prose) · <b>+ <code>tsv_code</code></b> under <code>simple</code> · <b>+ <code>len</code></b> · <b>+ <code>sig varbit</code></b> · <b>+ <code>cluster_id</code></b>.</p>
+        <span class="m">varbit, not bit(384) — no migration when dims change</span></div>
+
+      <div class="node n-new"><b>lexeme_stats · corpus_stats</b>
+        <p>Document frequency + avg length. Turns <code>unnest(tsv)</code> into real BM25 with no extension.</p>
+        <span class="m">408 kB / 20k chunks</span></div>
+
+      <div class="node n-new"><b>ivf_centroids</b>
+        <p>k-means centroids keyed by <code>embed_model</code>, so a model switch can never mix vector spaces.</p></div>
+
+      <div class="node n-chg"><b>code_index</b>
+        <p><b>+ <code>match_class</code></b> (exact | subtoken | path_suffix | path_segment) and <code>matched_term</code> — how Zoekt's exact-vs-partial distinction survives without trigrams.</p>
+        <span class="m bad">today: whole-line values crash 23.4% of files</span></div>
+
+      <div class="node n-new"><b>acl_tuples · acl_revocations</b>
+        <p>Zanzibar's model, materialized locally into <code>acl_groups</code>. Nesting, inheritance, and the AND-semantics a flat array cannot express.</p></div>
+
+      <div class="node n-chg"><b>audit_log</b>
+        <p><b>+</b> <code>duration_ms · ok · error · route · executor · trace_id</code>. <code>route</code> and <code>executor</code> are <b>already computed and thrown away</b>.</p>
+        <span class="m bad">today: only successes are recorded; p95 unobtainable</span></div>
+
+      <div class="node n-new"><b>retrieval_events</b>
+        <p>query → results → the doc actually fetched. Implicit relevance, eval material, and the future learning signal in one table.</p></div>
+
+      <div class="node n-new"><b>eval_queries · eval_qrels</b>
+        <p>Graded 0–3, keyed by <b>stable document id</b> — never chunk offset, or re-chunking destroys the labels.</p></div>
+    </div>
+  </section>
+
+  <!-- ─────────────── RETRIEVE ─────────────── -->
+  <section class="plane ret">
+    <h3>Retrieve <em>§6</em></h3>
+    <div class="body">
+      <div class="node n-keep"><b>Router</b>
+        <p>entity · docs · symbol · path · exact. Deterministic classifier, no LLM. Unchanged.</p></div>
+      <div class="flow">↓ &nbsp; fan out to arms &nbsp; ↓</div>
+
+      <div class="node n-chg"><b>Prose arm — BM25</b>
+        <p>Prune the query by document frequency <i>before</i> the scan, then score with real BM25 (<code>k1=1.2, b=0.75</code>). <code>setweight('A')</code> on the breadcrumb.</p>
+        <span class="m bad">today: ts_rank has no IDF — "work" counts as much as "backoff"</span></div>
+
+      <div class="node n-chg"><b>Code arm — Zoekt scorer</b>
+        <p>Subtoken tokenizer (one function, index <i>and</i> query). Score composes by <b>MAX, never SUM</b>. No IDF here — Zoekt's own evals reject it for keyword queries.</p>
+        <span class="m bad">today: exact equality only, and no ranking at all</span></div>
+
+      <div class="node n-chg"><b>Vector arm — the funnel</b>
+        <p>IVF cluster probe → Hamming on <code>sig</code> → exact <code>float4[]</code> rescore of survivors. Oversample fixed at 8×; <b>nprobe is calibrated, not guessed</b> (§12.1).</p>
+        <span class="m">1.30 µs/chunk vs 298.5 — 230×</span>
+        <span class="m">storage 30 MB → 1035 kB</span></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-new"><b>MaxP chunk → doc</b>
+        <p>Best chunk represents its document. Pure SQL, ~0 cost, +5–6 nDCG in the literature — and it structurally fixes cross-arm eviction.</p></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-chg"><b>RRF fusion</b>
+        <p>Rank-based, so incommensurable arm scores can never be compared — the problem Onyx needs a whole normalization pipeline to solve. <code>k</code> swept {10,20,30,60}.</p>
+        <span class="m">candidate pool widened to max(50, limit×6)</span></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-chg"><b>Tier / recency modifier</b>
+        <p>Rebalanced. Its 2.4× range currently overwhelms RRF's 1.6%-per-rank, letting a metadata prior reorder the whole list.</p>
+        <span class="m open">may be worth 0 — never evaluated</span></div>
+      <div class="flow">↓</div>
+
+      <div class="node n-new"><b>Dedup + confidence</b>
+        <p>Near-duplicate suppression at cosine&nbsp;&gt;&nbsp;0.95. Returns <code>top_score · score_gap · n_above_threshold · arms_contributing</code>.</p>
+        <span class="m">gives the agent CRAG's signal, deterministically, free</span></div>
+
+      <div class="node n-new"><b>Reranker seam — off</b>
+        <p>Flag-gated, default off. Onyx <b>deleted</b> theirs. Enable only if <code>Recall@50 − Recall@10</code> shows real headroom.</p></div>
+    </div>
+  </section>
+</div>
+
+<h2 class="sec">What the measurements decided</h2>
+
+<div class="grid2">
+  <div class="band">
+    <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--faint);margin-bottom:9px">Vector arm @20k chunks × 384-d</div>
+    <div class="scroll"><table>
+      <tr><th>approach</th><th class="num">total</th><th class="num">per chunk</th></tr>
+      <tr class="lo"><td>exact float4[] dot — <i>ships today</i></td><td class="num">5971 ms</td><td class="num">298.5 µs</td></tr>
+      <tr><td>binary Hamming, full scan</td><td class="num">26 ms</td><td class="num">1.30 µs</td></tr>
+      <tr class="hi"><td>IVF probe + Hamming</td><td class="num">3 ms</td><td class="num">0.17 µs</td></tr>
+    </table></div>
+    <p class="note">Storage <b>30 MB → 1035 kB</b>. At 20M chunks that is 30 GB versus 1 GB — the difference between
+      "needs a big server" and "fits in page cache."</p>
+  </div>
+
+  <div class="band">
+    <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--faint);margin-bottom:9px">Recall — and which knob actually moves it</div>
+    <div class="scroll"><table>
+      <tr><th>nprobe (of 64)</th><th class="num">oversample 8×</th><th class="num">16×</th><th class="num">scanned</th></tr>
+      <tr class="lo"><td>1</td><td class="num">45.5%</td><td class="num">45.5%</td><td class="num">18</td></tr>
+      <tr><td>4</td><td class="num">81.0%</td><td class="num">81.0%</td><td class="num">79</td></tr>
+      <tr><td>8</td><td class="num">90.5%</td><td class="num">90.5%</td><td class="num">157</td></tr>
+      <tr><td>16</td><td class="num">96.5%</td><td class="num">96.5%</td><td class="num">324</td></tr>
+      <tr class="hi"><td>64 (all)</td><td class="num">100.0%</td><td class="num">100.0%</td><td class="num">1337</td></tr>
+    </table></div>
+    <p class="note"><b>Oversample is not the knob — nprobe is.</b> 8× and 16× are identical at every setting, which
+      means that once survivors are rescored exactly, binary quantization costs nothing: <i>all</i> loss is clusters
+      not probed. This corpus (21 chunks/cluster) is too small to set nprobe from, so the spec ships a
+      <b>calibration procedure with a ≥0.98 gate</b> and a fallback to full scan — not a constant.</p>
+  </div>
+</div>
+
+<h2 class="sec">Sequencing — evaluation gates the rest</h2>
+
+<div class="band">
+  <ol class="seq">
+    <li><b>Instrumentation.</b> audit_log columns, try/finally so failures are logged, trace_id, missing indexes.
+      Nothing below is measurable without it — <i>and it produces the real queries step 2 needs.</i></li>
+    <li><b>Ingestion correctness.</b> Metadata hash · code timestamps · cursor safety · retry · per-chunk embed reuse ·
+      owner threaded into acl_groups.</li>
+    <li class="gate"><b>Evaluation harness.</b> 150–200 queries, ~50 replayed from step 1's logs. Recall@50 + Recall@10
+      + nDCG@10, pooled graded judging, paired permutation test. <b>Everything below must beat p&nbsp;&lt;&nbsp;0.05.</b></li>
+    <li><b>Cheap retrieval wins.</b> Embedder singleton (60–75×) · chunk/window match · MaxP · filters · ±1 neighbour
+      chunk. Anything that fails to help is <i>reverted, not kept</i>.</li>
+    <li><b>Storage for scale.</b> sig / cluster_id / ivf_centroids · lexeme_stats · tsv_code — plus the IVF calibration run.</li>
+    <li><b>Retrieval substance.</b> Vector funnel · BM25 · code executors · fusion recalibration.</li>
+    <li><b>Ingestion breadth.</b> Git history · cross-source links · Jira and Confluence field coverage.</li>
+    <li><b>Eval-gated options.</b> Reranker · second embedder · learned sparse arm — each requires demonstrated headroom.</li>
+  </ol>
+  <p class="note">Step 1 before step 3 is the non-obvious dependency, and it explains a symptom already visible:
+    <b>docs/golden-queries.md has held two entries for its lifetime</b> while asking for entries "from actual usage."
+    Nothing in the system currently produces usable usage records. Persisting the two fields
+    <code style="color:var(--lex)">searchDocs</code> already computes and discards turns the audit log into the eval corpus.</p>
+</div>
+
+<h2 class="sec">Deliberately not built</h2>
+
+<div class="band">
+  <p class="note" style="margin:0">
+    HyDE · LLM query expansion inside EIL · Self-RAG / CRAG / Adaptive-RAG loops · Microsoft GraphRAG ·
+    memory layers · RAPTOR · semantic / breakpoint chunking · function-level-only code chunking ·
+    SCIP / LSIF / stack-graphs · ColBERT as first stage · IVFFlat · any API reranker ·
+    pg_search / pg_textsearch / VectorChord as hard dependencies.
+    <br><br>
+    <b>The pattern:</b> each spends LLM tokens on something the calling agent already does better with full task
+    context, or that a deterministic method captures at ~0.1% of the cost. GraphRAG is the sharpest case — it pays
+    $20–50/M tokens to hallucinate approximations of the exact typed edges EIL already has in <code style="color:var(--lex)">links</code>
+    and does not yet use in the docs route.
+  </p>
+</div>
+
+<footer>
+  Proposed design · 2026-07-29 · companion to <b>system-map.html</b> (current, unchanged).
+  Spec: <b>docs/superpowers/specs/2026-07-29-knowledge-plane-design.md</b>.
+  Grounded in Onyx, Zoekt, tree-sitter, OpenFGA/Zanzibar, Temporal, OpenTelemetry and pgvector;
+  §3 of the spec records what was taken from each and what was rejected.
+</footer>
+
+</div>
+<script>
+  const root = document.documentElement;
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    const cur = root.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+</script>
+</body>
+</html>
