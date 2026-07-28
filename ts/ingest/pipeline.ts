@@ -1,13 +1,17 @@
 /** Shared ingest pipeline: per-doc upsert with cursor bookkeeping, and the
  *  full-listing reconcile. Extracted from cli.ts so orchestration is testable. */
 
+import type { RepoChange, RepoSource } from "../connectors/reposource.js";
 import type { Scope } from "../connectors/scope.js";
 import { cursorKey, predicate } from "../connectors/scope.js";
 import type { CanonicalDoc } from "../contracts/models.js";
+import type { Db } from "../db.js";
 import { connect } from "../db.js";
-import { getCursor } from "../store.js";
+import { getCursor, setCursor } from "../store.js";
+import { normalizeCode } from "./code.js";
 import type { ConfluencePage } from "./confluence.js";
 import type { JiraIssue } from "./jira.js";
+import type { RepoFilter } from "./repofilter.js";
 
 interface IngestOutcome {
   seen: number;
@@ -138,4 +142,97 @@ export async function ingestJiraScope(jira: JiraLike, scope: Scope, tenant: stri
     for await (const i of jira.updatedSince(cursor, pred)) yield normalize(i, tenant);
   })();
   await ingestDocs(key, docs, (d) => d.updatedAt ?? null);
+}
+
+async function tombstone(client: Db, id: string, tenant: string): Promise<void> {
+  await client.query("DELETE FROM documents WHERE id = $1 AND tenant = $2", [id, tenant]);
+}
+
+export async function ingestRepo(
+  source: RepoSource,
+  key: string,
+  subpath: string | undefined,
+  filter: RepoFilter,
+  tenant: string,
+): Promise<{ upserted: number; deleted: number; skipped: number }> {
+  const { upsertDocument } = await import("../store.js");
+  const ckey = `code:${key}${subpath ? `:${subpath}` : ""}`;
+  const client = await connect();
+  const out = { upserted: 0, deleted: 0, skipped: 0 };
+  try {
+    const head = await source.headSha();
+    const cursor = await getCursor(client, ckey);
+    if (cursor === head) {
+      console.log(`${ckey}: up to date (${head})`);
+      return out;
+    }
+
+    const ingestOne = async (path: string) => {
+      if (!filter.acceptPath(path)) {
+        out.skipped++;
+        return;
+      }
+      // Isolate ONLY the read: a single huge/unreadable blob must not abort
+      // the whole run (and thus never advance the cursor). A DB error from
+      // upsertDocument below is intentionally NOT caught here — it should
+      // still propagate and hold the cursor.
+      let content: string;
+      try {
+        content = await source.readFile(path);
+      } catch (err: any) {
+        out.skipped++;
+        console.log(`  skip ${path} (read failed: ${err.message})`);
+        return;
+      }
+      if (!filter.acceptContent(content)) {
+        out.skipped++;
+        console.log(`  skip ${path} (binary/size)`);
+        return;
+      }
+      if (
+        await upsertDocument(
+          client,
+          normalizeCode(key, path, content, source.blobUrl(path), tenant),
+        )
+      ) {
+        out.upserted++;
+        console.log(`  ~ ${path}`);
+      }
+    };
+
+    let changes: RepoChange[] | null = null;
+    if (cursor) {
+      try {
+        changes = [];
+        for await (const ch of source.changedSince(cursor)) changes.push(ch);
+      } catch {
+        changes = null; // unreachable sha -> full resync
+      }
+    }
+    // NOTE: the full-listing fallback below (changes === null) re-upserts
+    // every file currently present, but it does NOT tombstone files that
+    // were deleted during the missed commit range — there is no reconcile
+    // pass for code (unlike Confluence/Jira/Obsidian; deliberate non-goal).
+    // Those stale docs linger in the catalog until their path is re-touched
+    // by a future commit.
+    if (changes) {
+      for (const ch of changes) {
+        if (ch.status === "D") {
+          await tombstone(client, `code:${key}:${ch.path}`, tenant);
+          out.deleted++;
+          console.log(`  - ${ch.path}`);
+        } else await ingestOne(ch.path);
+      }
+    } else {
+      for await (const path of source.listFiles()) await ingestOne(path);
+    }
+    await setCursor(client, ckey, head);
+    console.log(
+      `${ckey}: ${out.upserted} upserted, ${out.deleted} deleted, ${out.skipped} skipped -> ${head}`,
+    );
+  } finally {
+    await client.end();
+    await source.dispose();
+  }
+  return out;
 }

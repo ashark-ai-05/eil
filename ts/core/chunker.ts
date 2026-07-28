@@ -59,7 +59,32 @@ function pack(text: string): string[] {
   return parts;
 }
 
+export const CODE_WINDOW_LINES = 60;
+export const CODE_OVERLAP_LINES = 10;
+
+/** Deterministic line-window chunker for code: fixed windows with overlap,
+ *  line ranges preserved in the heading for citation. */
+export function chunkCode(doc: CanonicalDoc): Chunk[] {
+  const lines = doc.body.split("\n");
+  const chunks: Chunk[] = [];
+  const step = CODE_WINDOW_LINES - CODE_OVERLAP_LINES;
+  for (let start = 0; start < lines.length; start += step) {
+    const end = Math.min(start + CODE_WINDOW_LINES, lines.length);
+    const headingPath = `${doc.title} › L${start + 1}-${end}`;
+    const window = lines.slice(start, end).join("\n");
+    chunks.push({
+      docId: doc.id,
+      seq: chunks.length,
+      headingPath,
+      text: `${headingPath}\n\n${window}`,
+    });
+    if (end === lines.length) break;
+  }
+  return chunks;
+}
+
 export function chunk(doc: CanonicalDoc): Chunk[] {
+  if (doc.source === "code") return chunkCode(doc);
   const chunks: Chunk[] = [];
   for (const [headingPath, text] of sections(doc.body, [doc.title])) {
     for (const piece of pack(text)) {

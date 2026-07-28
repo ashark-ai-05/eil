@@ -168,6 +168,42 @@ ingest
     await runReconcile("obsidian", async () => docs.map((d) => d.id), opts.tenant);
   });
 
+ingest
+  .command("repo <refs...>")
+  .description("Ingest one or more git repos (git clone or Bitbucket API) as code docs")
+  .option("--source <kind>", "git | bitbucket (default: auto-detect per ref)")
+  .option("--branch <b>", "branch", "main")
+  .option("--subpath <p>", "restrict to a subdirectory")
+  .option("--include <glob...>", "only paths matching (repeatable)")
+  .option("--exclude <glob...>", "skip paths matching (repeatable)")
+  .option("--name <key>", "override the repo key (else derived from the ref)")
+  .option("--tenant <tenant>", "tenant", "default")
+  .action(async (refs: string[], opts) => {
+    const { detectSource, repoKey } = await import("./ingest/code.js");
+    const { GitCloneSource, BitbucketApiSource } = await import("./connectors/reposource.js");
+    const { RepoFilter } = await import("./ingest/repofilter.js");
+    const { ingestRepo } = await import("./ingest/pipeline.js");
+    if (opts.name && refs.length > 1) {
+      console.log("--name cannot be used with multiple repos (it would collide their ids/cursors)");
+      process.exit(1);
+    }
+    const filter = new RepoFilter({ includes: opts.include, excludes: opts.exclude });
+    for (const ref of refs) {
+      const kind = opts.source ?? detectSource(ref);
+      const key = repoKey(ref, opts.name);
+      const cfg = { ref, branch: opts.branch, subpath: opts.subpath };
+      const source =
+        kind === "bitbucket"
+          ? liveClient(
+              () => new BitbucketApiSource(cfg),
+              "EIL_BITBUCKET_URL and EIL_BITBUCKET_TOKEN",
+            )
+          : new GitCloneSource(cfg);
+      console.log(`ingest ${kind} ${key} (${ref})`);
+      await ingestRepo(source, key, opts.subpath, filter, opts.tenant);
+    }
+  });
+
 program
   .command("search <query>")
   .description("Debug: run search_docs through the tool registry (audited, like MCP)")
