@@ -7,6 +7,7 @@
  * DB session, ACL viewer, audit logging.
  */
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { type Db, connect } from "./db.js";
@@ -18,6 +19,7 @@ import {
   getDoc,
   isTrustedViewer,
   localViewer,
+  recordRetrieval,
   searchDocs,
 } from "./search.js";
 
@@ -210,11 +212,48 @@ export async function callTool(
   }
   const ownsClient = client === undefined;
   const c = client ?? (await connect());
+  // One trace id per tool call, returned to the caller so an agent's multi-call
+  // task is reconstructable, and written to audit_log as the join key to spans.
+  const traceId = randomUUID();
+  const started = Date.now();
+  let result: Record<string, unknown> = {};
+  let ok = true;
+  let error: string | undefined;
   try {
-    const result = (await spec.handler(c, v, parsed.data)) ?? {};
-    await audit(c, v, name, args, resultCount(result));
-    return result;
+    result = (await spec.handler(c, v, parsed.data)) ?? {};
+    // A handler that returns {error} did not throw, but it did not succeed
+    // either — an ACL denial reaching vw_zero_results as a legitimate
+    // zero-result search is what corrupted the flagship adoption metric.
+    if (typeof result.error === "string") {
+      ok = false;
+      error = result.error;
+    }
+    return { ...result, trace_id: traceId };
+  } catch (err: any) {
+    // Audit the failure rather than letting it vanish. Before this, audit() ran
+    // after the handler, so ONLY successes were ever recorded — which is why the
+    // error rate was not merely unmeasured but unmeasurable.
+    ok = false;
+    error = String(err?.message ?? err).slice(0, 500);
+    throw err;
   } finally {
+    try {
+      await audit(c, v, name, args, {
+        resultCount: resultCount(result),
+        durationMs: Date.now() - started,
+        ok,
+        error,
+        route: typeof result.route === "string" ? result.route : undefined,
+        executor: typeof result.executor === "string" ? result.executor : undefined,
+        traceId,
+      });
+      if (ok && typeof parsed.data.query === "string") {
+        await recordRetrieval(c, v, traceId, parsed.data.query, result);
+      }
+    } catch (auditErr: any) {
+      // Never let bookkeeping mask the caller's outcome.
+      console.error(`audit skipped: ${auditErr.message}`);
+    }
     if (ownsClient) await c.end();
   }
 }

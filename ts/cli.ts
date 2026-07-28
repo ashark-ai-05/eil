@@ -264,12 +264,18 @@ program
   .option("--drift <n>", "sample N docs and compare against live source fetches", "0")
   .option("--strict", "exit non-zero if integrity invariants fail")
   .action(async (opts) => {
-    const { drift, integrity } = await import("./quality.js");
+    const { drift, integrity, recordHealth } = await import("./quality.js");
     const client = await connect();
     try {
-      const report: Record<string, unknown> = { integrity: await integrity(client) };
+      const integrityReport = await integrity(client);
+      const report: Record<string, unknown> = { integrity: integrityReport };
+      await recordHealth(client, "integrity", integrityReport.ok, integrityReport);
       const sample = Number(opts.drift);
-      if (sample > 0) report.drift = await drift(client, sample);
+      if (sample > 0) {
+        const driftReport = await drift(client, sample);
+        report.drift = driftReport;
+        await recordHealth(client, "drift", driftReport.gone.length === 0, driftReport);
+      }
       console.log(JSON.stringify(report, null, 2));
       if (opts.strict && !(report.integrity as { ok: boolean }).ok) process.exit(2);
     } finally {

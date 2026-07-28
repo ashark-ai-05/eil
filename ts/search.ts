@@ -320,17 +320,82 @@ export async function expand(
   return { id: docId, edges, truncated: Math.max(perArm.in, perArm.out) >= limit };
 }
 
+/** What a tool call did, beyond who called it. `route` and `executor` are
+ *  computed by searchDocs and were previously discarded; persisting them is what
+ *  makes arm contribution and route-vs-executor drift visible. */
+export interface AuditFacts {
+  resultCount: number;
+  durationMs: number;
+  ok: boolean;
+  // Explicitly `| undefined`: the repo runs exactOptionalPropertyTypes, and this
+  // object is assembled programmatically in a finally block where these are
+  // genuinely absent rather than merely omitted.
+  error?: string | undefined;
+  route?: string | undefined;
+  executor?: string | undefined;
+  traceId?: string | undefined;
+}
+
 export async function audit(
   client: Db,
   viewer: Viewer,
   tool: string,
   args: Record<string, unknown>,
-  resultCount: number,
+  facts: AuditFacts,
 ): Promise<void> {
   await client.query(
-    "INSERT INTO audit_log (tenant, principal, tool, args, result_count) VALUES ($1, $2, $3, $4, $5)",
-    [viewer.tenant, viewer.principal, tool, JSON.stringify(args), resultCount],
+    "INSERT INTO audit_log (tenant, principal, tool, args, result_count," +
+      " duration_ms, ok, error, route, executor, trace_id)" +
+      " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+    [
+      viewer.tenant,
+      viewer.principal,
+      tool,
+      JSON.stringify(args),
+      facts.resultCount,
+      facts.durationMs,
+      facts.ok,
+      facts.error ?? null,
+      facts.route ?? null,
+      facts.executor ?? null,
+      facts.traceId ?? null,
+    ],
   );
+}
+
+/** Query -> ranked ids, for eval replay and implicit relevance. Best-effort:
+ *  a failure here must never fail the search that produced it. */
+export async function recordRetrieval(
+  client: Db,
+  viewer: Viewer,
+  traceId: string,
+  query: string,
+  result: Record<string, unknown>,
+): Promise<void> {
+  const rows = Array.isArray(result.results) ? result.results : [];
+  if (rows.length === 0) return;
+  const returned = rows.map((r: any, i: number) => ({
+    doc_id: r.id ?? r.docId ?? null,
+    rank: i,
+    score: r.score ?? null,
+  }));
+  try {
+    await client.query(
+      "INSERT INTO retrieval_events (trace_id, tenant, principal, query, route, executor, returned)" +
+        " VALUES ($1, $2, $3, $4, $5, $6, $7)",
+      [
+        traceId,
+        viewer.tenant,
+        viewer.principal,
+        query,
+        (result.route as string) ?? null,
+        (result.executor as string) ?? null,
+        JSON.stringify(returned),
+      ],
+    );
+  } catch (err: any) {
+    console.error(`retrieval_events skipped: ${err.message}`);
+  }
 }
 
 /** Best-effort semantic arm: cosine over ACL-visible embedded chunks, scored

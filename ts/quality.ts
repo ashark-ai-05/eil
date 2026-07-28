@@ -119,3 +119,29 @@ export async function drift(client: Db, sampleSize: number): Promise<DriftReport
   }
   return report;
 }
+
+/**
+ * Persist a health report so it can trend and alert.
+ *
+ * integrity() and drift() are the best data-health signals in the codebase —
+ * unowned docs, chunkless docs, FTS holes, and live re-fetch drift that no
+ * amount of internal consistency can fake. Both printed JSON to stdout, so
+ * neither had a trend and neither could ever fire an alert. Best-effort: a
+ * bookkeeping failure must not fail the audit that produced the report.
+ */
+export async function recordHealth(
+  client: Db,
+  kind: "integrity" | "drift",
+  ok: boolean,
+  report: unknown,
+): Promise<void> {
+  try {
+    await client.query("INSERT INTO metrics.health_runs (kind, ok, report) VALUES ($1, $2, $3)", [
+      kind,
+      ok,
+      JSON.stringify(report),
+    ]);
+  } catch (err: any) {
+    console.error(`health_runs skipped: ${err.message}`);
+  }
+}
