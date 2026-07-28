@@ -105,6 +105,21 @@
   @keyframes reveal { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:none; } }
   .row.gov .row-h .t { color:var(--ok); }
 
+  /* expand / collapse all — master toggle, pure CSS */
+  .controls { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:16px 0 14px; }
+  .controls .hint { margin:0; }
+  .btn { font-family:var(--mono); font-size:11px; letter-spacing:0.07em; text-transform:uppercase; color:var(--lex);
+    background:var(--panel); border:1px solid color-mix(in oklab, var(--lex) 42%, var(--line)); padding:8px 13px;
+    border-radius:8px; cursor:pointer; user-select:none; white-space:nowrap; transition:background .15s, border-color .15s; }
+  .btn:hover { background:var(--panel-2); border-color:var(--lex); }
+  .btn .ca { display:none; }
+  #sall:checked ~ .controls .btn .ea { display:none; }
+  #sall:checked ~ .controls .btn .ca { display:inline; }
+  #sall:focus-visible ~ .controls .btn { outline:2px solid var(--lex); outline-offset:2px; }
+  #sall:checked ~ .pipe .detail { display:block; }
+  #sall:checked ~ .pipe .cv { transform:rotate(180deg); color:var(--lex); }
+  #sall:checked ~ .pipe .row-h { background:var(--panel-2); }
+
   .legend { display:flex; gap:20px 30px; flex-wrap:wrap; margin-top:26px; padding-top:20px; border-top:1px solid var(--line-soft); }
   .legend .grp { display:flex; flex-direction:column; gap:5px; }
   .legend h4 { margin:0 0 3px; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:var(--faint); font-weight:600; }
@@ -135,6 +150,7 @@
   <input type="checkbox" class="toggle" id="s3" aria-hidden="true"><input type="checkbox" class="toggle" id="s4" aria-hidden="true">
   <input type="checkbox" class="toggle" id="s5" aria-hidden="true"><input type="checkbox" class="toggle" id="s6" aria-hidden="true">
   <input type="checkbox" class="toggle" id="s7" aria-hidden="true"><input type="checkbox" class="toggle" id="sg" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="sall" aria-hidden="true">
 
   <header>
     <div>
@@ -153,7 +169,10 @@
     </div>
   </header>
 
-  <p class="hint">▾ <b>click any stage</b> to expand its diagram in place. the cycle closes at the bottom.</p>
+  <div class="controls">
+    <label class="btn" for="sall"><span class="ea">⊕&nbsp; expand all</span><span class="ca">⊖&nbsp; collapse all</span></label>
+    <p class="hint">▾ <b>click any stage</b> to expand its diagram in place — or open the whole ecosystem at once.</p>
+  </div>
 
   <div class="pipe">
 
