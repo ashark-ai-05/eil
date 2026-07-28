@@ -189,38 +189,41 @@
     <section class="row" data-r="2">
       <label class="row-h" for="s2"><span class="n">02</span><span class="t">Ingest</span><span class="sub">only what changed</span><span class="cv" aria-hidden="true">⌄</span></label>
       <div class="detail"><div class="diagram">
-        <svg viewBox="0 0 400 140" fill="none" aria-hidden="true">
+        <svg viewBox="0 0 400 176" fill="none" aria-hidden="true">
           <!-- connector lane -->
-          <text x="2" y="14" fill="var(--muted)" font-size="9">connector · CQL / JQL</text>
-          <line x1="6" y1="30" x2="150" y2="30" stroke="var(--line)" stroke-width="6" stroke-linecap="round"/>
-          <line class="signal" x1="6" y1="30" x2="112" y2="30" stroke="var(--lex)" stroke-width="2"/>
-          <g transform="translate(112,22)"><path d="M0 0 h12 v16 h-12z" fill="var(--lex)" opacity=".25"/><path d="M0 0 v16 M12 0 v16" stroke="var(--lex)" stroke-width="1.5"/><text x="6" y="-3" fill="var(--lex)" font-size="8" text-anchor="middle">cursor</text></g>
-          <g font-size="8" fill="var(--muted)"><rect x="126" y="24" width="9" height="12" rx="2" fill="var(--panel-2)" stroke="var(--line)"/><rect x="138" y="24" width="9" height="12" rx="2" fill="var(--panel-2)" stroke="var(--line)"/></g>
-          <!-- git repo lane (code ingestion) -->
-          <text x="2" y="66" fill="var(--lex)" font-size="9">git repo · clone + diff</text>
-          <g transform="translate(6,74)">
-            <rect x="0" y="0" width="26" height="30" rx="4" fill="var(--panel-2)" stroke="var(--lex)"/>
-            <path d="M6 8h14M6 14h14M6 20h9" stroke="var(--lex)" stroke-width="1.4" stroke-linecap="round"/>
+          <text x="4" y="13" fill="var(--muted)" font-size="9">connector · CQL / JQL — cursor sync</text>
+          <line x1="8" y1="27" x2="176" y2="27" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
+          <line class="signal" x1="8" y1="27" x2="120" y2="27" stroke="var(--lex)" stroke-width="2"/>
+          <path d="M120 21 v12" stroke="var(--lex)" stroke-width="2"/><text x="120" y="19" fill="var(--lex)" font-size="8" text-anchor="middle">cursor ►</text>
+          <g fill="var(--panel-2)" stroke="var(--line)"><rect x="128" y="22" width="8" height="10" rx="2"/><rect x="139" y="22" width="8" height="10" rx="2"/></g>
+          <text x="160" y="30" fill="var(--muted)" font-size="8">Δ only</text>
+          <!-- git repo / code lane: clone -> filter (glob + skip) -> chunk -->
+          <text x="4" y="52" fill="var(--lex)" font-size="9">git repo · clone → filter → chunk  (code)</text>
+          <g transform="translate(6,66)"><rect x="0" y="0" width="30" height="36" rx="4" fill="var(--panel-2)" stroke="var(--lex)"/><path d="M7 9h16M7 16h16M7 23h10" stroke="var(--lex)" stroke-width="1.4" stroke-linecap="round"/></g>
+          <text x="21" y="114" fill="var(--faint)" font-size="8" text-anchor="middle">walk</text>
+          <path class="signal" d="M38 84 h24" stroke="var(--faint)" stroke-width="1.6"/>
+          <g font-size="8.5">
+            <rect x="64" y="60" width="122" height="16" rx="4" fill="color-mix(in oklab,var(--lex) 10%,transparent)" stroke="var(--lex)"/><text x="72" y="71" fill="var(--lex)">src/retry.ts</text><text x="180" y="71" fill="var(--ok)" text-anchor="end">✓ keep</text>
+            <rect x="64" y="80" width="122" height="16" rx="4" fill="var(--panel-2)" stroke="var(--line)"/><text x="72" y="91" fill="var(--muted)">logo.png</text><text x="180" y="91" fill="var(--warn)" text-anchor="end">✗ binary</text>
+            <rect x="64" y="100" width="122" height="16" rx="4" fill="var(--panel-2)" stroke="var(--line)"/><text x="72" y="111" fill="var(--muted)">bundle.min.js</text><text x="180" y="111" fill="var(--warn)" text-anchor="end">✗ &gt;512KB</text>
+            <rect x="64" y="120" width="122" height="16" rx="4" fill="var(--panel-2)" stroke="var(--line)"/><text x="72" y="131" fill="var(--muted)">vendor/dep.ts</text><text x="180" y="131" fill="var(--warn)" text-anchor="end">✗ exclude</text>
           </g>
-          <line class="signal" x1="34" y1="89" x2="118" y2="89" stroke="var(--lex)" stroke-width="2"/>
-          <g font-size="8" font-weight="700">
-            <rect x="120" y="74" width="20" height="13" rx="3" fill="color-mix(in oklab,var(--ok) 22%,transparent)" stroke="var(--ok)"/><text x="130" y="83" fill="var(--ok)" text-anchor="middle">A</text>
-            <rect x="120" y="90" width="20" height="13" rx="3" fill="color-mix(in oklab,var(--vec) 22%,transparent)" stroke="var(--vec)"/><text x="130" y="99" fill="var(--vec)" text-anchor="middle">M</text>
-            <rect x="120" y="106" width="20" height="13" rx="3" fill="color-mix(in oklab,var(--warn) 22%,transparent)" stroke="var(--warn)"/><text x="130" y="115" fill="var(--warn)" text-anchor="middle">D</text>
+          <text x="125" y="150" fill="var(--faint)" font-size="7.5" text-anchor="middle">--include **/*.ts · --exclude vendor/**</text>
+          <path class="signal" d="M186 68 C 214 68, 214 86, 240 86" stroke="var(--lex)" stroke-width="1.8"/>
+          <rect x="240" y="72" width="68" height="30" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="274" y="86" fill="var(--text)" font-size="9" text-anchor="middle">chunk</text><text x="274" y="97" fill="var(--muted)" font-size="7" text-anchor="middle">line-windows</text>
+          <path class="signal" d="M308 87 h20" stroke="var(--ok)" stroke-width="1.8"/><path d="M322 83l6 4-6 4" stroke="var(--ok)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="356" y="90" fill="var(--ok)" font-size="8.5" text-anchor="middle">upsert</text>
+          <g transform="translate(240,120)" font-size="8">
+            <text x="0" y="9" fill="var(--faint)">re-sync = git diff →</text>
+            <g font-weight="700">
+              <rect x="92" y="0" width="14" height="12" rx="3" fill="color-mix(in oklab,var(--ok) 22%,transparent)" stroke="var(--ok)"/><text x="99" y="9" fill="var(--ok)" text-anchor="middle">A</text>
+              <rect x="109" y="0" width="14" height="12" rx="3" fill="color-mix(in oklab,var(--vec) 22%,transparent)" stroke="var(--vec)"/><text x="116" y="9" fill="var(--vec)" text-anchor="middle">M</text>
+              <rect x="126" y="0" width="14" height="12" rx="3" fill="color-mix(in oklab,var(--warn) 22%,transparent)" stroke="var(--warn)"/><text x="133" y="9" fill="var(--warn)" text-anchor="middle">D</text>
+            </g>
           </g>
-          <!-- merge -> normalize -> chunk -> catalog -->
-          <path class="signal" d="M150 30 C 175 30, 175 70, 200 70" stroke="var(--faint)" stroke-width="1.6"/>
-          <path class="signal" d="M150 92 C 175 92, 175 70, 200 70" stroke="var(--faint)" stroke-width="1.6"/>
-          <g font-size="9" text-anchor="middle">
-            <rect x="200" y="58" width="60" height="24" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="230" y="73" fill="var(--text)">normalize</text>
-            <path class="signal" d="M260 70 h22" stroke="var(--faint)" stroke-width="1.6"/>
-            <rect x="282" y="58" width="48" height="24" rx="6" fill="var(--panel-2)" stroke="var(--line)"/><text x="306" y="73" fill="var(--text)">chunk</text>
-            <path class="signal" d="M330 70 h22" stroke="var(--faint)" stroke-width="1.6"/>
-            <rect x="352" y="58" width="44" height="24" rx="6" fill="var(--panel-2)" stroke="var(--ok)"/><text x="374" y="73" fill="var(--ok)">upsert</text>
-          </g>
-          <circle class="pkt" style="--tx:106px" cx="6" cy="30" r="3" fill="var(--lex)"/>
+          <circle class="pkt" style="--tx:112px" cx="8" cy="27" r="3" fill="var(--lex)"/>
         </svg>
-        <p class="cap"><b>Incremental by construction.</b> Connectors sync from a saved <span class="kx">cursor</span>; <b>git repos</b> re-index by <b>git&nbsp;diff</b> — <span class="ko">A</span>dded / <span class="kv">M</span>odified / <span style="color:var(--warn)">D</span>eleted. Unchanged files are no-ops; deletions tombstone.</p>
+        <p class="cap"><b>Only what changed.</b> Connectors sync from a saved <span class="kx">cursor</span>. <b>Git repos</b> clone, <b>filter by glob</b> (skipping binaries &amp; oversize files), chunk into line-windows, and re-index by <b>git diff</b> — <span class="ko">A</span>dd / <span class="kv">M</span>odify / <span style="color:var(--warn)">D</span>elete-tombstone.</p>
       </div></div>
     </section>
     <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
@@ -256,6 +259,21 @@
             <g fill="var(--vec)"><circle cx="214" cy="81" r="2"/><circle cx="222" cy="81" r="2"/><circle cx="230" cy="81" r="2"/><circle cx="238" cy="81" r="2"/><circle cx="246" cy="81" r="2"/><circle cx="254" cy="81" r="2"/><circle cx="262" cy="81" r="2"/></g>
           </g>
           <text x="352" y="55" fill="var(--faint)" font-size="8.5" text-anchor="middle">GIN +</text><text x="352" y="66" fill="var(--faint)" font-size="8.5" text-anchor="middle">cosine</text>
+        </svg>
+        <svg viewBox="0 0 400 80" fill="none" aria-hidden="true" style="margin-top:8px">
+          <text x="6" y="12" fill="var(--muted)" font-size="9">code chunker · overlapping line-windows</text>
+          <rect x="58" y="35" width="122" height="15" fill="color-mix(in oklab,var(--lex) 15%,transparent)"/>
+          <g stroke="var(--faint)" stroke-width="2" stroke-linecap="round">
+            <line x1="80" y1="22" x2="150" y2="22"/><line x1="80" y1="27" x2="132" y2="27"/><line x1="80" y1="32" x2="146" y2="32"/>
+            <line x1="80" y1="37" x2="120" y2="37"/><line x1="80" y1="42" x2="152" y2="42"/><line x1="80" y1="47" x2="128" y2="47"/>
+            <line x1="80" y1="52" x2="144" y2="52"/><line x1="80" y1="57" x2="116" y2="57"/><line x1="80" y1="62" x2="150" y2="62"/><line x1="80" y1="67" x2="124" y2="67"/>
+          </g>
+          <path d="M72 19 h-10 v32 h10" stroke="var(--lex)" stroke-width="1.6" fill="none"/>
+          <text x="36" y="25" fill="var(--lex)" font-size="8">L1–60</text>
+          <path d="M158 33 h10 v37 h-10" stroke="var(--vec)" stroke-width="1.6" fill="none"/>
+          <text x="176" y="73" fill="var(--vec)" font-size="8">L51–110</text>
+          <text x="196" y="41" fill="var(--faint)" font-size="8.5">~10-line overlap →</text>
+          <text x="196" y="52" fill="var(--faint)" font-size="8.5">chunks stay line-cited</text>
         </svg>
         <p class="cap">Each doc → chunks; every chunk gets a <span class="kx">full-text tsvector</span> and a <span class="kv">local vector</span>, side by side — no pgvector needed. The <span class="ko">ACL</span> lives on the doc.</p>
       </div></div>
