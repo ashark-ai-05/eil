@@ -119,7 +119,12 @@ ingest
       "EIL_CONFLUENCE_URL and EIL_CONFLUENCE_TOKEN",
     );
     for (const scope of scopes) await ingestConfluenceScope(conf, scope, opts.tenant);
-    if (opts.reconcile) await runReconcile("confluence", () => conf.listIds(), opts.tenant);
+    if (opts.reconcile)
+      await runReconcile(
+        "confluence",
+        async () => ({ ids: await conf.listIds(), complete: true }),
+        opts.tenant,
+      );
   });
 
 ingest
@@ -152,7 +157,12 @@ ingest
     const { ingestJiraScope } = await import("./ingest/pipeline.js");
     const jira = liveClient(() => new JiraClient(), "EIL_JIRA_URL and EIL_JIRA_TOKEN");
     for (const scope of scopes) await ingestJiraScope(jira, scope, opts.tenant);
-    if (opts.reconcile) await runReconcile("jira", () => jira.listIds(), opts.tenant);
+    if (opts.reconcile)
+      await runReconcile(
+        "jira",
+        async () => ({ ids: await jira.listIds(), complete: true }),
+        opts.tenant,
+      );
   });
 
 ingest
@@ -165,7 +175,11 @@ ingest
     const docs = walkVault(opts.vault, opts.tenant);
     await ingestDocs("obsidian", docs);
     // The vault walk IS a full listing — reconcile deletions on every run.
-    await runReconcile("obsidian", async () => docs.map((d) => d.id), opts.tenant);
+    await runReconcile(
+      "obsidian",
+      async () => ({ ids: docs.map((d) => d.id), complete: true }),
+      opts.tenant,
+    );
   });
 
 ingest

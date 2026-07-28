@@ -17,7 +17,7 @@ import { type Db, connect, migrate } from "../db.js";
 import { normalize as normalizePage } from "../ingest/confluence.js";
 import { normalize as normalizeIssue } from "../ingest/jira.js";
 import { type Viewer, getDoc, searchDocs, viewerFromAuthenticatedClaims } from "../search.js";
-import { upsertDocument } from "../store.js";
+import { reconcile, upsertDocument } from "../store.js";
 import { callTool } from "../tools.js";
 
 const fixture = (name: string) =>
@@ -124,13 +124,62 @@ describe("pglite zero-install backend", () => {
     await upsertDocument(client, doomed);
     expect(await getDoc(client, VIEWER, "confluence:page:99999")).not.toBeNull();
     // full listing that no longer contains 99999
-    const removed = await reconcile(client, "confluence", ["confluence:page:12345"]);
-    expect(removed).toEqual(["confluence:page:99999"]);
+    const removed = await reconcile(client, "confluence", {
+      ids: ["confluence:page:12345"],
+      complete: true,
+    });
+    expect(removed.tombstoned).toEqual(["confluence:page:99999"]);
     expect(await getDoc(client, VIEWER, "confluence:page:99999")).toBeNull();
     const orphanLinks = await client.query(
       "SELECT count(*)::int AS n FROM links WHERE src_id = 'confluence:page:99999'",
     );
-    expect(orphanLinks.rows[0].n).toBe(0); // cascade followed
+    expect(orphanLinks.rows[0].n).toBe(2); // quarantine retains evidence for recovery
+  });
+
+  it("keeps reads pure and requires explicit refresh authorization", async () => {
+    const read = await callTool(
+      "get_doc",
+      { id: "confluence:page:12345", fresh: true },
+      VIEWER,
+      client,
+    );
+    expect((read as any).error).toBe("invalid arguments for get_doc");
+    const refresh = await callTool("refresh_doc", { id: "confluence:page:12345" }, VIEWER, client);
+    expect((refresh as any).error).toBe("refresh_doc requires eil-refresh authorization");
+  });
+
+  it("records incomplete listings without tombstoning documents", async () => {
+    const before = await client.query(
+      "SELECT tombstoned_at FROM documents WHERE tenant = 'default' AND id = $1",
+      ["confluence:page:12345"],
+    );
+    const outcome = await reconcile(client, "confluence", { ids: [], complete: false });
+    const after = await client.query(
+      "SELECT tombstoned_at FROM documents WHERE tenant = 'default' AND id = $1",
+      ["confluence:page:12345"],
+    );
+    expect(outcome).toEqual({ status: "incomplete", tombstoned: [] });
+    expect(after.rows[0].tombstoned_at).toEqual(before.rows[0].tombstoned_at);
+  });
+
+  it("retains ACL snapshot history for each changed revision", async () => {
+    const first = await client.query(
+      "SELECT revision, acl_snapshot FROM documents WHERE tenant = 'default' AND id = $1",
+      ["confluence:page:12345"],
+    );
+    const changed = {
+      ...normalizePage(fixture("confluence_page.json")),
+      aclGroups: ["ops"],
+      body: `${normalizePage(fixture("confluence_page.json")).body}\nchanged`,
+    };
+    await upsertDocument(client, changed);
+    const revisions = await client.query(
+      "SELECT revision, acl_snapshot FROM document_revisions WHERE tenant = 'default' AND doc_id = $1 ORDER BY revision",
+      ["confluence:page:12345"],
+    );
+    expect(revisions.rows.length).toBeGreaterThanOrEqual(2);
+    expect(revisions.rows.at(-1).acl_snapshot).toEqual(["ops"]);
+    expect(revisions.rows.at(-1).revision).toBe(first.rows[0].revision + 1);
   });
 
   it("integrity audit passes on a healthy catalog and flags planted damage", async () => {

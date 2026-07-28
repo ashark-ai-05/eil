@@ -4,7 +4,7 @@
  */
 
 import { userInfo } from "node:os";
-import { type CanonicalDoc, chunkHash, contentHash } from "./contracts/models.js";
+import { type CanonicalDoc, chunkHash, contentHash, sha256 } from "./contracts/models.js";
 import { chunk } from "./core/chunker.js";
 import type { Db } from "./db.js";
 
@@ -33,25 +33,55 @@ export async function setCursor(
   );
 }
 
+export interface SourceListing {
+  ids: string[];
+  /** Only an explicitly complete upstream listing may tombstone documents. */
+  complete: boolean;
+}
+export interface ReconcileOutcome {
+  status: "complete" | "incomplete";
+  tombstoned: string[];
+}
+
 /**
- * Full-listing reconcile — the deletion story (design flow K1). A doc deleted
- * at the source never appears in an "updated since" query; only diffing a
- * complete id listing produces tombstones. Deletes catalog docs of `source`
- * (and tenant) absent from presentIds; chunks and outgoing links follow via
- * FK cascade. Returns the removed ids.
+ * A failed/partial listing is recorded but cannot mutate catalog visibility.
+ * A complete listing tombstones missing documents for a quarantine period;
+ * re-ingestion clears the tombstone, while purge is deliberately a separate
+ * explicit retention operation.
  */
 export async function reconcile(
   client: Db,
   source: string,
-  presentIds: string[],
+  listing: SourceListing,
   tenant = "default",
-): Promise<string[]> {
-  const res = await client.query(
-    "DELETE FROM documents WHERE source = $1 AND tenant = $2" +
-      " AND NOT (id = ANY($3::text[])) RETURNING id",
-    [source, tenant, presentIds],
-  );
-  return res.rows.map((r) => r.id as string);
+  actor?: string,
+): Promise<ReconcileOutcome> {
+  await client.query("BEGIN");
+  try {
+    if (!listing.complete) {
+      await client.query(
+        "INSERT INTO reconcile_runs (tenant, source, status, listed_count, actor) VALUES ($1, $2, 'incomplete', $3, $4)",
+        [tenant, source, listing.ids.length, actor ?? null],
+      );
+      await client.query("COMMIT");
+      return { status: "incomplete", tombstoned: [] };
+    }
+    const res = await client.query(
+      "UPDATE documents SET tombstoned_at = now(), quarantine_until = now() + interval '7 days'" +
+        " WHERE source = $1 AND tenant = $2 AND tombstoned_at IS NULL" +
+        " AND NOT (id = ANY($3::text[])) RETURNING id",
+      [source, tenant, listing.ids],
+    );
+    await client.query(
+      "INSERT INTO reconcile_runs (tenant, source, status, listed_count, tombstoned_count, actor) VALUES ($1, $2, 'complete', $3, $4, $5)",
+      [tenant, source, listing.ids.length, res.rows.length, actor ?? null],
+    );
+    await client.query("COMMIT");
+    return { status: "complete", tombstoned: res.rows.map((r) => r.id as string) };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  }
 }
 
 /**
@@ -74,29 +104,39 @@ export async function upsertDocument(client: Db, doc: CanonicalDoc): Promise<boo
 
 async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
   const hash = contentHash(doc);
+  const aclSnapshot = JSON.stringify(doc.aclGroups);
+  const aclVersion = sha256(aclSnapshot);
   const existing = await client.query(
-    "SELECT content_hash, ingested_by FROM documents WHERE tenant = $1 AND id = $2 FOR UPDATE",
+    "SELECT content_hash, acl_version, ingested_by, tombstoned_at FROM documents WHERE tenant = $1 AND id = $2 FOR UPDATE",
     [doc.tenant, doc.id],
   );
   const row = existing.rows[0];
-  if (row && row.content_hash === hash && row.ingested_by) {
+  if (
+    row &&
+    row.content_hash === hash &&
+    row.acl_version === aclVersion &&
+    row.ingested_by &&
+    !row.tombstoned_at
+  ) {
     return false; // hash gate: nothing to do
   }
   // An empty ingested_by (pre-0003 rows) makes a doc invisible to everyone —
   // fail-closed but repairable: re-ingest falls through the gate and heals it.
 
-  await client.query(
+  const write = await client.query(
     `INSERT INTO documents
         (id, tenant, source, title, url, author, created_at, updated_at,
-         hierarchy, acl_groups, quality_tier, content_hash, body, ingested_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         hierarchy, acl_groups, acl_snapshot, acl_version, quality_tier, content_hash, body, ingested_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      ON CONFLICT (tenant, id) DO UPDATE SET
         title = EXCLUDED.title, url = EXCLUDED.url, author = EXCLUDED.author,
         created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
         hierarchy = EXCLUDED.hierarchy, acl_groups = EXCLUDED.acl_groups,
+        acl_snapshot = EXCLUDED.acl_snapshot, acl_version = EXCLUDED.acl_version,
         quality_tier = EXCLUDED.quality_tier, content_hash = EXCLUDED.content_hash,
-        body = EXCLUDED.body, ingested_at = now(),
-        ingested_by = EXCLUDED.ingested_by`,
+        body = EXCLUDED.body, ingested_at = now(), ingested_by = EXCLUDED.ingested_by,
+        tombstoned_at = NULL, quarantine_until = NULL, revision = documents.revision + 1
+     RETURNING revision`,
     [
       doc.id,
       doc.tenant,
@@ -108,6 +148,8 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
       doc.updatedAt ?? null,
       JSON.stringify(doc.hierarchy),
       JSON.stringify(doc.aclGroups),
+      aclSnapshot,
+      aclVersion,
       doc.qualityTier,
       hash,
       doc.body,
@@ -129,5 +171,9 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
       [doc.tenant, doc.id, dst],
     );
   }
+  await client.query(
+    "INSERT INTO document_revisions (tenant, doc_id, revision, source, content_hash, acl_snapshot, acl_version) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [doc.tenant, doc.id, write.rows[0].revision, doc.source, hash, aclSnapshot, aclVersion],
+  );
   return true;
 }

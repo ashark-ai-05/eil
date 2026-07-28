@@ -62,17 +62,20 @@ export async function ingestDocs(
 
 export async function runReconcile(
   source: string,
-  listIds: () => Promise<string[]>,
+  listIds: () => Promise<{ ids: string[]; complete: boolean }>,
   tenant: string,
 ): Promise<void> {
   console.log(`reconcile: fetching full ${source} id listing...`);
-  const present = await listIds();
+  const listing = await listIds();
   const { reconcile } = await import("../store.js");
   const client = await connect();
   try {
-    const removed = await reconcile(client, source, present, tenant);
-    for (const id of removed) console.log(`  - ${id} (deleted at source)`);
-    console.log(`reconcile: ${present.length} present at source, ${removed.length} removed`);
+    const outcome = await reconcile(client, source, listing, tenant);
+    for (const id of outcome.tombstoned)
+      console.log(`  - ${id} (quarantined after source removal)`);
+    console.log(
+      `reconcile: ${listing.ids.length} listed (${outcome.status}), ${outcome.tombstoned.length} quarantined`,
+    );
   } finally {
     await client.end();
   }

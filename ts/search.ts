@@ -20,7 +20,7 @@ export const EXPAND_MAX_EDGES = 50;
 // Only static $-indices ever reach SQL text.
 const visibleSql = (principalIdx: number, groupsIdx: number, tenantIdx: number) =>
   `((d.ingested_by = $${principalIdx} OR d.acl_groups ?| $${groupsIdx}::text[])` +
-  ` AND d.tenant = $${tenantIdx})`;
+  ` AND d.tenant = $${tenantIdx} AND d.tombstoned_at IS NULL)`;
 
 export interface Viewer {
   principal: string;

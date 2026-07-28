@@ -80,23 +80,28 @@ const getDocSpec: ToolSpec = {
   name: "get_doc",
   description:
     "Fetch one document's content by canonical id (from search_docs/expand). " +
-    "Large documents are windowed; pass section=1,2,... for more. Pass " +
-    "fresh=true to re-fetch live from the source before reading (incident paths).",
-  schema: z.object({
-    id: z.string(),
-    section: z.number().int().default(0),
-    fresh: z.boolean().default(false),
-  }),
+    "Large documents are windowed; pass section=1,2,... for more. This read never refreshes or mutates the catalog.",
+  schema: z.object({ id: z.string(), section: z.number().int().default(0) }).strict(),
   requiresEnv: [],
   handler: async (c, v, a) => {
-    const freshNote = a.fresh ? await freshFetch(c, v, a.id) : null;
     const doc = await getDoc(c, v, a.id, a.section ?? 0);
-    if (!doc) return { error: `not found: ${a.id}`, ...(freshNote ? { fresh: freshNote } : {}) };
-    return freshNote
-      ? { ...doc, fresh: freshNote }
-      : a.fresh
-        ? { ...doc, fresh: "refreshed" }
-        : doc;
+    return doc ?? { error: `not found: ${a.id}` };
+  },
+};
+
+const refreshDocSpec: ToolSpec = {
+  name: "refresh_doc",
+  description:
+    "Authorised connector refresh for one catalog document. Requires the eil-refresh group; this is audited and idempotent.",
+  schema: z.object({ id: z.string() }),
+  requiresEnv: [],
+  handler: async (c, v, a) => {
+    if (!v.groups.includes("eil-refresh"))
+      return { error: "refresh_doc requires eil-refresh authorization" };
+    const note = await freshFetch(c, v, a.id);
+    if (note) return { error: note };
+    const doc = await getDoc(c, v, a.id);
+    return doc ? { id: a.id, status: "refreshed" } : { error: `not found after refresh: ${a.id}` };
   },
 };
 
@@ -142,7 +147,9 @@ const fetchLogsSpec: ToolSpec = {
 };
 
 export const REGISTRY: Record<string, ToolSpec> = Object.fromEntries(
-  [searchDocsSpec, getDocSpec, expandSpec, searchCodeSpec, fetchLogsSpec].map((s) => [s.name, s]),
+  [searchDocsSpec, getDocSpec, refreshDocSpec, expandSpec, searchCodeSpec, fetchLogsSpec].map(
+    (s) => [s.name, s],
+  ),
 );
 
 export function manifest(): Record<string, unknown> {

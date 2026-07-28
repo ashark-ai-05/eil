@@ -119,6 +119,7 @@ describe("tool registry (portability contract)", () => {
       "expand",
       "fetch_logs",
       "get_doc",
+      "refresh_doc",
       "search_code",
       "search_docs",
     ]);
