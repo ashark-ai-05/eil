@@ -7,7 +7,7 @@
 import { userInfo } from "node:os";
 import { rrf } from "./core/fusion.js";
 import { modifier } from "./core/ranking.js";
-import { classify } from "./core/router.js";
+import { type Route, classify } from "./core/router.js";
 import type { Db } from "./db.js";
 import { type Embedder, getEmbedder, toVec } from "./embed/index.js";
 
@@ -30,6 +30,25 @@ export interface Viewer {
 }
 
 const tenantOf = (viewer: Viewer): string | null => viewer.tenant ?? null;
+
+/**
+ * Arm weights come from the query router rather than a tuned constant: it
+ * already distinguishes a natural-language question from an identifier, path or
+ * quoted string, and it is unit-tested. A prose question leans on the prose arm;
+ * `retryHandler` or `src/retry.ts` leans on the code arm. Neither is silenced —
+ * the loser is down-weighted, not dropped.
+ */
+const CODE_LEANING_ROUTES: ReadonlySet<Route> = new Set<Route>(["symbol", "path", "exact"]);
+const OFF_LEAN_WEIGHT = 0.6;
+
+function armWeights(route: Route): Record<string, number> {
+  const leansCode = CODE_LEANING_ROUTES.has(route);
+  return {
+    fts_prose: leansCode ? OFF_LEAN_WEIGHT : 1.0,
+    fts_code: leansCode ? 1.0 : OFF_LEAN_WEIGHT,
+    vec: 1.0,
+  };
+}
 
 /** Local mode: OS user + optional EIL_USER_GROUPS / EIL_TENANT. On kube: token claims. */
 export function localViewer(): Viewer {
@@ -78,41 +97,62 @@ export async function searchDocs(
     return { route: "entity", entity: doc, linked: neighborhood.edges };
   }
 
-  // v0: single lexical arm through Postgres FTS; a kNN arm joins here later
-  // and rrf() already fuses however many arms exist.
+  // Lexical candidates, with two properties the naive query lacked:
+  //   best AS  — one row per DOC before any cut. The pool used to be capped in
+  //              CHUNKS, so a handful of large code files could consume it and
+  //              prose never entered the running at all.
+  //   quota AS — a separate allowance per source class, so code competes with
+  //              code. ts_rank is also normalized by length (flag 1); on its own
+  //              that is not enough, because ts_rank has no IDF and no tf
+  //              saturation, but it is a real improvement WITHIN an arm.
   const res = await client.query(
-    `SELECT c.doc_id, d.title, d.url, d.quality_tier, d.updated_at,
-            ts_rank(c.tsv, websearch_to_tsquery('english', $1)) AS rank,
-            ts_headline('english', c.text,
-                        websearch_to_tsquery('english', $1), $2) AS snippet
-     FROM chunks c JOIN documents d ON d.id = c.doc_id
-     WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND ${visibleSql(4, 5, 6)}
-     ORDER BY rank DESC, c.doc_id, c.seq
-     LIMIT $3`,
+    `WITH m AS (
+       SELECT c.doc_id, c.seq, c.text, d.source, d.title, d.url, d.quality_tier, d.updated_at,
+              ts_rank(c.tsv, websearch_to_tsquery('english', $1), 1) AS rank
+         FROM chunks c JOIN documents d ON d.id = c.doc_id
+        WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND ${visibleSql(4, 5, 6)}
+     ), best AS (
+       SELECT DISTINCT ON (doc_id) * FROM m ORDER BY doc_id, rank DESC, seq
+     ), quota AS (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY (source = 'code') ORDER BY rank DESC, doc_id) AS rn
+         FROM best
+     )
+     SELECT doc_id, source, title, url, quality_tier, updated_at,
+            ts_headline('english', text, websearch_to_tsquery('english', $1), $2) AS snippet
+       FROM quota
+      WHERE rn <= $3
+      ORDER BY rank DESC, doc_id`,
     [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, tenantOf(viewer)],
   );
 
   const byDoc = new Map<string, SearchResult & { updated: Date | null }>();
+  const prose: string[] = [];
+  const code: string[] = [];
   for (const row of res.rows) {
-    if (!byDoc.has(row.doc_id)) {
-      byDoc.set(row.doc_id, {
-        id: row.doc_id,
-        title: row.title,
-        url: row.url,
-        tier: row.quality_tier,
-        snippet: row.snippet,
-        updated: row.updated_at,
-      });
-    }
+    if (byDoc.has(row.doc_id)) continue;
+    byDoc.set(row.doc_id, {
+      id: row.doc_id,
+      title: row.title,
+      url: row.url,
+      tier: row.quality_tier,
+      snippet: row.snippet,
+      updated: row.updated_at,
+    });
+    (row.source === "code" ? code : prose).push(row.doc_id);
   }
-  const arms: Record<string, string[]> = { fts: [...byDoc.keys()] };
+  // Separate arms is the actual fix. RRF is rank-based, so an inflated ts_rank
+  // inside the code arm can only ever outrank OTHER CODE — it cannot evict
+  // prose from the result set, whatever the raw scores look like.
+  const arms: Record<string, string[]> = {};
+  if (prose.length > 0) arms.fts_prose = prose;
+  if (code.length > 0) arms.fts_code = code;
   try {
     const vec = await vecArm(client, viewer, query, limit, byDoc, embedder);
     if (vec && vec.length > 0) arms.vec = vec;
   } catch (err: any) {
     console.error(`vec arm skipped: ${err.message}`); // best-effort: degrade to FTS-only
   }
-  const fused = rrf(arms);
+  const fused = rrf(arms, armWeights(decision.route));
   const scored = fused
     .map(([docId, score]): [number, string] => {
       const entry = byDoc.get(docId)!;
@@ -124,10 +164,11 @@ export async function searchDocs(
     const { updated: _updated, ...entry } = byDoc.get(docId)!;
     return { ...entry, score: Math.round(score * 1e6) / 1e6 };
   });
-  // Honesty about execution: path/symbol/exact routes currently fall through
-  // to FTS (specialized executors arrive with Zoekt/symbols). The executor
-  // field tells callers what actually ran, so route ≠ executor is visible.
-  return { route: decision.route, executor: "fts", results };
+  // Honesty about execution: path/symbol/exact routes still run through FTS
+  // (specialized executors arrive with Zoekt/symbols) — the route only steers
+  // arm weights today. `executor` names the arms that actually contributed, so
+  // route ≠ executor stays visible, as does a silently-missing vector arm.
+  return { route: decision.route, executor: Object.keys(arms).sort().join("+") || "none", results };
 }
 
 export async function getDoc(
