@@ -336,4 +336,26 @@ auth
     console.log(`removed ${account} from the keychain`);
   });
 
+const embed = program.command("embed").description("Embeddings for semantic search");
+embed
+  .command("backfill")
+  .description("Embed catalog chunks so search gains a semantic (vector) arm")
+  .option("--batch <n>", "batch size", "64")
+  .option("--reembed", "re-embed every chunk (e.g. after changing the model)")
+  .action(async (opts) => {
+    const { getEmbedder } = await import("./embed/index.js");
+    const { backfill } = await import("./embed/backfill.js");
+    const embedder = getEmbedder();
+    const client = await connect();
+    try {
+      const r = await backfill(client, embedder, {
+        batch: Number(opts.batch),
+        reembed: !!opts.reembed,
+      });
+      console.log(`embedded ${r.embedded} chunks (provider ${embedder.id})`);
+    } finally {
+      await client.end();
+    }
+  });
+
 program.parseAsync(process.argv);

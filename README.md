@@ -401,6 +401,45 @@ pnpm eil audit --drift 20       # also re-fetch 20 sampled docs live and compare
 
 Output is a single JSON report — pipe it into monitoring or read it by eye.
 
+## Semantic search (vector arm)
+
+Search fuses lexical FTS with a **semantic (vector) arm** via reciprocal-rank
+fusion — so "money keeps getting stuck when I send it" finds "Parked payments
+not alerting after retry exhaustion" with no shared keywords. It's **off until
+you embed**, then automatic; nothing changes for pure-FTS setups.
+
+The default embedder runs **fully in-process** via Transformers.js (ONNX) — no
+network at query time, your content never leaves the machine, ideal for a
+locked-down work PC:
+
+```sh
+pnpm eil embed backfill        # embeds with a local model (all-MiniLM-L6-v2, 384-dim)
+pnpm eil search "why do payments get stuck"   # now fuses FTS + vector
+```
+
+The model (~90MB) downloads once from the HF hub and is cached. For an
+air-gapped machine, pre-place it and set `EIL_EMBED_CACHE=/path/to/models`
+(with `EIL_EMBED_OFFLINE=1` to forbid any remote fetch). `@huggingface/transformers`
+is an **optional dependency** (auto-installed unless your `pnpm install` blocks
+native builds; otherwise `pnpm add @huggingface/transformers`).
+
+- **Extension-free**: embeddings are packed float32 in a `bytea` column, cosine
+  runs in-process — works on every Postgres tier (incl. zero-install PGlite)
+  with no `CREATE EXTENSION` and no admin. Brute-force is fine at personal scale;
+  pgvector/HNSW is a drop-in upgrade later.
+- **Pluggable embedder** via `EIL_EMBED_PROVIDER`:
+  - `local` (default) — in-process ONNX; `EIL_EMBED_MODEL` picks the model.
+  - `http` — any OpenAI-compatible `/embeddings` endpoint (internal gateway,
+    data stays in-org): `EIL_EMBED_BASE_URL` (falls back to `EIL_MAAS_BASE_URL`),
+    `EIL_EMBED_MODEL`, `EIL_EMBED_API_KEY`.
+  - `fake` — deterministic, no-network, for offline pipeline trials/CI.
+- **Self-correcting on model change**: the vec arm only compares against chunks
+  embedded by the *current* model, so switching `EIL_EMBED_MODEL` degrades to
+  FTS-only until you `embed backfill --reembed`. Re-run `embed backfill` after
+  ingesting more (embed-once skips unchanged chunks).
+- **Degrades safely**: if the model/endpoint is unavailable or nothing is
+  embedded yet, search silently stays lexical-only.
+
 ## Observability
 
 Metrics live where the facts already are: `migrations/0005_metrics.sql`
@@ -434,5 +473,6 @@ which is how the TS port was verified.
 - [x] Data-trust audit: integrity invariants (CI-gated) + live drift sampling
 - [x] Zero-install PGlite backend + embedded-postgres no-admin concurrency tier
 - [x] OS keychain auth: keychain-first token resolution (macOS/Windows/WSL2/libsecret) + `eil auth`
+- [x] Semantic search: extension-free vector arm (bytea float32 + cosine) fused with FTS via rrf; `eil embed backfill`, pluggable embedder
 - [ ] Golden-query log growth from real usage (`docs/golden-queries.md`)
 - [ ] Per-user tokens + HTTP MCP transport (phase 2 — the kube rollout gate)
