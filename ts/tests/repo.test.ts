@@ -204,3 +204,83 @@ describe("BitbucketApiSource (mock)", () => {
     expect(s.blobUrl("src/a.ts")).toContain("/projects/PAY/repos/retry/browse/src/a.ts");
   });
 });
+
+describe("ingestRepo orchestration", () => {
+  const dir = mkdtempSync(join(tmpdir(), "eil-repo-"));
+  beforeAll(async () => {
+    process.env.EIL_DATABASE_URL = `pglite://${dir}`;
+    const { connect, migrate } = await import("../db.js");
+    const c = await connect();
+    await migrate(c);
+    await c.end();
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  function fakeSource(head: string, files: Record<string, string>, changes?: any[]): any {
+    return {
+      headSha: async () => head,
+      async *listFiles() {
+        for (const p of Object.keys(files)) yield p;
+      },
+      async *changedSince(_sha: string) {
+        for (const ch of changes ?? []) yield ch;
+      },
+      readFile: async (p: string) => files[p] ?? "",
+      blobUrl: () => null,
+      dispose: async () => {},
+    };
+  }
+
+  it("full ingest sets the per-repo cursor and upserts code docs; incremental applies A/M/D", async () => {
+    const { ingestRepo } = await import("../ingest/pipeline.js");
+    const { RepoFilter } = await import("../ingest/repofilter.js");
+    const { connect } = await import("../db.js");
+    const { getCursor } = await import("../store.js");
+    const filter = new RepoFilter({ includes: ["**/*.ts"] });
+
+    const full = await ingestRepo(
+      fakeSource("sha1", {
+        "src/a.ts": "l1\n",
+        "src/skip.md": "x",
+        "src/big.ts": "\0",
+      }),
+      "org/repo",
+      undefined,
+      filter,
+      "default",
+    );
+    expect(full.upserted).toBe(1); // a.ts; skip.md not-included; big.ts binary
+    expect(full.skipped).toBeGreaterThanOrEqual(2);
+    const c = await connect();
+    try {
+      expect(await getCursor(c, "code:org/repo")).toBe("sha1");
+      const doc = await c.query("SELECT source FROM documents WHERE id = 'code:org/repo:src/a.ts'");
+      expect(doc.rows[0].source).toBe("code");
+
+      const inc = await ingestRepo(
+        fakeSource("sha2", { "src/a.ts": "l1\nl2\n", "src/new.ts": "n\n" }, [
+          { path: "src/a.ts", status: "M" },
+          { path: "src/new.ts", status: "A" },
+          { path: "src/a.ts", status: "D" },
+        ]),
+        "org/repo",
+        undefined,
+        filter,
+        "default",
+      );
+      // note: contrived changes include a D for a.ts last -> ends deleted
+      // Need a fresh connection to see the updated cursor
+      const c2 = await connect();
+      try {
+        expect(await getCursor(c2, "code:org/repo")).toBe("sha2");
+      } finally {
+        await c2.end();
+      }
+      // Verify at least one upsert and one delete occurred in incremental
+      expect(inc.upserted).toBeGreaterThan(0);
+      expect(inc.deleted).toBeGreaterThan(0);
+    } finally {
+      await c.end();
+    }
+  });
+});
