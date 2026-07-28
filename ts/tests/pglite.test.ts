@@ -13,12 +13,12 @@ import { tmpdir } from "node:os";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { searchCodeIndex } from "../code-search.js";
 import { type Db, connect, migrate } from "../db.js";
+import { normalizeCode } from "../ingest/code.js";
 import { normalize as normalizePage } from "../ingest/confluence.js";
 import { normalize as normalizeIssue } from "../ingest/jira.js";
 import { type Viewer, getDoc, searchDocs, viewerFromAuthenticatedClaims } from "../search.js";
-import { searchCodeIndex } from "../code-search.js";
-import { normalizeCode } from "../ingest/code.js";
 import { reconcile, replaceCodeIndex, upsertDocument } from "../store.js";
 import { callTool } from "../tools.js";
 
@@ -204,6 +204,8 @@ describe("pglite zero-install backend", () => {
     expect(hit.results).toHaveLength(1);
     expect(hit.results[0]).toMatchObject({ path: "src/retry.ts", ref: "sha-code-1", lineStart: 1 });
     expect(hit.context.totalChars).toBeGreaterThan(0);
+    const routed: any = await searchDocs(client, VIEWER, "retryPayment");
+    expect(routed).toMatchObject({ route: "symbol", executor: "code_index" });
   });
 
   it("integrity audit passes on a healthy catalog and flags planted damage", async () => {

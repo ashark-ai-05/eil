@@ -101,6 +101,16 @@ export async function searchDocs(
     const neighborhood = await expand(client, viewer, entityId);
     return { route: "entity", entity: doc, linked: neighborhood.edges };
   }
+  if (decision.route === "path" || decision.route === "symbol" || decision.route === "exact") {
+    const { searchCodeIndex } = await import("./code-search.js");
+    const kind = decision.route === "exact" ? "literal" : decision.route;
+    const code = await searchCodeIndex(client, viewer, {
+      query: decision.match ?? query,
+      kind,
+      limit,
+    });
+    if (code.results.length > 0) return { route: decision.route, ...code };
+  }
 
   // v0: single lexical arm through Postgres FTS; a kNN arm joins here later
   // and rrf() already fuses however many arms exist.

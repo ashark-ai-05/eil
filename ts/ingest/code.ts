@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-/** Map a repo file into a CanonicalDoc (source="code"), plus ref helpers. */
-import { detectLanguage, EXTRACTOR_VERSION } from "./codeindex.js";
 import type { CanonicalDoc } from "../contracts/models.js";
+/** Map a repo file into a CanonicalDoc (source="code"), plus ref helpers. */
+import { EXTRACTOR_VERSION, detectLanguage } from "./codeindex.js";
 
 export function normalizeCode(
   key: string,
