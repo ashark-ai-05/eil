@@ -72,7 +72,8 @@
   .grid3 { display:grid; grid-template-columns:var(--cols); column-gap:56px; row-gap:20px; }
   .row2 { margin-top:52px; }
 
-  .plane { display:flex; flex-direction:column; gap:13px; position:relative; z-index:1; min-width:0; }
+  /* the gap also has to fit an arrowhead on the stubs between stacked nodes */
+  .plane { display:flex; flex-direction:column; gap:18px; position:relative; z-index:1; min-width:0; }
   .plane > h3 { margin:0 0 2px; font-size:10.5px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--faint);
     display:flex; align-items:baseline; gap:8px; }
   .plane > h3 .pn { color:var(--line); font-variant-numeric:tabular-nums; }
@@ -95,7 +96,10 @@
     background:none; border:0; border-radius:9px; color:inherit; font:inherit; font-size:12.5px; letter-spacing:0.01em; }
   .nh:hover { background:var(--panel-2); }
   .nh:focus-visible { outline:2px solid var(--lex); outline-offset:2px; }
-  .nh .lbl { font-weight:600; color:var(--text); }
+  .nh .lbl { font-weight:600; color:var(--text); flex:none; }
+  /* the collapsed one-liner: enough that the map reads without opening anything */
+  .nh .ns { color:var(--faint); font-weight:400; font-size:11px; letter-spacing:0; line-height:1.35;
+    flex:1 1 auto; min-width:0; }
   .nh .sub { color:var(--faint); font-weight:400; font-size:11px; letter-spacing:0; }
   .nh .cv { margin-left:auto; color:var(--faint); font-size:11px; flex:none; transition:transform .3s cubic-bezier(.4,0,.2,1), color .15s; }
   .node.open > .nh { background:var(--panel-2); border-radius:9px 9px 0 0; }
@@ -159,13 +163,30 @@
   @keyframes dash { to { stroke-dashoffset:-1000; } }
   @keyframes floaty { 0%,100%{ opacity:.4 } 50%{ opacity:1 } }
   @keyframes draw { from { stroke-dashoffset:var(--len,200); } to { stroke-dashoffset:0; } }
-  .edge { fill:none; stroke-width:1.5; stroke-linecap:round; }
+  .edge { fill:none; stroke-width:1.5; stroke-linecap:round; transition:opacity .18s, stroke-width .18s; }
   .edge.k-faint { stroke:var(--faint); }
   .edge.k-lex   { stroke:var(--lex); }
   .edge.k-vec   { stroke:var(--vec); }
   .edge.k-fuse  { stroke:var(--fuse); stroke-width:1.8; }
   .edge.k-ok    { stroke:var(--ok); }
   .edge.k-loop  { stroke:var(--lex); stroke-width:1.8; opacity:.85; }
+  .tip { fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round;
+    transition:opacity .18s; }
+  .tip.k-faint { stroke:var(--faint); } .tip.k-lex { stroke:var(--lex); }
+  .tip.k-vec { stroke:var(--vec); } .tip.k-fuse { stroke:var(--fuse); }
+  .tip.k-ok { stroke:var(--ok); } .tip.k-loop { stroke:var(--lex); }
+
+  /* ── focus: hovering a node lights its wiring and fades everything else ── */
+  .canvas.focusing .edge, .canvas.focusing .tip { opacity:.12; }
+  .canvas.focusing .edge.lit { opacity:1; stroke-width:2.4; }
+  .canvas.focusing .tip.lit  { opacity:1; }
+  .canvas.focusing .node { opacity:.34; transition:opacity .18s; }
+  .canvas.focusing .node.lit { opacity:1; }
+  .canvas.focusing .node.src { opacity:1; box-shadow:var(--shadow), 0 0 0 1px var(--lex); }
+  .canvas.focusing .plane > h3, .canvas.focusing .pnote { opacity:.34; transition:opacity .18s; }
+  @media (prefers-reduced-motion: reduce) {
+    .edge, .tip, .canvas.focusing .node { transition:none; }
+  }
   @media (prefers-reduced-motion: no-preference) {
     .edge { stroke-dasharray:5 8; animation:dash 14s linear infinite; }
     .edge.k-loop { stroke-dasharray:5 7; animation:dash 18s linear infinite; }
@@ -221,7 +242,7 @@
   </header>
 
   <div class="controls">
-    <p class="hint">▸ <b>click any node</b> to open it in place — the bar at the bottom is under everything.</p>
+    <p class="hint">▸ <b>hover any node</b> to trace just its wiring · <b>click</b> to open it in place — the bar at the bottom is under everything.</p>
   </div>
 
   <div class="scroll">
@@ -235,7 +256,7 @@
         <h3><span class="pn">01</span>Sources<span class="sub">what you can already read</span></h3>
 
         <section class="node" data-id="src.confluence">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Confluence</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Confluence</span><span class="ns">spaces you name, by CQL</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 46" fill="none" aria-hidden="true">
               <g font-size="7.5">
@@ -251,14 +272,14 @@
         </section>
 
         <section class="node" data-id="src.jira">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Jira</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Jira</span><span class="ns">projects scoped by JQL</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt"><p class="cap">Projects scoped by <span class="kx">JQL</span> — issues, descriptions and comment threads become docs.</p></div>
           </div></div></div>
         </section>
 
         <section class="node" data-id="src.git">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Git repos</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Git repos</span><span class="ns">clone → glob filter → chunk</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 96" fill="none" aria-hidden="true">
               <text x="2" y="8" fill="var(--faint)" font-size="6.5">clone → walk → filter</text>
@@ -281,20 +302,20 @@
         </section>
 
         <section class="node" data-id="src.notes">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Notes · Logs</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Notes · Logs</span><span class="ns">markdown, runbooks, log archives</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt"><p class="cap">Local markdown, runbooks and log archives — the long tail that never had a home.</p></div>
           </div></div></div>
         </section>
 
-        <p class="pnote"><b>Your credentials.</b> You can only index what you could already read.</p>
+        <!--@gen:sources--><p class="pnote"><b>Your credentials.</b> You can only index what you could already read. Ingest adapters: <code>confluence</code> · <code>jira</code> · <code>obsidian</code> · <code>repo</code>.</p><!--/@gen:sources-->
       </div>
 
       <div class="plane">
         <h3><span class="pn">02</span>Ingest<span class="sub">only what changed</span></h3>
 
         <section class="node" data-id="ing.cursor">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Cursor sync</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Cursor sync</span><span class="ns">resumes from a saved mark · Δ only</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 40" fill="none" aria-hidden="true">
               <line x1="6" y1="22" x2="164" y2="22" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
@@ -309,7 +330,7 @@
         </section>
 
         <section class="node" data-id="ing.diff">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">git diff</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">git diff</span><span class="ns">A · M · D → tombstone</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 34" fill="none" aria-hidden="true">
               <g font-size="8" font-weight="700">
@@ -324,7 +345,7 @@
         </section>
 
         <section class="node" data-id="ing.chunk">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Chunker</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Chunker</span><span class="ns">overlapping line-windows</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 76" fill="none" aria-hidden="true">
               <rect x="42" y="32" width="72" height="13" fill="color-mix(in oklab,var(--lex) 15%,transparent)"/>
@@ -352,7 +373,7 @@
         <h3><span class="pn">03</span>Index<span class="sub">one Postgres, no extension</span></h3>
 
         <section class="node" data-id="idx.fts">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">full-text · tsvector</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">full-text · tsvector</span><span class="ns">exact terms · GIN</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 30" fill="none" aria-hidden="true">
               <g stroke="var(--lex)" stroke-width="2.4" stroke-linecap="round">
@@ -366,7 +387,7 @@
         </section>
 
         <section class="node" data-id="idx.vec">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">vector · bytea f32</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">vector · bytea f32</span><span class="ns">meaning · local model · no pgvector</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 30" fill="none" aria-hidden="true">
               <g fill="var(--vec)"><circle cx="8" cy="12" r="2.6"/><circle cx="24" cy="12" r="2.6"/><circle cx="40" cy="12" r="2.6"/><circle cx="56" cy="12" r="2.6"/>
@@ -379,7 +400,7 @@
         </section>
 
         <section class="node acc" data-id="idx.acl">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">ACL stamp</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">ACL stamp</span><span class="ns">owner + groups, on the doc</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 40" fill="none" aria-hidden="true">
               <rect x="4" y="4" width="30" height="32" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
@@ -405,21 +426,21 @@
         <h3><span class="pn">06</span>Agents<span class="sub">the consumers</span></h3>
 
         <section class="node acc" data-id="agt.amp">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">Amp</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">Amp</span><span class="ns">pulls context before it answers</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt"><p class="cap">Connected over MCP — pulls ranked, ACL-filtered context before it answers.</p></div>
           </div></div></div>
         </section>
 
         <section class="node" data-id="agt.cc">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Claude Code</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Claude Code</span><span class="ns">greps the org like the repo</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt"><p class="cap">Same two-phase contract — grep the org the way it greps the repo.</p></div>
           </div></div></div>
         </section>
 
         <section class="node" data-id="agt.any">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">any MCP client</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">any MCP client</span><span class="ns">the contract is the protocol</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 36" fill="none" aria-hidden="true">
               <rect x="2" y="8" width="58" height="20" rx="5" fill="var(--panel-2)" stroke="var(--lex)"/><text x="31" y="21" fill="var(--lex)" font-size="7" text-anchor="middle">EIL tools</text>
@@ -438,7 +459,7 @@
         <h3><span class="pn">05</span>Serve<span class="sub">MCP · two-phase</span></h3>
 
         <section class="node" data-id="srv.mcp">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">MCP server</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">MCP server</span><span class="ns">two calls · zero tokens to search</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig wide" viewBox="0 0 300 78" fill="none" aria-hidden="true">
               <rect x="2" y="14" width="46" height="58" rx="5" fill="var(--panel-2)" stroke="var(--ok)"/><text x="25" y="46" fill="var(--ok)" font-size="8.5" text-anchor="middle">agent</text>
@@ -457,17 +478,19 @@
         </section>
 
         <section class="node" data-id="srv.tools">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">5 tools</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span>
+            <span class="lbl"><!--@gen:toolcount-->5 tools<!--/@gen:toolcount--></span>
+            <span class="ns">the whole surface an agent can call</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt">
-              <p class="cap"><code>search_docs</code> · <code>get_doc</code> · <code>expand</code> · <code>search_code</code> · <code>fetch_logs</code></p>
+              <!--@gen:tools--><p class="cap"><code>search_docs</code> · <code>get_doc</code> · <code>expand</code> · <code>search_code</code> · <code>fetch_logs</code></p><!--/@gen:tools-->
               <p class="cap">A small, closed surface — nothing that writes, nothing that reasons.</p>
             </div>
           </div></div></div>
         </section>
 
         <section class="node acc" data-id="srv.audit">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">audit row</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">audit row</span><span class="ns">who asked, what matched</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt"><p class="cap">Every tool call and every model call lands as a <b>logged row</b> — who asked, what matched, what came back.</p></div>
           </div></div></div>
@@ -480,14 +503,14 @@
         <h3><span class="pn">04</span>Search<span class="sub">two arms, fused</span></h3>
 
         <section class="node" data-id="sea.fts">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">FTS arm · ts_rank</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">FTS arm · ts_rank</span><span class="ns">wins on exact</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt"><p class="cap">Ranks by term match. Wins on <span class="kx">exact</span> — a stack trace, a flag name, a ticket key.</p></div>
           </div></div></div>
         </section>
 
         <section class="node" data-id="sea.vec">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">Vector arm · cosine</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">Vector arm · cosine</span><span class="ns">wins on meaning · best-effort</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt">
               <p class="cap">Ranks by meaning. Wins when the asker doesn't know the vocabulary.</p>
@@ -497,7 +520,7 @@
         </section>
 
         <section class="node" data-id="sea.rrf">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">rrf() fusion</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">rrf() fusion</span><span class="ns">one list from two rankings</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 62" fill="none" aria-hidden="true">
               <rect x="4" y="6" width="52" height="16" rx="4" fill="color-mix(in oklab,var(--lex) 15%,transparent)" stroke="var(--lex)"/><text x="30" y="17" fill="var(--lex)" font-size="7" text-anchor="middle">lexical</text>
@@ -514,7 +537,7 @@
         </section>
 
         <section class="node acc" data-id="sea.rank">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">tier · recency · ACL</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">tier · recency · ACL</span><span class="ns">the final sort · fail-closed</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <div class="txt"><p class="cap">The final sort: source tier, then freshness — and the <span class="ko">ACL filter</span> that decides what you were ever allowed to see.</p></div>
           </div></div></div>
@@ -529,20 +552,18 @@
     <div class="grid3 lane">
       <div class="obs">
         <section class="node" data-id="obs.metrics">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">07 · Observability</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">07 · Observability</span><span class="ns">usage decides what gets built next</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
-            <svg class="vig wide" viewBox="0 0 330 74" fill="none" aria-hidden="true">
+            <svg class="vig" viewBox="0 0 170 74" fill="none" aria-hidden="true">
               <text x="4" y="10" fill="var(--muted)" font-size="8">recall@k · trend</text>
-              <rect x="4" y="16" width="146" height="52" rx="5" fill="var(--panel-2)" stroke="var(--line)"/>
-              <g stroke="var(--line-soft)" stroke-width="1"><line x1="12" y1="30" x2="142" y2="30"/><line x1="12" y1="44" x2="142" y2="44"/><line x1="12" y1="58" x2="142" y2="58"/></g>
-              <polyline class="spark" style="--len:170" points="12,60 36,54 60,56 84,42 108,37 134,26" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle class="pulse" cx="134" cy="26" r="3" fill="var(--ok)"/>
-              <g font-size="8" fill="var(--muted)">
-                <text x="164" y="24">▸ metrics.vw_* views</text><text x="164" y="40">▸ eil eval · recall</text>
-                <text x="164" y="56">▸ eil report · adoption</text><text x="164" y="70">▸ zero-result · two-phase</text></g>
+              <rect x="4" y="16" width="162" height="52" rx="5" fill="var(--panel-2)" stroke="var(--line)"/>
+              <g stroke="var(--line-soft)" stroke-width="1"><line x1="12" y1="30" x2="158" y2="30"/><line x1="12" y1="44" x2="158" y2="44"/><line x1="12" y1="58" x2="158" y2="58"/></g>
+              <polyline class="spark" style="--len:180" points="12,60 40,54 68,56 96,42 124,37 150,26" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle class="pulse" cx="150" cy="26" r="3" fill="var(--ok)"/>
             </svg>
             <div class="txt">
               <p class="cap"><b>Metrics are SQL views over the facts</b> — the <span class="ko">vw_*</span> views <em style="font-style:normal;color:var(--text)">are</em> the definitions, not a dashboard's interpretation of them.</p>
+              <!--@gen:views--><p class="cap"><b>8 views</b> — <code>vw_tool_calls</code> · <code>vw_zero_results</code> · <code>vw_llm_calls</code> · <code>vw_connector_health</code> · <code>vw_eval_trend</code> · <code>vw_two_phase</code> · <code>vw_spend_daily</code> · <code>vw_cost_per_run</code></p><!--/@gen:views-->
               <p class="cap">Recall trend and adoption decide what gets indexed or built next — the arrow that runs back over the top into <b>Ingest</b>.</p>
             </div>
           </div></div></div>
@@ -663,6 +684,34 @@
     svg.appendChild(p);
     return p;
   });
+
+  /* Arrowheads are drawn as a second layer so they sit above every wire.
+     Their geometry comes from sampling the wire itself, which means they work
+     for beziers and orthogonal rails alike and inherit the wire's colour. */
+  var tips = EDGES.map(function (e) {
+    var t = document.createElementNS(SVGNS, "path");
+    t.setAttribute("class", "tip k-" + e.kind);
+    svg.appendChild(t);
+    return t;
+  });
+
+  function drawTip(path, tip) {
+    if (!path.getAttribute("d")) { tip.removeAttribute("d"); return; }
+    var len = path.getTotalLength();
+    if (len < 10) { tip.removeAttribute("d"); return; }
+    /* short stubs between stacked nodes get a proportionally smaller head
+       rather than no head at all — every wire must show its direction. */
+    var sample = Math.min(9, Math.max(3, len * 0.5));
+    var end = path.getPointAtLength(len), back = path.getPointAtLength(len - sample);
+    var vx = end.x - back.x, vy = end.y - back.y;
+    var m = Math.sqrt(vx * vx + vy * vy) || 1;
+    vx /= m; vy /= m;
+    var L = Math.min(6, len * 0.4), W = L * 0.63, px = -vy, py = vx;
+    tip.setAttribute("d",
+      "M" + (end.x - vx * L + px * W) + " " + (end.y - vy * L + py * W) +
+      " L" + end.x + " " + end.y +
+      " L" + (end.x - vx * L - px * W) + " " + (end.y - vy * L - py * W));
+  }
 
   var warned = {};
   function node(id) {
@@ -805,10 +854,10 @@
                        : Math.max(5, edgeX - 14 - (used - 1) * 9);
     });
 
-    /* 4 — draw. */
+    /* 4 — draw, then hang an arrowhead off each wire's far end. */
     plans.forEach(function (p, i) {
       var path = paths[i];
-      if (!p) { path.removeAttribute("d"); return; }
+      if (!p) { path.removeAttribute("d"); tips[i].removeAttribute("d"); return; }
       var d;
       if (p.mode === "h")         d = hPath(p.a.right, p.oy, p.b.left, p.iy);
       else if (p.mode === "hr")   d = hPath(p.a.left, p.oy, p.b.right, p.iy);
@@ -816,8 +865,50 @@
       else if (p.mode === "loop") d = loopPath(p.a, p.b, p.oy, p.ix, 8, 12);
       else d = vPath(p.ox, p.down ? p.a.bottom : p.a.top, p.ix, p.down ? p.b.top : p.b.bottom);
       path.setAttribute("d", d);
+      drawTip(path, tips[i]);
     });
   }
+
+  /* ── focus: hovering (or tabbing to) a node lights only its own wiring ── */
+  var focused = null;
+
+  function clearFocus() {
+    focused = null;
+    canvas.classList.remove("focusing");
+    Array.prototype.forEach.call(canvas.querySelectorAll(".lit, .src"), function (el) {
+      el.classList.remove("lit", "src");
+    });
+  }
+
+  function focusNode(id) {
+    clearFocus();
+    var self = canvas.querySelector('[data-id="' + id + '"]');
+    if (!self) return;
+    focused = id;
+    canvas.classList.add("focusing");
+    self.classList.add("src");
+    EDGES.forEach(function (e, i) {
+      if (e.from !== id && e.to !== id) return;
+      paths[i].classList.add("lit");
+      tips[i].classList.add("lit");
+      var other = canvas.querySelector('[data-id="' + (e.from === id ? e.to : e.from) + '"]');
+      if (other) other.classList.add("lit");
+    });
+  }
+
+  function focusFrom(target) {
+    var n = target && target.closest && target.closest(".node");
+    var id = n && n.getAttribute("data-id");
+    if (id === focused) return;
+    if (id) focusNode(id); else clearFocus();
+  }
+
+  canvas.addEventListener("mouseover", function (ev) { focusFrom(ev.target); });
+  canvas.addEventListener("mouseleave", clearFocus);
+  canvas.addEventListener("focusin", function (ev) { focusFrom(ev.target); });
+  canvas.addEventListener("focusout", function (ev) {
+    if (!canvas.contains(ev.relatedTarget)) clearFocus();
+  });
 
   /* Redraw every frame while a node is opening, so the wires stretch with the box. */
   var animUntil = 0, animRunning = false;

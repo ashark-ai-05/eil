@@ -3,13 +3,15 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Enterprise Intelligence Layer — knowledge plane (TypeScript)",
+  "description": "Enterprise Intelligence Layer \u2014 knowledge plane (TypeScript)",
   "scripts": {
     "eil": "tsx ts/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check ts",
-    "lint:fix": "biome check --write ts"
+    "lint": "biome check ts scripts",
+    "lint:fix": "biome check --write ts scripts",
+    "map:build": "tsx scripts/build-map.ts",
+    "map:check": "tsx scripts/build-map.ts --check"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

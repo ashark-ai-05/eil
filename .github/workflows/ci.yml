@@ -34,6 +34,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      # fails if docs/system-map.html no longer matches the code it describes
+      - run: pnpm map:check
       - run: pnpm test
       - name: migrations + fixture ingest + search + eval smoke
         run: |
