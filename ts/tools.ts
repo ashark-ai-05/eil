@@ -98,10 +98,19 @@ const refreshDocSpec: ToolSpec = {
   handler: async (c, v, a) => {
     if (!v.groups.includes("eil-refresh"))
       return { error: "refresh_doc requires eil-refresh authorization" };
+    // Resolve the document through the ACL *before* spending the server's
+    // credentials on it. Fetching first made this a confused deputy: any holder
+    // of eil-refresh could name an arbitrary Confluence page id or Jira key —
+    // one not in the catalog at all — and have the process fetch and cache it
+    // under the server's PAT. It also leaked an existence oracle, because a
+    // missing id surfaced the connector's 404 text while an unreadable one
+    // surfaced "not found after refresh", letting a caller enumerate ids they
+    // cannot read. One opaque error for both, and no outbound call unless the
+    // caller can already read the document.
+    if (!(await getDoc(c, v, a.id))) return { error: `not found: ${a.id}` };
     const note = await freshFetch(c, v, a.id);
     if (note) return { error: note };
-    const doc = await getDoc(c, v, a.id);
-    return doc ? { id: a.id, status: "refreshed" } : { error: `not found after refresh: ${a.id}` };
+    return { id: a.id, status: "refreshed" };
   },
 };
 

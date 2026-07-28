@@ -28,9 +28,12 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
     Number((await client.query(sql)).rows[0]?.n ?? 0);
 
   const docsTotal = await one("SELECT count(*)::int AS n FROM documents");
+  // Tenant must be part of the correlation since migration 0009. Without it a
+  // HEALTHY copy in one tenant masks a chunkless copy in another, and the CI
+  // gate this report exists to trip reports ok:true through a real fault.
   const withoutChunks = await one(
     "SELECT count(*)::int AS n FROM documents d" +
-      " WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.doc_id = d.id)",
+      " WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.tenant = d.tenant AND c.doc_id = d.id)",
   );
   const unowned = await one("SELECT count(*)::int AS n FROM documents WHERE ingested_by = ''");
   const emptyBody = await one("SELECT count(*)::int AS n FROM documents WHERE length(body) < 40");
@@ -41,7 +44,7 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
   const nullTsv = await one("SELECT count(*)::int AS n FROM chunks WHERE tsv IS NULL");
   const danglingDst = await one(
     "SELECT count(*)::int AS n FROM links l" +
-      " WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = l.dst_id)",
+      " WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.tenant = l.tenant AND d.id = l.dst_id)",
   );
   const stale = await client.query(
     "SELECT source FROM metrics.vw_connector_health WHERE age_hours > 24 ORDER BY source",

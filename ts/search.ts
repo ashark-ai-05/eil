@@ -203,8 +203,17 @@ export async function expand(
   // Fail-closed on the FOCAL document first: expanding a restricted doc must
   // leak nothing — not even the ids its body references (dangling out-edges
   // would otherwise slip past the destination-side ACL check below).
+  // The tenant must be anchored OUTSIDE the negation. Folding it into
+  // visibleSql() and negating the whole conjunction made ANOTHER tenant's row
+  // with the same canonical id satisfy `NOT(... AND d.tenant = $4)`, so expand
+  // returned zero edges for a viewer fully entitled to their own copy — and the
+  // entity route, which calls expand() for every jira:issue:* query, silently
+  // returned linked: []. Negate only the principal/groups test.
   const restricted = await client.query(
-    `SELECT 1 FROM documents d WHERE d.id = $1 AND NOT ${visibleSql(2, 3, 4)}`,
+    `SELECT 1 FROM documents d
+      WHERE d.tenant = $4 AND d.id = $1
+        AND NOT ((d.ingested_by = $2 OR d.acl_groups ?| $3::text[])
+                 AND d.tombstoned_at IS NULL)`,
     [docId, viewer.principal, viewer.groups, viewer.tenant],
   );
   if (restricted.rows.length > 0) return { id: docId, edges: [], truncated: false };
@@ -273,9 +282,12 @@ async function vecArm(
   // but meaningless score. Matching on embed_model makes a model switch
   // self-correcting: it degrades to FTS-only until `embed backfill --reembed`,
   // and lets us skip embedding the query when nothing matches.
+  // Scoped to the viewer's tenant: an unscoped probe made a tenant with nothing
+  // embedded still pay for a query-embedding call on every single search,
+  // because some OTHER tenant had embeddings.
   const has = await client.query(
-    "SELECT 1 FROM chunks WHERE embedding IS NOT NULL AND embed_model = $1 LIMIT 1",
-    [emb.id],
+    "SELECT 1 FROM chunks WHERE tenant = $2 AND embedding IS NOT NULL AND embed_model = $1 LIMIT 1",
+    [emb.id, viewer.tenant],
   );
   if (has.rows.length === 0) return null; // nothing embedded with this model -> pure FTS
   // Stored vectors are unit-normalized (migration 0008 / toVec), so normalizing
