@@ -387,15 +387,15 @@
         </section>
 
         <section class="node" data-id="idx.vec">
-          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">vector · bytea f32</span><span class="ns">meaning · local model · no pgvector</span><span class="cv" aria-hidden="true">›</span></button>
+          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">vector · float4[]</span><span class="ns">meaning · scored in SQL · no pgvector</span><span class="cv" aria-hidden="true">›</span></button>
           <div class="nb"><div class="nbi"><div class="pad">
             <svg class="vig" viewBox="0 0 170 30" fill="none" aria-hidden="true">
               <g fill="var(--vec)"><circle cx="8" cy="12" r="2.6"/><circle cx="24" cy="12" r="2.6"/><circle cx="40" cy="12" r="2.6"/><circle cx="56" cy="12" r="2.6"/>
                 <circle cx="72" cy="12" r="2.6"/><circle cx="88" cy="12" r="2.6"/><circle cx="104" cy="12" r="2.6"/><circle cx="120" cy="12" r="2.6"/>
                 <circle cx="136" cy="12" r="2.6"/><circle cx="152" cy="12" r="2.6"/></g>
-              <text x="4" y="27" fill="var(--faint)" font-size="7">local model · cosine · no pgvector</text>
+              <text x="4" y="27" fill="var(--faint)" font-size="7">unit-norm · dot in SQL · no pgvector</text>
             </svg>
-            <div class="txt"><p class="cap">Meaning, embedded <b>locally</b> and stored as raw <code>bytea</code> floats — <span class="kv">no extension</span> to install anywhere.</p></div>
+            <div class="txt"><p class="cap">Meaning, embedded <b>locally</b> and stored <b>unit-normalized</b> as <code>float4[]</code> — so cosine is a plain dot product Postgres can compute itself, and only the top matches ever leave the database. <span class="kv">No extension</span> to install anywhere.</p></div>
           </div></div></div>
         </section>
 

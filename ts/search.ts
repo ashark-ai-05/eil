@@ -9,7 +9,7 @@ import { rrf } from "./core/fusion.js";
 import { modifier } from "./core/ranking.js";
 import { classify } from "./core/router.js";
 import type { Db } from "./db.js";
-import { type Embedder, cosine, getEmbedder, unpackF32 } from "./embed/index.js";
+import { type Embedder, getEmbedder, toVec } from "./embed/index.js";
 
 export const SNIPPET_OPTS = "StartSel=**, StopSel=**, MaxWords=40, MinWords=10";
 export const GET_DOC_MAX_CHARS = 8_000;
@@ -217,7 +217,9 @@ export async function audit(
   );
 }
 
-/** Best-effort semantic arm: cosine over ACL-visible embedded chunks. Returns a
+/** Best-effort semantic arm: cosine over ACL-visible embedded chunks, scored
+ *  IN Postgres (vectors are unit-norm, so cosine is a dot product) and cut to
+ *  the candidate count there — only the winners are transferred. Returns a
  *  ranked docId list (best chunk per doc) and augments `byDoc` for vec-only
  *  docs. Returns null when nothing is embedded. Reuses visibleSql for ACL. */
 async function vecArm(
@@ -242,26 +244,37 @@ async function vecArm(
     [emb.id],
   );
   if (has.rows.length === 0) return null; // nothing embedded with this model -> pure FTS
-  const qv = (await emb.embed([query]))[0]!;
+  // Stored vectors are unit-normalized (migration 0008 / toVec), so normalizing
+  // the query too makes a dot product exactly equal to cosine — which is what
+  // lets the scoring run in SQL instead of dragging every vector into Node.
+  const qv = toVec((await emb.embed([query]))[0]!);
+  // Score, reduce to the best chunk per doc, and cut to the candidate count all
+  // inside Postgres, so only the winners cross the wire. `text` is deliberately
+  // NOT selected until the final join — it dominated the old transfer.
   const res = await client.query(
-    `SELECT c.doc_id, c.text, c.embedding, d.title, d.url, d.quality_tier, d.updated_at
-     FROM chunks c JOIN documents d ON d.id = c.doc_id
-     WHERE c.embedding IS NOT NULL AND c.embed_model = $4 AND ${visibleSql(1, 2, 3)}`,
-    [viewer.principal, viewer.groups, tenantOf(viewer), emb.id],
+    `WITH scored AS (
+       SELECT c.doc_id, c.seq,
+              (SELECT sum(a::float8 * b::float8)
+                 FROM unnest(c.embedding, $4::float4[]) AS t(a, b)) AS score
+         FROM chunks c JOIN documents d ON d.id = c.doc_id
+        WHERE c.embedding IS NOT NULL AND c.embed_model = $5 AND ${visibleSql(1, 2, 3)}
+     ), best AS (
+       SELECT DISTINCT ON (doc_id) doc_id, seq, score
+         FROM scored ORDER BY doc_id, score DESC, seq
+     ), top AS (
+       SELECT doc_id, seq, score FROM best ORDER BY score DESC, doc_id LIMIT $6
+     )
+     SELECT t.doc_id, t.score, ch.text, d.title, d.url, d.quality_tier, d.updated_at
+       FROM top t
+       JOIN chunks ch ON ch.doc_id = t.doc_id AND ch.seq = t.seq
+       JOIN documents d ON d.id = t.doc_id
+      ORDER BY t.score DESC, t.doc_id`,
+    [viewer.principal, viewer.groups, tenantOf(viewer), qv, emb.id, limit * 3],
   );
-  const best = new Map<string, { score: number; row: any }>();
   for (const row of res.rows) {
-    const score = cosine(qv, unpackF32(row.embedding as Buffer));
-    const cur = best.get(row.doc_id);
-    if (!cur || score > cur.score) best.set(row.doc_id, { score, row });
-  }
-  const ranked = [...best.entries()]
-    .sort((a, b) => (b[1].score !== a[1].score ? b[1].score - a[1].score : a[0] < b[0] ? -1 : 1))
-    .slice(0, limit * 3);
-  for (const [docId, { row }] of ranked) {
-    if (!byDoc.has(docId)) {
-      byDoc.set(docId, {
-        id: docId,
+    if (!byDoc.has(row.doc_id)) {
+      byDoc.set(row.doc_id, {
+        id: row.doc_id,
         title: row.title,
         url: row.url,
         tier: row.quality_tier,
@@ -270,5 +283,5 @@ async function vecArm(
       });
     }
   }
-  return ranked.map(([docId]) => docId);
+  return res.rows.map((r) => r.doc_id as string);
 }

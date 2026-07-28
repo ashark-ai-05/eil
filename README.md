@@ -456,10 +456,13 @@ builds; otherwise `pnpm add @huggingface/transformers`. No hub access is needed 
 any point. (To swap models, set `EIL_EMBED_CACHE`/`EIL_EMBED_MODEL` and
 `EIL_EMBED_ALLOW_REMOTE=1` to allow a one-time hub fetch on a connected machine.)
 
-- **Extension-free**: embeddings are packed float32 in a `bytea` column, cosine
-  runs in-process — works on every Postgres tier (incl. zero-install PGlite)
-  with no `CREATE EXTENSION` and no admin. Brute-force is fine at personal scale;
-  pgvector/HNSW is a drop-in upgrade later.
+- **Extension-free**: embeddings are stored unit-normalized as `float4[]`, so
+  cosine reduces to a dot product that Postgres computes itself — scoring,
+  best-chunk-per-doc and the top-N cut all happen in SQL, and only the winners
+  cross the wire. Works on every Postgres tier (incl. zero-install PGlite) with
+  no `CREATE EXTENSION` and no admin. Scoring is still a linear scan; an LSH
+  sketch column (or pgvector/HNSW where the extension is available) is the
+  sub-linear upgrade later.
 - **Pluggable embedder** via `EIL_EMBED_PROVIDER`:
   - `local` (default) — in-process ONNX; `EIL_EMBED_MODEL` picks the model.
   - `http` — any OpenAI-compatible `/embeddings` endpoint (internal gateway,
@@ -506,7 +509,7 @@ which is how the TS port was verified.
 - [x] Data-trust audit: integrity invariants (CI-gated) + live drift sampling
 - [x] Zero-install PGlite backend + embedded-postgres no-admin concurrency tier
 - [x] OS keychain auth: keychain-first token resolution (macOS/Windows/WSL2/libsecret) + `eil auth`
-- [x] Semantic search: extension-free vector arm (bytea float32 + cosine) fused with FTS via rrf; `eil embed backfill`, pluggable embedder
+- [x] Semantic search: extension-free vector arm (`float4[]` + dot product scored in SQL) fused with FTS via rrf; `eil embed backfill`, pluggable embedder
 - [x] Repo/code ingestion — git clone or Bitbucket API, subpath/branch/globs, code-aware chunking, per-repo commit-SHA incremental with deletions
 - [ ] Golden-query log growth from real usage (`docs/golden-queries.md`)
 - [ ] Per-user tokens + HTTP MCP transport (phase 2 — the kube rollout gate)
