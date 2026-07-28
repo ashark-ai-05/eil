@@ -9,30 +9,21 @@
     --ink: #090e18; --ink-2: #0c1322; --panel: #10192b; --panel-2: #131e33;
     --line: #223148; --line-soft: #1a2740; --text: #cbd7e9; --muted: #6f819e; --faint: #46587a;
     --lex: #5cc2ef; --vec: #efab54; --fuse: #eef4fd; --ok: #5ccb8e;
-    --shadow: 0 1px 0 #ffffff08, 0 14px 40px -18px #000000cc;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --r: 9px; color-scheme: dark;
+    --r: 10px; color-scheme: dark;
   }
   @media (prefers-color-scheme: light) {
-    :root {
-      --ink: #eef1f6; --ink-2: #e7ecf3; --panel: #ffffff; --panel-2: #f2f5fa;
-      --line: #cbd4e2; --line-soft: #dbe2ec; --text: #16202f; --muted: #5d6c85; --faint: #8794a8;
-      --lex: #1f8fc7; --vec: #c07914; --fuse: #0d1524; --ok: #1f9d63;
-      --shadow: 0 1px 0 #ffffff, 0 12px 30px -20px #23324a55; color-scheme: light;
-    }
+    :root { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63;
+      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme: light; }
   }
-  :root[data-theme="dark"] {
-    --ink: #090e18; --ink-2: #0c1322; --panel: #10192b; --panel-2: #131e33;
-    --line: #223148; --line-soft: #1a2740; --text: #cbd7e9; --muted: #6f819e; --faint: #46587a;
-    --lex: #5cc2ef; --vec: #efab54; --fuse: #eef4fd; --ok: #5ccb8e;
-    --shadow: 0 1px 0 #ffffff08, 0 14px 40px -18px #000000cc; color-scheme: dark;
-  }
-  :root[data-theme="light"] {
-    --ink: #eef1f6; --ink-2: #e7ecf3; --panel: #ffffff; --panel-2: #f2f5fa;
-    --line: #cbd4e2; --line-soft: #dbe2ec; --text: #16202f; --muted: #5d6c85; --faint: #8794a8;
-    --lex: #1f8fc7; --vec: #c07914; --fuse: #0d1524; --ok: #1f9d63;
-    --shadow: 0 1px 0 #ffffff, 0 12px 30px -20px #23324a55; color-scheme: light;
-  }
+  :root[data-theme="dark"] { --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc; color-scheme: dark; }
+  :root[data-theme="light"] { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+    --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63;
+    --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme: light; }
 
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -41,205 +32,122 @@
     font-family: var(--mono); font-size: 15px; line-height: 1.5;
     -webkit-font-smoothing: antialiased; letter-spacing: -0.01em;
     background-image:
-      radial-gradient(120% 80% at 82% -10%, color-mix(in oklab, var(--lex) 8%, transparent), transparent 60%),
-      radial-gradient(120% 80% at 10% 110%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
+      radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--lex) 8%, transparent), transparent 60%),
+      radial-gradient(110% 70% at 6% 108%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
     background-attachment: fixed;
   }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: clamp(20px, 4vw, 44px) clamp(16px, 4vw, 40px) 64px; }
-
-  /* hidden checkboxes drive the expand — pure CSS, no JS */
+  .wrap { max-width: 840px; margin: 0 auto; padding: clamp(20px,4vw,44px) clamp(16px,4vw,36px) 60px; }
   .toggle { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-  .mark { display: flex; align-items: center; gap: 13px; }
-  .glyph { width: 34px; height: 34px; flex: none; }
-  .word { font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+  .mark { display: flex; align-items: center; gap: 12px; }
+  .glyph { width: 32px; height: 32px; flex: none; }
+  .word { font-size: 19px; font-weight: 700; letter-spacing: 0.02em; }
   .word span { color: var(--muted); font-weight: 500; }
-  .tag { color: var(--muted); font-size: 13px; margin-top: 3px; max-width: 64ch; letter-spacing: 0; line-height: 1.6; }
+  .tag { color: var(--muted); font-size: 13px; margin-top: 4px; max-width: 60ch; letter-spacing: 0; line-height: 1.55; }
   .tag b { color: var(--text); font-weight: 600; }
   .toolbar { display: flex; align-items: center; gap: 10px; }
-  .stat { font-size: 11.5px; color: var(--faint); letter-spacing: 0.04em; text-align: right; line-height: 1.7; }
+  .stat { font-size: 11px; color: var(--faint); letter-spacing: 0.04em; text-align: right; line-height: 1.7; }
   .stat b { color: var(--ok); font-weight: 600; }
-  button.theme {
-    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--muted); background: var(--panel); border: 1px solid var(--line);
-    padding: 8px 12px; border-radius: 7px; cursor: pointer; transition: color .15s, border-color .15s;
-  }
+  button.theme { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line); padding: 8px 12px; border-radius: 7px; cursor: pointer; transition: color .15s, border-color .15s; }
   button.theme:hover { color: var(--text); border-color: var(--muted); }
-  .hint { font-size: 11px; color: var(--faint); letter-spacing: 0.02em; margin: 14px 0 -8px; }
+  .hint { font-size: 11.5px; color: var(--faint); letter-spacing: 0.02em; margin: 16px 0 14px; }
   .hint b { color: var(--lex); font-weight: 600; }
-  .rule { height: 1px; background: linear-gradient(90deg, var(--line), transparent); margin: 22px 0 4px; }
 
-  /* ---------- flow band ---------- */
-  .flowscroll { overflow-x: auto; overflow-y: hidden; margin: 0 calc(-1 * clamp(16px, 4vw, 40px)); padding: 26px clamp(16px, 4vw, 40px) 18px; scrollbar-width: thin; }
-  .flow { display: flex; align-items: stretch; min-width: 1080px; }
-  .stage { flex: 1 1 0; min-width: 190px; padding: 0 4px; }
+  /* ---------- vertical pipeline ---------- */
+  .pipe { position: relative; }
+  .row { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+  .row.acc { border-color: color-mix(in oklab, var(--ok) 36%, var(--line)); }
+  .row-h { display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer; user-select: none; border-radius: var(--r); flex-wrap: wrap; }
+  .row-h:hover { background: var(--panel-2); }
+  .row-h .n { font-size: 11px; color: var(--faint); letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
+  .row-h .t { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text); }
+  .row-h .sub { font-size: 12px; color: var(--muted); letter-spacing: 0; }
+  .row-h .cv { margin-left: auto; color: var(--faint); font-size: 13px; transition: transform .2s, color .15s; }
+  .summary { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 16px 14px; }
+  .detail { display: none; padding: 4px 16px 16px; }
+  .detail p { margin: 0 0 11px; font-size: 12.5px; color: var(--muted); line-height: 1.55; max-width: 80ch; }
+  .detail p em { color: var(--text); font-style: normal; }
+  .detail p .kx { color: var(--lex); } .detail p .kv { color: var(--vec); } .detail p .kf { color: var(--text); font-weight: 600; }
+  .detail .file { font-size: 11px; color: var(--faint); margin-bottom: 9px; }
 
-  .conn { flex: 0 0 30px; align-self: stretch; position: relative; }
-  .conn svg { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); overflow: visible; }
-  .conn .rail { stroke: var(--faint); stroke-width: 2; }
-  .conn .head { stroke: var(--faint); stroke-width: 2; fill: none; }
-
-  /* stage header is a <label> toggling a hidden checkbox */
-  .stage-h {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    background: transparent; border: 1px solid transparent; border-radius: 7px;
-    padding: 5px 8px; margin-bottom: 5px; cursor: pointer; user-select: none; color: inherit;
-    transition: background .15s, border-color .15s;
-  }
-  .stage-h:hover { background: var(--panel); border-color: var(--line); }
-  .stage-h .n { font-size: 11px; color: var(--faint); letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
-  .stage-h .t { font-size: 12.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
-  .stage-h .cv { margin-left: auto; color: var(--faint); font-size: 12px; transition: transform .2s, color .15s; }
-  .stage-sub { font-size: 11px; color: var(--muted); margin: 0 0 14px; padding: 0 10px; letter-spacing: 0; min-height: 30px; line-height: 1.4; }
-
-  .node {
-    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
-    padding: 10px 12px; margin-bottom: 9px; box-shadow: var(--shadow);
-    transition: border-color .16s, transform .16s;
-  }
-  .node .lbl { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
-  .node .meta { font-size: 11px; color: var(--muted); margin-top: 3px; letter-spacing: 0; }
-  .node .meta code { color: var(--faint); }
+  .chip { font-size: 11.5px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; letter-spacing: 0; display: inline-flex; align-items: center; gap: 7px; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.lex { border-color: color-mix(in oklab, var(--lex) 45%, var(--line)); }
+  .chip.vec { border-color: color-mix(in oklab, var(--vec) 45%, var(--line)); }
+  .chip.ok  { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
   .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--muted); }
   .dot.lex { background: var(--lex); box-shadow: 0 0 8px var(--lex); }
   .dot.vec { background: var(--vec); box-shadow: 0 0 8px var(--vec); }
   .dot.ok  { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 
-  .search-node { padding: 0; background: transparent; border: none; box-shadow: none; }
-  figure.fuse { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 12px 10px; box-shadow: var(--shadow); }
-  figure.fuse svg { display: block; width: 100%; height: auto; }
-  .arm-key { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
-  .arm-key span { font-size: 10.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; letter-spacing: 0; }
+  /* fusion mini-graphic in the Search row */
+  .fusewrap { padding: 2px 16px 12px; }
+  .fuse svg { display: block; width: 100%; max-width: 340px; height: auto; }
 
-  /* ---------- expandable layer-below drawer (pure CSS) ---------- */
-  .layer {
-    display: none;
-    background: var(--panel-2); border: 1px solid var(--line);
-    border-radius: var(--r); padding: 16px 18px; margin-top: 4px; box-shadow: var(--shadow);
-  }
-  #s1:checked ~ .drawer #layer-1,
-  #s2:checked ~ .drawer #layer-2,
-  #s3:checked ~ .drawer #layer-3,
-  #s4:checked ~ .drawer #layer-4,
-  #s5:checked ~ .drawer #layer-5 { display: block; animation: reveal .28s ease both; }
-  @keyframes reveal { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  /* down connectors */
+  .vconn { display: flex; justify-content: center; padding: 2px 0; }
+  .vconn svg { overflow: visible; }
+  .vrail { stroke: var(--faint); stroke-width: 2; }
+  .vhead { stroke: var(--faint); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 
-  /* chevron + active header state, driven by :checked */
-  #s1:checked ~ .flowscroll [data-stage="1"] .cv,
-  #s2:checked ~ .flowscroll [data-stage="2"] .cv,
-  #s3:checked ~ .flowscroll [data-stage="3"] .cv,
-  #s4:checked ~ .flowscroll [data-stage="4"] .cv,
-  #s5:checked ~ .flowscroll [data-stage="5"] .cv { transform: rotate(180deg); color: var(--lex); }
-  #s1:checked ~ .flowscroll [data-stage="1"] .stage-h,
-  #s2:checked ~ .flowscroll [data-stage="2"] .stage-h,
-  #s3:checked ~ .flowscroll [data-stage="3"] .stage-h,
-  #s4:checked ~ .flowscroll [data-stage="4"] .stage-h,
-  #s5:checked ~ .flowscroll [data-stage="5"] .stage-h { background: var(--panel); border-color: var(--line); }
-  #s1:focus-visible ~ .flowscroll [data-stage="1"] .stage-h,
-  #s2:focus-visible ~ .flowscroll [data-stage="2"] .stage-h,
-  #s3:focus-visible ~ .flowscroll [data-stage="3"] .stage-h,
-  #s4:focus-visible ~ .flowscroll [data-stage="4"] .stage-h,
-  #s5:focus-visible ~ .flowscroll [data-stage="5"] .stage-h { outline: 2px solid var(--lex); outline-offset: 2px; }
+  /* loop-back: from Observability up into Ingest/Index */
+  .loopback { display: flex; align-items: center; gap: 12px; justify-content: center; padding: 8px 0 2px; }
+  .loopback svg { overflow: visible; }
+  .lbrail { stroke: var(--lex); stroke-width: 2; fill: none; }
+  .lbhead { stroke: var(--lex); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .loopback .txt { font-size: 12px; color: var(--lex); letter-spacing: 0.01em; }
+  .loopback .txt b { font-weight: 700; }
+  /* subtle return spine on the right, robust to in-place expansion */
+  .pipe::after { content: ""; position: absolute; right: -14px; top: 96px; bottom: 118px;
+    border-right: 2px dashed color-mix(in oklab, var(--lex) 40%, var(--line)); border-radius: 2px; pointer-events: none; }
+  @media (max-width: 700px) { .pipe::after { display: none; } }
 
-  .layer .lh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
-  .layer .lh b { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
-  .layer .lh i { font-style: normal; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
-  .layer .lh .file { margin-left: auto; font-size: 11px; color: var(--faint); }
-  .layer p { margin: 0 0 12px; font-size: 13px; color: var(--muted); line-height: 1.55; letter-spacing: 0; max-width: 78ch; }
-  .layer p em { color: var(--text); font-style: normal; }
-  .layer p .kx { color: var(--lex); } .layer p .kv { color: var(--vec); } .layer p .kf { color: var(--text); font-weight: 600; }
-  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
-  .chip { font-size: 11.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; letter-spacing: 0; }
-  .chip b { color: var(--text); font-weight: 600; }
-  .chip.lex { border-color: color-mix(in oklab, var(--lex) 45%, var(--line)); }
-  .chip.vec { border-color: color-mix(in oklab, var(--vec) 45%, var(--line)); }
-  .chip.ok  { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
+  /* ---------- pure-CSS in-place reveal ---------- */
+  #s1:checked ~ .pipe [data-r="1"] .detail, #s2:checked ~ .pipe [data-r="2"] .detail,
+  #s3:checked ~ .pipe [data-r="3"] .detail, #s4:checked ~ .pipe [data-r="4"] .detail,
+  #s5:checked ~ .pipe [data-r="5"] .detail, #s6:checked ~ .pipe [data-r="6"] .detail,
+  #s7:checked ~ .pipe [data-r="7"] .detail, #sg:checked ~ .pipe [data-r="g"] .detail
+    { display: block; animation: reveal .26s ease both; }
+  #s1:checked ~ .pipe [data-r="1"] .cv, #s2:checked ~ .pipe [data-r="2"] .cv,
+  #s3:checked ~ .pipe [data-r="3"] .cv, #s4:checked ~ .pipe [data-r="4"] .cv,
+  #s5:checked ~ .pipe [data-r="5"] .cv, #s6:checked ~ .pipe [data-r="6"] .cv,
+  #s7:checked ~ .pipe [data-r="7"] .cv, #sg:checked ~ .pipe [data-r="g"] .cv
+    { transform: rotate(180deg); color: var(--lex); }
+  #s1:checked ~ .pipe [data-r="1"] .row-h, #s2:checked ~ .pipe [data-r="2"] .row-h,
+  #s3:checked ~ .pipe [data-r="3"] .row-h, #s4:checked ~ .pipe [data-r="4"] .row-h,
+  #s5:checked ~ .pipe [data-r="5"] .row-h, #s6:checked ~ .pipe [data-r="6"] .row-h,
+  #s7:checked ~ .pipe [data-r="7"] .row-h, #sg:checked ~ .pipe [data-r="g"] .row-h
+    { background: var(--panel-2); }
+  #s1:focus-visible ~ .pipe [data-r="1"] .row-h, #s2:focus-visible ~ .pipe [data-r="2"] .row-h,
+  #s3:focus-visible ~ .pipe [data-r="3"] .row-h, #s4:focus-visible ~ .pipe [data-r="4"] .row-h,
+  #s5:focus-visible ~ .pipe [data-r="5"] .row-h, #s6:focus-visible ~ .pipe [data-r="6"] .row-h,
+  #s7:focus-visible ~ .pipe [data-r="7"] .row-h, #sg:focus-visible ~ .pipe [data-r="g"] .row-h
+    { outline: 2px solid var(--lex); outline-offset: 2px; }
+  @keyframes reveal { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
 
-  /* ---------- explanatory band ---------- */
-  .read { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
-  .read h3 { margin: 0 0 16px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px 26px; }
-  .step { display: flex; flex-direction: column; gap: 5px; }
-  .step .sh { display: flex; align-items: baseline; gap: 8px; }
-  .step .sh b { font-size: 13px; color: var(--text); letter-spacing: 0.02em; }
-  .step .sh i { font-style: normal; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
-  .step p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.55; letter-spacing: 0; max-width: 40ch; }
-  .step p em { color: var(--text); font-style: normal; }
-  .step p .kx { color: var(--lex); } .step p .kv { color: var(--vec); } .step p .kf { color: var(--text); font-weight: 600; }
+  /* governance base */
+  .row.gov .row-h .t { color: var(--ok); }
 
-  .legend { display: flex; gap: 22px 30px; flex-wrap: wrap; margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
+  .legend { display: flex; gap: 20px 30px; flex-wrap: wrap; margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
   .legend .grp { display: flex; flex-direction: column; gap: 5px; }
   .legend h4 { margin: 0 0 3px; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
   .legend .li { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .legend .li b { color: var(--text); font-weight: 600; }
-  .foot { margin-top: 30px; font-size: 11.5px; color: var(--faint); letter-spacing: 0.02em; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .foot { margin-top: 26px; font-size: 11px; color: var(--faint); letter-spacing: 0.02em; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .foot code { color: var(--muted); }
-
-  /* ---------- governance substrate ---------- */
-  .gov { margin: 10px 0 0; background: linear-gradient(180deg, var(--panel-2), transparent); border: 1px solid var(--line-soft); border-radius: var(--r); padding: 11px 14px; }
-  .gov-h { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; padding: 4px 6px; margin: -2px; border-radius: 6px; flex-wrap: wrap; }
-  .gov-h:hover { background: var(--panel); }
-  .gov-h .t { font-size: 11.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
-  .gov-h .s { font-size: 11.5px; color: var(--muted); letter-spacing: 0; }
-  .gov-h .cv { margin-left: auto; color: var(--faint); font-size: 12px; transition: transform .2s, color .15s; }
-  .gov-rail { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-  .gchip { font-size: 11.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 7px; letter-spacing: 0; }
-  .gchip b { color: var(--text); font-weight: 600; }
-  .gov-layer { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
-  .gov-layer p { margin: 0 0 11px; font-size: 12.5px; color: var(--muted); line-height: 1.55; max-width: 82ch; }
-  .gov-layer p em { color: var(--text); font-style: normal; }
-
-  /* ---------- learning loop + agents + observability ---------- */
-  .loop { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
-  .loop h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
-  .loop .cap { font-size: 12.5px; color: var(--muted); margin: 0 0 16px; max-width: 82ch; line-height: 1.55; }
-  .loop .cap b { color: var(--text); font-weight: 600; }
-  .loopscroll { overflow-x: auto; overflow-y: hidden; padding: 2px 2px 6px; }
-  .loop-flow { display: flex; align-items: stretch; min-width: 760px; }
-  .lnode { flex: 1 1 0; min-width: 156px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 13px; box-shadow: var(--shadow); }
-  .lnode.agent { border-color: color-mix(in oklab, var(--ok) 40%, var(--line)); }
-  .lnode.obs { cursor: pointer; user-select: none; }
-  .lnode.obs:hover { border-color: color-mix(in oklab, var(--text) 30%, var(--line)); }
-  .lnode .lt { font-size: 12.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
-  .lnode .lt .cv { margin-left: auto; color: var(--faint); font-size: 11px; transition: transform .2s, color .15s; }
-  .lnode .lm { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; letter-spacing: 0; }
-  .lnode .lm code { color: var(--faint); }
-  .lconn { flex: 0 0 26px; position: relative; }
-  .lconn svg { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); overflow: visible; }
-  .lconn .rail { stroke: var(--faint); stroke-width: 2; }
-  .lconn .head { stroke: var(--faint); stroke-width: 2; fill: none; }
-
-  .loop-return { position: relative; height: 46px; margin-top: 2px; }
-  .loop-return svg { width: 100%; height: 46px; overflow: visible; display: block; }
-  .loop-return .rr { stroke: var(--lex); stroke-width: 2; fill: none; opacity: .85; }
-  .loop-return .rh { stroke: var(--lex); stroke-width: 2; fill: none; }
-  .loop-return .rlbl { position: absolute; left: 50%; top: 15px; transform: translateX(-50%); font-size: 11px; color: var(--lex); letter-spacing: 0.02em; background: var(--ink); padding: 0 8px; white-space: nowrap; }
-
-  .obs-layer { display: none; margin-top: 14px; }
-  .obs-layer .layer { display: block; margin-top: 0; }
-
-  /* pure-CSS reveals for governance (sg) + observability (so) */
-  #sg:checked ~ .gov .gov-layer,
-  #so:checked ~ .loop .obs-layer { display: block; animation: reveal .28s ease both; }
-  #sg:checked ~ .gov .gov-h .cv,
-  #so:checked ~ .loop .obs .cv { transform: rotate(180deg); color: var(--lex); }
-  #sg:checked ~ .gov .gov-h,
-  #so:checked ~ .loop .obs { background: var(--panel); }
-  #sg:focus-visible ~ .gov .gov-h,
-  #so:focus-visible ~ .loop .obs { outline: 2px solid var(--lex); outline-offset: 2px; }
 
   /* ---------- subtle motion ---------- */
   @keyframes dash { to { stroke-dashoffset: -1000; } }
-  @keyframes drift { to { stroke-dashoffset: -240; } }
   @media (prefers-reduced-motion: no-preference) {
     .signal { stroke-dasharray: 6 10; animation: dash 14s linear infinite; }
-    .conn .rail, .lconn .rail { stroke-dasharray: 3 6; animation: drift 6s linear infinite; }
-    .loop-return .rr { stroke-dasharray: 5 8; animation: dash 20s linear infinite; }
-    .pulse { animation: pulseMove 3.2s ease-in-out infinite; }
+    .vrail  { stroke-dasharray: 3 6; animation: dash 9s linear infinite; }
+    .lbrail { stroke-dasharray: 5 7; animation: dash 16s linear infinite; }
+    .pulse  { animation: pulseMove 3.2s ease-in-out infinite; }
     @keyframes pulseMove { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
   }
-  @media (prefers-reduced-motion: reduce) { .layer { animation: none !important; } }
   @media (max-width: 560px) { body { font-size: 14px; } }
 </style>
 </head>
@@ -250,8 +158,9 @@
   <input type="checkbox" class="toggle" id="s3" aria-hidden="true">
   <input type="checkbox" class="toggle" id="s4" aria-hidden="true">
   <input type="checkbox" class="toggle" id="s5" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s6" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s7" aria-hidden="true">
   <input type="checkbox" class="toggle" id="sg" aria-hidden="true">
-  <input type="checkbox" class="toggle" id="so" aria-hidden="true">
 
   <header>
     <div>
@@ -263,265 +172,157 @@
         </svg>
         <div class="word"><b>EIL</b> <span>· knowledge plane</span></div>
       </div>
-      <p class="tag">Deterministic, <b>token-free</b> retrieval over org knowledge — local-first on Postgres,
-      served to agents through MCP. Everything left of <b>Serve</b> turns what you can read into ranked,
-      permission-filtered context an agent pulls in two cheap calls.</p>
+      <p class="tag">Deterministic, <b>token-free</b> retrieval over org knowledge — local-first on Postgres, served to agents via MCP.</p>
     </div>
     <div class="toolbar">
-      <div class="stat">status &nbsp;<b>local ● online</b><br/>node 22 · postgres 17 / pglite</div>
+      <div class="stat">status &nbsp;<b>local ● online</b><br/>node 22 · postgres / pglite</div>
       <button class="theme" id="themeBtn" type="button" aria-label="Toggle color theme">◐ theme</button>
     </div>
   </header>
 
-  <p class="hint">▸ follow the flow left to right — <b>click any stage</b> to reveal the layer below it.</p>
-  <div class="rule"></div>
+  <p class="hint">▾ <b>click any stage</b> to expand it in place. the cycle closes at the bottom — agents' usage steers what gets indexed.</p>
 
-  <div class="flowscroll" aria-label="EIL pipeline: sources → ingest → index → search → serve.">
-    <div class="flow">
+  <div class="pipe">
 
-      <section class="stage" data-stage="1">
-        <label class="stage-h" for="s1"><span class="n">01</span><span class="t">Sources</span><span class="cv" aria-hidden="true">⌄</span></label>
-        <div class="stage-sub">what you can already read</div>
-        <div class="node"><div class="lbl"><span class="dot"></span>Confluence</div><div class="meta">CQL · spaces / pages</div></div>
-        <div class="node"><div class="lbl"><span class="dot"></span>Jira</div><div class="meta">JQL · projects / issues</div></div>
-        <div class="node"><div class="lbl"><span class="dot"></span>Git repos</div><div class="meta">clone / Bitbucket API</div></div>
-        <div class="node"><div class="lbl"><span class="dot"></span>Obsidian · ELK</div><div class="meta">notes · production logs</div></div>
-      </section>
-
-      <div class="conn"><svg width="30" height="24" viewBox="0 0 30 24" fill="none" aria-hidden="true">
-        <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
-
-      <section class="stage" data-stage="2">
-        <label class="stage-h" for="s2"><span class="n">02</span><span class="t">Ingest</span><span class="cv" aria-hidden="true">⌄</span></label>
-        <div class="stage-sub">incremental, scoped, deletable</div>
-        <div class="node"><div class="lbl">Connectors</div><div class="meta">personal PAT · fail-closed ACL</div></div>
-        <div class="node"><div class="lbl">Cursor sync</div><div class="meta"><code>sync_cursors</code> · per-scope / repo SHA</div></div>
-        <div class="node"><div class="lbl">Normalize → doc</div><div class="meta">storage-format → markdown</div></div>
-        <div class="node"><div class="lbl">Reconcile</div><div class="meta">tombstone on delete</div></div>
-      </section>
-
-      <div class="conn"><svg width="30" height="24" viewBox="0 0 30 24" fill="none" aria-hidden="true">
-        <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
-
-      <section class="stage" data-stage="3">
-        <label class="stage-h" for="s3"><span class="n">03</span><span class="t">Index</span><span class="cv" aria-hidden="true">⌄</span></label>
-        <div class="stage-sub">one Postgres, no extension</div>
-        <div class="node"><div class="lbl">Chunker</div><div class="meta">prose sections · code line-windows</div></div>
-        <div class="node"><div class="lbl"><span class="dot lex"></span>Full-text</div><div class="meta"><code>tsvector</code> · GIN index</div></div>
-        <div class="node"><div class="lbl"><span class="dot vec"></span>Vectors</div><div class="meta"><code>bytea</code> f32 · 384d · local ONNX</div></div>
-        <div class="node"><div class="lbl">ACL predicate</div><div class="meta">jsonb groups · owner-only default</div></div>
-      </section>
-
-      <div class="conn"><svg width="30" height="24" viewBox="0 0 30 24" fill="none" aria-hidden="true">
-        <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
-
-      <section class="stage" data-stage="4">
-        <label class="stage-h" for="s4"><span class="n">04</span><span class="t">Search</span><span class="cv" aria-hidden="true">⌄</span></label>
-        <div class="stage-sub">two arms, fused by <code>rrf()</code></div>
-        <div class="node search-node">
-          <figure class="fuse">
-            <svg viewBox="0 0 200 132" fill="none" aria-hidden="true">
-              <text x="8" y="18" fill="var(--muted)" font-size="9" font-family="var(--mono)">query</text>
-              <circle cx="20" cy="66" r="3" fill="var(--text)"/>
-              <path class="signal" d="M23 66 C 55 66, 55 30, 92 30" stroke="var(--lex)" stroke-width="2" fill="none"/>
-              <path class="signal" d="M23 66 C 55 66, 55 102, 92 102" stroke="var(--vec)" stroke-width="2" fill="none"/>
-              <rect x="92" y="18" width="66" height="24" rx="6" fill="color-mix(in oklab, var(--lex) 16%, transparent)" stroke="var(--lex)"/>
-              <text x="100" y="30" fill="var(--lex)" font-size="9.5" font-family="var(--mono)">FTS</text>
-              <text x="100" y="39" fill="var(--muted)" font-size="7.5" font-family="var(--mono)">ts_rank · exact</text>
-              <rect x="92" y="90" width="66" height="24" rx="6" fill="color-mix(in oklab, var(--vec) 16%, transparent)" stroke="var(--vec)"/>
-              <text x="100" y="102" fill="var(--vec)" font-size="9.5" font-family="var(--mono)">VECTOR</text>
-              <text x="100" y="111" fill="var(--muted)" font-size="7.5" font-family="var(--mono)">cosine · meaning</text>
-              <path class="signal" d="M158 30 C 176 30, 176 66, 182 66" stroke="var(--lex)" stroke-width="2" fill="none"/>
-              <path class="signal" d="M158 102 C 176 102, 176 66, 182 66" stroke="var(--vec)" stroke-width="2" fill="none"/>
-              <circle class="pulse" cx="182" cy="66" r="5.5" fill="var(--fuse)"/>
-              <circle cx="182" cy="66" r="5.5" fill="none" stroke="var(--fuse)" stroke-width="1.2" opacity=".5"/>
-              <text x="150" y="66" fill="var(--fuse)" font-size="10" font-weight="700" font-family="var(--mono)" text-anchor="end">rrf()</text>
-            </svg>
-            <div class="arm-key">
-              <span><span class="dot lex"></span>lexical</span>
-              <span><span class="dot vec"></span>semantic</span>
-              <span><span class="dot" style="background:var(--fuse);box-shadow:0 0 8px var(--fuse)"></span>fused rank</span>
-            </div>
-          </figure>
-        </div>
-        <div class="node"><div class="lbl">Rank + gate</div><div class="meta">tier · recency · ACL filter</div></div>
-        <div class="node"><div class="lbl">Entity route</div><div class="meta"><code>PAY-981</code> → catalog + links</div></div>
-      </section>
-
-      <div class="conn"><svg width="30" height="24" viewBox="0 0 30 24" fill="none" aria-hidden="true">
-        <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
-
-      <section class="stage" data-stage="5">
-        <label class="stage-h" for="s5"><span class="n">05</span><span class="t">Serve</span><span class="cv" aria-hidden="true">⌄</span></label>
-        <div class="stage-sub">two-phase · zero tokens</div>
-        <div class="node"><div class="lbl"><span class="dot ok"></span>MCP server</div><div class="meta">stdio · audited</div></div>
-        <div class="node"><div class="lbl">Tools</div><div class="meta"><code>search_docs · get_doc · expand</code><br/><code>search_code · fetch_logs</code></div></div>
-        <div class="node"><div class="lbl">Agents</div><div class="meta">Amp · Claude Code · connector</div></div>
-        <div class="node" style="border-style:dashed"><div class="lbl">Observability</div><div class="meta">metrics · eval recall · report</div></div>
-      </section>
-
-    </div>
-  </div>
-
-  <!-- the layer below, revealed when a stage's checkbox is checked -->
-  <div class="drawer">
-    <div class="layer" id="layer-1">
-      <div class="lh"><i>01</i><b>Sources — the connector contract</b><span class="file">ts/connectors/</span></div>
-      <p>Each source is a small connector you drive with <em>your own credentials</em>, so you can only ever index what you're already allowed to read. Live syncs speak the source's own query language.</p>
-      <div class="chips">
-        <span class="chip"><b>ConfluenceClient</b> · updatedSince(cursor, scope)</span>
-        <span class="chip"><b>JiraClient</b> · JQL</span>
-        <span class="chip"><b>GitCloneSource</b> / <b>BitbucketApiSource</b></span>
-        <span class="chip">walkVault · Obsidian</span>
-        <span class="chip">Bearer PAT / Basic</span>
+    <section class="row" data-r="1">
+      <label class="row-h" for="s1"><span class="n">01</span><span class="t">Sources</span><span class="sub">what you can already read</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="summary"><span class="chip">Confluence · CQL</span><span class="chip">Jira · JQL</span><span class="chip">Git repos</span><span class="chip">Obsidian · ELK</span></div>
+      <div class="detail">
+        <div class="file">ts/connectors/</div>
+        <p>Each source is a small connector you drive with <em>your own credentials</em> — you can only index what you're already allowed to read.</p>
+        <div class="chips"><span class="chip"><b>ConfluenceClient</b> · updatedSince(cursor, scope)</span><span class="chip"><b>GitCloneSource</b> / <b>BitbucketApiSource</b></span><span class="chip">Bearer PAT / Basic</span></div>
       </div>
-    </div>
-    <div class="layer" id="layer-2">
-      <div class="lh"><i>02</i><b>Ingest — fetch → normalize → chunk → upsert</b><span class="file">ts/ingest/pipeline.ts</span></div>
-      <p>Per-doc transaction, content-hash gated so unchanged docs are no-ops. The cursor advances <em>only</em> on success and holds at the earliest failure. Scope it as tight or wide as you like; deletions tombstone.</p>
-      <div class="chips">
-        <span class="chip"><b>ingestDocs()</b> · <b>ingestRepo()</b></span>
-        <span class="chip">upsertDocument · hash-gate</span>
-        <span class="chip">--space / --project / --issue / --query</span>
-        <span class="chip">--reconcile · tombstone</span>
-        <span class="chip"><b>sync_cursors</b> · timestamp / commit-SHA</span>
-      </div>
-    </div>
-    <div class="layer" id="layer-3">
-      <div class="lh"><i>03</i><b>Index — one row per doc, one per chunk</b><span class="file">migrations/0001–0007</span></div>
-      <p>Full-text and vector live <em>side by side on the chunk</em>; the ACL lives on the doc. No <span class="kv">pgvector</span> and no server needed — embeddings are packed float32 in <code>bytea</code>, cosine runs in-process, so it works on zero-install PGlite too.</p>
-      <div class="chips">
-        <span class="chip">documents(id, source, hierarchy, <b>acl_groups</b>, content_hash, body)</span>
-        <span class="chip lex">chunks.tsv · <b>GENERATED</b> tsvector</span>
-        <span class="chip vec">chunks.embedding · bytea f32 · embed_model</span>
-        <span class="chip">ACL: ingested_by = $p OR acl_groups ?| $g</span>
-      </div>
-    </div>
-    <div class="layer" id="layer-4">
-      <div class="lh"><i>04</i><b>Search — two passes, fused in-process</b><span class="file">ts/search.ts · core/fusion.ts</span></div>
-      <p>The <span class="kx">lexical</span> and <span class="kv">semantic</span> arms each return a ranking; <span class="kf">rrf()</span> fuses them, then tier/recency modifiers and the ACL predicate finish the sort. The vector arm is best-effort — no embeddings or model, and search degrades cleanly to FTS-only.</p>
-      <div class="chips">
-        <span class="chip lex">websearch_to_tsquery · ts_rank</span>
-        <span class="chip vec">cosine · embed_model match</span>
-        <span class="chip"><b>rrf({ fts, vec })</b></span>
-        <span class="chip">modifier(tier, recency)</span>
-        <span class="chip">entity route · expand() link graph</span>
-      </div>
-    </div>
-    <div class="layer" id="layer-5">
-      <div class="lh"><i>05</i><b>Serve — five MCP tools, two-phase</b><span class="file">ts/tools.ts · mcp-server.ts</span></div>
-      <p>A standard stdio MCP server, every call audited. <em>Two-phase by design</em>: search returns ids + snippets, the agent fetches only what it needs — deterministic, and zero tokens spent searching. Hosts can index the tools without spawning via the manifest.</p>
-      <div class="chips">
-        <span class="chip ok"><b>search_docs · get_doc · expand · search_code · fetch_logs</b></span>
-        <span class="chip">eil serve · stdio</span>
-        <span class="chip">eil tools · JSON manifest</span>
-        <span class="chip">in-proc callTool / REGISTRY</span>
-        <span class="chip">metrics views · eval · report</span>
-      </div>
-    </div>
-  </div>
+    </section>
+    <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
-  <!-- governance: the substrate under every stage -->
-  <div class="gov">
-    <label class="gov-h" for="sg">
-      <span class="t">Governance</span>
-      <span class="s">— the substrate every stage sits on</span>
-      <span class="cv" aria-hidden="true">⌄</span>
-    </label>
-    <div class="gov-rail">
-      <span class="gchip"><span class="dot ok"></span><b>Fail-closed ACL</b> · every read path</span>
-      <span class="gchip"><b>Audit log</b> · every tool call</span>
-      <span class="gchip"><b>Personal credentials</b> · index only what you can read</span>
-      <span class="gchip"><b>Tenant isolation</b></span>
-      <span class="gchip"><b>Data-trust</b> · integrity + drift</span>
-    </div>
-    <div class="gov-layer">
-      <p>Access control isn't a stage — it's the ground the whole plane rests on. Every query is filtered by the <em>same</em> predicate; a doc with no groups is <em>owner-only</em> until an ACL sync stamps it, so a bug fails closed, never open. And nothing is deterministic-but-unaccountable: each tool call and model call is a logged row you can audit.</p>
-      <div class="chips">
-        <span class="chip">visibleSql · <b>ingested_by = $p OR acl_groups ?| $g</b></span>
-        <span class="chip">tool audit · llm_calls · cost/run</span>
-        <span class="chip">eil audit --strict · integrity invariants (CI-gated)</span>
-        <span class="chip">drift() · re-fetch a sample, compare hashes</span>
-        <span class="chip">per-tenant · service accounts only on kube</span>
+    <section class="row" data-r="2">
+      <label class="row-h" for="s2"><span class="n">02</span><span class="t">Ingest</span><span class="sub">incremental · scoped · deletable</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="summary"><span class="chip">connectors</span><span class="chip">cursor sync</span><span class="chip">normalize → doc</span><span class="chip">reconcile</span></div>
+      <div class="detail">
+        <div class="file">ts/ingest/pipeline.ts</div>
+        <p>Per-doc transaction, content-hash gated so unchanged docs are no-ops. The <em>cursor advances only on success</em>; edits update, deletions tombstone. Scope it tight or wide.</p>
+        <div class="chips"><span class="chip"><b>ingestDocs()</b> · <b>ingestRepo()</b></span><span class="chip">--space / --project / --repo / --query</span><span class="chip"><b>sync_cursors</b> · timestamp / commit-SHA</span></div>
       </div>
-    </div>
-  </div>
+    </section>
+    <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
-  <!-- the learning loop: agents + observability + feedback -->
-  <div class="loop">
-    <h3>The learning loop — how agents steer what gets built</h3>
-    <p class="cap">Agents don't just consume the plane; their <b>usage is the signal</b>. What they search, what returns nothing, how often the two-phase pull is really used — it all flows into observability, and that data decides what gets ingested, indexed, or built next.</p>
-    <div class="loopscroll">
-      <div class="loop-flow">
-        <div class="lnode agent"><div class="lt"><span class="dot ok"></span>Agents</div><div class="lm">Amp · Claude Code · work connector — pull ranked, ACL-filtered context; <code>search → get_doc</code>, two calls, zero search tokens</div></div>
-        <div class="lconn"><svg width="26" height="24" viewBox="0 0 26 24" fill="none" aria-hidden="true"><line class="rail" x1="0" y1="12" x2="19" y2="12"/><path class="head" d="M17 7l7 5-7 5"/></svg></div>
-        <div class="lnode"><div class="lt">Usage &amp; queries</div><div class="lm">real queries · zero-result hits · <code>golden-queries.md</code> grows</div></div>
-        <div class="lconn"><svg width="26" height="24" viewBox="0 0 26 24" fill="none" aria-hidden="true"><line class="rail" x1="0" y1="12" x2="19" y2="12"/><path class="head" d="M17 7l7 5-7 5"/></svg></div>
-        <label class="lnode obs" for="so"><div class="lt">Observability<span class="cv" aria-hidden="true">⌄</span></div><div class="lm">metrics views · eval recall@k · HTML report</div></label>
-        <div class="lconn"><svg width="26" height="24" viewBox="0 0 26 24" fill="none" aria-hidden="true"><line class="rail" x1="0" y1="12" x2="19" y2="12"/><path class="head" d="M17 7l7 5-7 5"/></svg></div>
-        <div class="lnode"><div class="lt">Decide</div><div class="lm">what to ingest / index / build next — Zoekt, embeddings, or nothing</div></div>
+    <section class="row" data-r="3">
+      <label class="row-h" for="s3"><span class="n">03</span><span class="t">Index</span><span class="sub">one Postgres · no extension</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="summary"><span class="chip">chunker</span><span class="chip lex"><span class="dot lex"></span>full-text</span><span class="chip vec"><span class="dot vec"></span>vectors</span><span class="chip">ACL</span></div>
+      <div class="detail">
+        <div class="file">migrations/0001–0007</div>
+        <p>Full-text and vector live <em>side by side on the chunk</em>; the ACL lives on the doc. No <span class="kv">pgvector</span> — embeddings are packed float32 in <code>bytea</code>, cosine runs in-process, so it works on zero-install PGlite too.</p>
+        <div class="chips"><span class="chip lex">chunks.tsv · GENERATED tsvector</span><span class="chip vec">chunks.embedding · bytea f32 · 384d</span><span class="chip">ACL: ingested_by = $p OR acl_groups ?| $g</span></div>
       </div>
-    </div>
-    <div class="loop-return">
-      <svg viewBox="0 0 1000 46" preserveAspectRatio="none" aria-hidden="true"><path class="rr" d="M992 3 C 992 42, 8 42, 8 5"/></svg>
-      <span class="rlbl">↻ feeds back into 02 Ingest &amp; 03 Index</span>
-    </div>
-    <div class="obs-layer">
-      <div class="layer">
-        <div class="lh"><i>OBS</i><b>Observability — metrics are SQL views over the facts</b><span class="file">observability/ · migrations/0005</span></div>
-        <p>Nothing bolts on a separate metrics store: the <span class="kf">vw_*</span> views <em>are</em> the metric definitions — versioned and independently tested. <code>eil eval</code> records recall per run for the trend; <code>eil report</code> writes a self-contained HTML report; Grafana reads the very same views.</p>
-        <div class="chips">
-          <span class="chip">migrations/0005 · <b>metrics.vw_*</b> views</span>
-          <span class="chip">eil eval · recall@k vs golden queries</span>
-          <span class="chip">eil report · adoption · zero-result · two-phase ratio</span>
-          <span class="chip">connector health · cursor age</span>
-          <span class="chip">Grafana provisioning</span>
-        </div>
-      </div>
-    </div>
-  </div>
+    </section>
+    <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
 
-  <!-- plain-language narrative -->
-  <div class="read">
-    <h3>How to read it — left to right</h3>
-    <div class="steps">
-      <div class="step"><div class="sh"><i>01</i><b>Sources</b></div>
-        <p>Anything you can already read — Confluence, Jira, git repos, notes, logs. You only ever index what you're allowed to see.</p></div>
-      <div class="step"><div class="sh"><i>02</i><b>Ingest</b></div>
-        <p>Connectors pull with your token and sync <em>incrementally</em> from a saved cursor: edits update, deletions tombstone.</p></div>
-      <div class="step"><div class="sh"><i>03</i><b>Index</b></div>
-        <p>Each doc is chunked and stored <em>once</em> in plain Postgres — a <span class="kx">tsvector</span> and a local <span class="kv">vector</span>, behind a fail-closed ACL.</p></div>
-      <div class="step"><div class="sh"><i>04</i><b>Search</b></div>
-        <p>A query runs two ways at once — exact terms and meaning. <span class="kf">rrf()</span> fuses the rankings; tier, recency and ACL finish the sort.</p></div>
-      <div class="step"><div class="sh"><i>05</i><b>Serve</b></div>
-        <p>Results go out over MCP as five tools — search returns ids + snippets, the agent fetches only what matters. No tokens spent searching.</p></div>
+    <section class="row" data-r="4">
+      <label class="row-h" for="s4"><span class="n">04</span><span class="t">Search</span><span class="sub">two arms, fused by <code>rrf()</code></span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="fusewrap">
+        <figure class="fuse" style="margin:0">
+          <svg viewBox="0 0 340 96" fill="none" aria-hidden="true">
+            <text x="6" y="52" fill="var(--muted)" font-size="9" font-family="var(--mono)">query</text>
+            <circle cx="36" cy="48" r="3" fill="var(--text)"/>
+            <path class="signal" d="M39 48 C 80 48, 80 22, 150 22" stroke="var(--lex)" stroke-width="2" fill="none"/>
+            <path class="signal" d="M39 48 C 80 48, 80 74, 150 74" stroke="var(--vec)" stroke-width="2" fill="none"/>
+            <rect x="150" y="10" width="96" height="24" rx="6" fill="color-mix(in oklab, var(--lex) 16%, transparent)" stroke="var(--lex)"/>
+            <text x="160" y="25" fill="var(--lex)" font-size="10" font-family="var(--mono)">FTS · ts_rank</text>
+            <rect x="150" y="62" width="96" height="24" rx="6" fill="color-mix(in oklab, var(--vec) 16%, transparent)" stroke="var(--vec)"/>
+            <text x="160" y="77" fill="var(--vec)" font-size="10" font-family="var(--mono)">VECTOR · cosine</text>
+            <path class="signal" d="M246 22 C 280 22, 280 48, 300 48" stroke="var(--lex)" stroke-width="2" fill="none"/>
+            <path class="signal" d="M246 74 C 280 74, 280 48, 300 48" stroke="var(--vec)" stroke-width="2" fill="none"/>
+            <circle class="pulse" cx="300" cy="48" r="5.5" fill="var(--fuse)"/>
+            <text x="335" y="52" fill="var(--fuse)" font-size="11" font-weight="700" font-family="var(--mono)" text-anchor="end">rrf()</text>
+          </svg>
+        </figure>
+      </div>
+      <div class="detail">
+        <div class="file">ts/search.ts · core/fusion.ts</div>
+        <p>The <span class="kx">lexical</span> and <span class="kv">semantic</span> arms each rank; <span class="kf">rrf()</span> fuses them, then tier/recency and the ACL predicate finish the sort. The vector arm is best-effort — it degrades cleanly to FTS-only.</p>
+        <div class="chips"><span class="chip"><b>rrf({ fts, vec })</b></span><span class="chip">modifier(tier, recency)</span><span class="chip">entity route · <code>PAY-981</code> → link graph</span></div>
+      </div>
+    </section>
+    <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
+
+    <section class="row" data-r="5">
+      <label class="row-h" for="s5"><span class="n">05</span><span class="t">Serve</span><span class="sub">MCP · two-phase · zero tokens</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="summary"><span class="chip"><span class="dot ok"></span>MCP server</span><span class="chip">5 tools</span><span class="chip">audited</span></div>
+      <div class="detail">
+        <div class="file">ts/tools.ts · mcp-server.ts</div>
+        <p>A standard stdio MCP server, every call audited. <em>Two-phase</em>: search returns ids + snippets, the agent fetches only what it needs — deterministic, zero tokens spent searching.</p>
+        <div class="chips"><span class="chip ok"><b>search_docs · get_doc · expand · search_code · fetch_logs</b></span><span class="chip">eil tools · JSON manifest</span><span class="chip">in-proc callTool / REGISTRY</span></div>
+      </div>
+    </section>
+    <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
+
+    <section class="row acc" data-r="6">
+      <label class="row-h" for="s6"><span class="n">06</span><span class="t">Agents</span><span class="sub">the consumers</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="summary"><span class="chip"><span class="dot ok"></span>Amp</span><span class="chip">Claude Code</span><span class="chip">work connector</span></div>
+      <div class="detail">
+        <p>Agents pull ranked, ACL-filtered context in two cheap calls — <code>search → get_doc</code>. What they ask, and what returns nothing, becomes the signal for the loop below.</p>
+        <div class="chips"><span class="chip">two-phase pull · zero search tokens</span><span class="chip">any MCP client</span></div>
+      </div>
+    </section>
+    <div class="vconn"><svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="16"/><path class="vhead" d="M6 14l5 7 5-7"/></svg></div>
+
+    <section class="row" data-r="7">
+      <label class="row-h" for="s7"><span class="n">07</span><span class="t">Observability</span><span class="sub">usage → what to build next</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="summary"><span class="chip">metrics views</span><span class="chip">eval recall</span><span class="chip">report</span></div>
+      <div class="detail">
+        <div class="file">observability/ · migrations/0005</div>
+        <p>Metrics are SQL views over the facts — the <span class="kf">vw_*</span> views <em>are</em> the definitions. <code>eil eval</code> tracks recall, <code>eil report</code> shows adoption / zero-result / two-phase ratio, and that decides what's indexed or built next.</p>
+        <div class="chips"><span class="chip"><b>metrics.vw_*</b> views</span><span class="chip">eil eval · recall@k</span><span class="chip">eil report · Grafana</span></div>
+      </div>
+    </section>
+
+    <!-- the loop closes here, back up into ingest/index -->
+    <div class="loopback">
+      <svg width="34" height="30" viewBox="0 0 34 30" fill="none" aria-hidden="true">
+        <path class="lbrail" d="M31 28 C 31 6, 4 6, 4 8"/>
+        <path class="lbhead" d="M0 12 L4 5 L8 12"/>
+      </svg>
+      <span class="txt"><b>↻ learning loop</b> — usage steers <b>02 Ingest</b> &amp; <b>03 Index</b></span>
     </div>
+
+    <div class="vconn" style="opacity:.5"><svg width="22" height="20" viewBox="0 0 22 20" fill="none" aria-hidden="true"><line class="vrail" x1="11" y1="0" x2="11" y2="12"/><path class="vhead" d="M6 10l5 7 5-7"/></svg></div>
+
+    <!-- governance: under every stage -->
+    <section class="row gov" data-r="g">
+      <label class="row-h" for="sg"><span class="n">◆</span><span class="t">Governance</span><span class="sub">under every stage</span><span class="cv" aria-hidden="true">⌄</span></label>
+      <div class="summary"><span class="chip"><span class="dot ok"></span>fail-closed ACL</span><span class="chip">audit log</span><span class="chip">personal creds</span><span class="chip">tenant isolation</span><span class="chip">data-trust</span></div>
+      <div class="detail">
+        <p>Access control isn't a stage — it's the ground the plane rests on. Every query uses the <em>same</em> predicate; an unstamped doc is owner-only, so a bug fails closed. Every tool and model call is a logged row.</p>
+        <div class="chips"><span class="chip">visibleSql · ingested_by / acl_groups</span><span class="chip">tool audit · llm_calls</span><span class="chip">eil audit --strict · integrity + drift</span><span class="chip">per-tenant</span></div>
+      </div>
+    </section>
+
   </div>
 
   <div class="legend">
     <div class="grp">
       <h4>Signal</h4>
       <div class="li"><span class="dot lex"></span><b>Lexical</b> — full-text, exact terms</div>
-      <div class="li"><span class="dot vec"></span><b>Semantic</b> — meaning, vendored local model</div>
+      <div class="li"><span class="dot vec"></span><b>Semantic</b> — meaning, local model</div>
       <div class="li"><span class="dot" style="background:var(--fuse);box-shadow:0 0 8px var(--fuse)"></span><b>Fused</b> — reciprocal-rank fusion</div>
     </div>
     <div class="grp">
       <h4>Guarantees</h4>
-      <div class="li">Fail-closed ACL on every read path</div>
+      <div class="li">Fail-closed ACL, everywhere</div>
       <div class="li">Deterministic — no LLM in the hot loop</div>
-      <div class="li">Incremental — cursors, hash-gated, tombstoned</div>
+      <div class="li">Incremental · hash-gated · tombstoned</div>
     </div>
     <div class="grp">
       <h4>Runs on</h4>
-      <div class="li">PGlite (zero-install) · embedded PG</div>
-      <div class="li">system Postgres · org DSN · kube</div>
+      <div class="li">PGlite · embedded PG · system PG</div>
+      <div class="li">org DSN · kube</div>
       <div class="li">macOS · Linux · WSL2 — no Docker</div>
     </div>
   </div>
 
   <div class="foot">
     <span>Enterprise Intelligence Layer — the knowledge plane</span>
-    <span><code>sources → ingest → index → search → serve</code></span>
+    <span><code>sources → … → agents ↻</code></span>
   </div>
 </div>
 
