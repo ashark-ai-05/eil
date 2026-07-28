@@ -15,18 +15,32 @@ Fixed by the product, not negotiable inside this spec:
 | Constraint | Consequence |
 |---|---|
 | Target 1M–20M chunks, org-wide, single deployment | The linear vector scan must go. Everything is sized against 20M. |
-| **No Postgres extensions** | No pgvector, no pg_search, no pg_trgm. Every mechanism below is stock SQL. |
+| **No Postgres extensions** (policy, see below) | Every mechanism below is stock SQL. Extensions may be used opportunistically, never required. |
 | Deterministic and auditable | Same query + same corpus ⇒ same order, including ties. No LLM in the query path. |
 | Cost minimal | Local models only. No per-query API spend. Re-embedding is the dominant recurring cost and must be avoided, not optimised. |
 | Runs on a laptop (PGlite) and on a server | Two backends, one code path. Nothing may require a server process. |
 
-**pgvector is now installable on PGlite** (`@electric-sql/pglite-pgvector` ships
-0.8.1), so the zero-install premise is weaker than when the no-extension rule was
-set. It does not change the decision: inside PGlite, native `bit_count` beats
-pgvector's own operator because the WASM build has no SIMD, and integer Hamming
-is bit-for-bit reproducible where float dot products are subject to SIMD
-reassociation. pgvector becomes an *opportunistic* index — detected at startup,
-never required. `pg_trgm` is genuinely unavailable on PGlite (verified).
+**The "no extensions" rule is a deployment-symmetry policy, not a technical
+limit, and it should be held deliberately rather than inherited.** Two verified
+corrections to the premise it was set under:
+
+- **pgvector is installable on PGlite** (`@electric-sql/pglite-pgvector`, 0.8.1).
+- **`pg_trgm` is too** — via `@electric-sql/pglite/contrib/pg_trgm` plus
+  **constructor registration**, not a migration. Measured:
+  `CREATE EXTENSION pg_trgm` fails on the default bundle (which is what an
+  earlier draft of this spec tested and wrongly concluded from), but with the
+  contrib import it succeeds, `similarity('retryHandler','handler') = 0.4`, and
+  a `gin_trgm_ops` index builds. PGlite ships 33 contrib extensions.
+
+Neither changes the decision, for reasons that are about *properties*, not
+availability. Inside PGlite, native `bit_count` beats pgvector's own operator
+because the WASM build has no SIMD, and integer Hamming is bit-for-bit
+reproducible where float dot products are subject to SIMD reassociation — which
+matters for the determinism contract. And §6.2's subtoken index makes `handler`
+a first-class indexed token of `retryHandler` rather than a substring of it, so
+trigram search is only needed for genuinely mid-token fragments (`etryHand`),
+which agents essentially never issue. Extensions stay **opportunistic** —
+detected at startup, never required.
 
 ---
 
@@ -100,19 +114,30 @@ result moving from rank 1 to rank 10.
 ## 3. Grounding in existing systems
 
 Rather than invent, each decision is anchored to a system that already works.
-Research on Onyx, Zoekt/tree-sitter, and OpenFGA/OpenTelemetry is still in
-flight; those sections will be revised before implementation.
+
+**The strongest external result: ONYX — the leading open-source enterprise RAG
+platform — deleted cross-encoder reranking from its retrieval path entirely
+(Alembic `78ebc66946a0`, 2026-01-28) and runs no LLM in the query path.** Its
+live pipeline is build-ACL-filters → strip-stopwords → one hybrid call →
+post-query censoring. EIL's determinism thesis is not a compromise; it is where
+the leading platform independently converged. Two further validations: ONYX
+needs `normalize_linear` in Vespa plus a whole normalization pipeline in
+OpenSearch to make score fusion work at all, a problem EIL's rank-based RRF
+cannot have; and EIL's `embed_model`-stamped self-healing model switch replaces
+ONYX's five-table `PRESENT`/`FUTURE` two-index swap protocol.
 
 | Reference | What we take | What we reject |
 |---|---|---|
-| **Zoekt** | Its *ranking model* — symbol match, word-boundary, filename match, term count — which is portable even though its trigram index is not. Symbol extraction at index time. | The trigram index itself. `pg_trgm` is unavailable on PGlite and cannot represent `->`, `::`, `=>` anyway. |
-| **Tree-sitter** | `tags.scm` symbol extraction for a definition index, and AST boundaries for *stable chunk identity*. | AST chunking **for accuracy** — measured a statistical tie with sliding windows, and function-level chunking was the worst of four strategies. |
+| **Zoekt** | Its *ranking model*, with the actual constants (§6.2): symbol/basename 7000 exact / 4000 partial, word-boundary 500/50, symbol-kind 100×factor, atom bonus `(1−1/n)×400`, composed by **MAX not SUM**. Symbol extraction at index time. | The positional trigram index (3.5× corpus, needs app-side candidate verification). Also its `repoRank`/`docOrder` tiebreakers — at ×100/×10 against a ×10⁷ main score they are provably incapable of changing any decision. |
+| **Onyx** | Two-gate dedup (timestamp before hash), 30-min poll overlap, `SlimConnector` as a first-class id-listing contract, ACL namespace prefixing, sticky `in_repeated_error_state`, `should_index()` as a pure predicate, ±1 neighbour chunk expansion, document sets as collections of *connectors*. | Celery + Redis + 8 worker pools; contextual RAG (LLM in the index path, off by default even there); score-based fusion; ACL denormalized to a second store. |
+| **Tree-sitter** | `tags.scm` `@definition.*`/`@name` convention via **web-tree-sitter** (zero deps, pure WASM, offline once vendored), with the 7 grammars `detectLanguage()` already claims. | AST chunking **for accuracy** — a statistical tie with sliding windows, and function-level chunking was worst of four. Native bindings (node-gyp toolchain). `tree-sitter-wasms` (51.8 MB). `@reference.*` tags — 10–50× the volume of definitions at near-zero precision. |
 | **SCIP / LSIF / stack-graphs** | — | All of it. Compiler-coupled, minutes-to-hours per repo. The measured agent gains attributed to symbol graphs come from compiler-free tree-sitter graphs at ~1/35th the cost. |
-| **OpenFGA / Zanzibar** | The relation-tuple *model*, materialized locally into `acl_groups` at ingest. Zanzibar itself recommends denormalizing ACLs into the search index for exactly this filtering problem — EIL's existing pattern is right. | Running an OpenFGA server. |
+| **OpenFGA / Zanzibar** | The relation-tuple *model*, materialized locally (§4.5). EIL's denormalized-ACL-in-index approach is literally OpenFGA's documented recommendation for search at scale — confirmed, keep it. | Running a server; zookies/ZedTokens (they solve snapshot skew between two stores; EIL has one and writes ACL+body in one transaction); per-result Check; ListObjects (documented small-collection-only). |
 | **Temporal** | Retry semantics: per-step retry policy, heartbeat-as-cursor-progress, and full-jitter backoff. | The server. It is mandatory, shard count is fixed at build time and unchangeable, and self-hosting is a documented biweekly-upgrade treadmill with no version skipping. That conflicts head-on with "runs on a laptop, no Docker." |
 | **LangGraph** | Nothing for this spec. | As a durability layer: its own docs state nodes re-execute from the top on resume, "including any LLM calls, API requests, or interrupts," with no retry policy, no rate limiting, and checkpoints that accumulate with no GC. It is an agent-reasoning library, not a durable runtime. |
 | **DBOS Transact** | The shape we imitate: durable steps checkpointed into *your own* Postgres, library-only, no separate server. | Taking the dependency now — a job table gets us the same guarantees for this workload. |
 | **Langfuse / Phoenix** | Later, for the agentic layer. | As the home for *retrieval* evaluation. EIL's retrieval path has no LLM in it; an LLM-tracing tool is the wrong shape for recall@k over a labeled set. |
+| **OpenTelemetry** | Traces only, for causality and cross-process agent context (§4.7). | OTel metrics as the metrics system. Prometheus's own docs disqualify it for per-request billing, which is what `usage_facts` is. |
 | **pgvector** | Its column types as the migration target, so `bit(N)` + `float4[]` map cleanly later. | As a requirement. Opportunistic only. |
 
 ---
@@ -181,11 +206,104 @@ CREATE INDEX documents_acl_groups_idx ON documents USING gin (acl_groups);
 CREATE INDEX audit_log_at_idx ON audit_log (at);
 ```
 
-The `?|` ACL predicate is currently unindexable, forcing a second full scan on
-every vector query. `audit_log` — the highest-volume table — has no index on
-`at` while every metrics view groups by `date_trunc('day', at)`.
+`audit_log` — the highest-volume table — has no index on `at` while every
+metrics view groups by `date_trunc('day', at)`.
 
-### 4.5 Instrumentation
+Two notes on the ACL index, because both are easy to get wrong:
+
+**The GIN index must use the default `jsonb_ops` opclass.** `jsonb_path_ops`
+supports only `@>`, `@?` and `@@` — it does **not** support the `?|` existence
+operator, and Postgres will silently decline to use it. The statement above is
+correct as written; do not "optimize" the opclass.
+
+**Adding the index is not enough on its own.** The predicate is
+`d.ingested_by = $1 OR d.acl_groups ?| $2::text[]`, and that `OR` across two
+different columns defeats the GIN index regardless. The fix is to fold the owner
+into the array as a `user:<principal>` token at materialization time, so the
+whole check becomes one indexable operation:
+
+```sql
+(d.acl_groups ?| $1::text[] AND d.tenant = $2 AND d.tombstoned_at IS NULL)
+```
+
+Worth benchmarking `text[]` + `&&` (GIN `array_ops`) against `jsonb` + `?|`
+while making this change — smaller index, cheaper decode, identical semantics.
+
+### 4.5 Authorization: local relation tuples
+
+EIL's denormalized-ACL-in-the-index approach is **not a shortcut** — it is
+precisely what OpenFGA documents as its recommended pattern for search at scale
+("build a local index from `/changes`"), and Zanzibar's own paper describes the
+`Expand` API as existing so clients can "build efficient search indices for
+access-controlled content." Per-result `Check` and `ListObjects` are both
+documented as small-collection-only. **Keep the pattern.**
+
+What the current *flat array* cannot express, in severity order:
+
+1. **Union-only algebra.** `?|` is an OR. But every real connector model is
+   `container_grant AND doc_restriction` — Confluence needs space-View **and**
+   passing the nearest page restriction; Jira needs BROWSE_PROJECTS **and**
+   membership of the issue security level. An intersection of two group sets is
+   not representable as a set of group tokens unless one is a subset of the
+   other. Getting this wrong is a security bug, not a performance bug.
+2. **Nested groups.** `?|` is a flat set intersection, so it works only if the
+   viewer's token already carries the transitive closure. GitHub teams nest and
+   inherit downward, so this is not hypothetical.
+3. **Container inheritance.** Nothing walks space → page or project → issue.
+4. **No "why can I see this?"** — no `Expand` equivalent, so grants are unauditable.
+
+The fix is the Zanzibar *model* materialized locally — no server:
+
+```sql
+CREATE TABLE acl_tuples (            -- object#relation@subject
+  tenant text NOT NULL,
+  object text NOT NULL,              -- 'space:ENG' | 'repo:acme/eil' | 'doc:...'
+  relation text NOT NULL,            -- 'viewer' | 'member' | 'parent' | 'restricted_read'
+  subject text NOT NULL,             -- 'user:alice' | 'idp:eng' | 'group:acme/eng#member'
+  source text NOT NULL,              -- asserting connector, for scoped invalidation
+  observed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant, object, relation, subject)
+);
+CREATE TABLE acl_revocations (       -- push-based, fail-closed before the next sync
+  tenant text NOT NULL, subject text NOT NULL, object text NOT NULL,
+  at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant, subject, object)
+);
+```
+
+Two recursive CTEs (`acl_group_closure` over `member`, `acl_ancestors` over
+`parent`, both `UNION` not `UNION ALL` so real AD membership cycles terminate)
+feed a materializer that stamps `acl_groups` inside the existing upsert
+transaction. Group grain by default; expand to `user:` grain **only** where an
+intersection forces it, and fail closed when an intersection cannot be reduced —
+otherwise a restricted page in a 5,000-member space becomes 5,000 array entries.
+
+**Namespace group tokens.** EIL has no namespace discipline today, so a
+Confluence group named `eng` and a Jira group named `eng` collide silently.
+Onyx prefixes everything: `user_email:`, `group:`, `external_group:<source>_<name>`,
+`PUBLIC`. Adopt the same. Also adopt its *active* demotion path: a document that
+a permission sweep can no longer see becomes **private**, not deleted — the
+reason may be "you lost access" rather than "it's gone," and that is recoverable.
+EIL reaches owner-only today by never having stamped, which is the same end state
+arrived at passively; the sweep should be able to demote deliberately.
+
+**Scope discipline:** use each provider's *effective permissions* endpoint where
+one exists (GitHub `/collaborators?affiliation=all`, Bitbucket effective
+permissions) — they collapse inheritance for you. Reserve the tuple graph for the
+two connectors that genuinely need AND-semantics: Confluence (space × page
+restriction) and Jira (project browse × security level). Note Jira's Reporter /
+Assignee / Project-Lead grants are *per-issue dynamic subjects*, so a
+reassignment is an ACL change.
+
+**Zookies are the wrong tool here and we skip them.** They solve snapshot skew
+between a separate ACL store and a content store. EIL writes the ACL stamp and
+the body in one transaction to one database, so that race does not exist. EIL's
+real staleness is *connector lag* — Confluence changed, EIL hasn't polled — which
+a consistency token cannot help with. `acl_revocations` is the correct
+substitute: revocation is a push that fails closed immediately, re-grant may be
+lazy.
+
+### 4.6 Instrumentation
 
 ```sql
 ALTER TABLE audit_log
@@ -206,7 +324,78 @@ runs after the handler, so **only successes are ever recorded**, and an ACL
 denial is indistinguishable from a zero-result search, polluting the one metric
 the design calls the adoption killer.
 
-### 4.6 Evaluation and feedback
+Add `span_id text` alongside `trace_id`, and the same pair on `llm_calls`. That
+column pair is the join key between the fact tables and traces (§4.7).
+
+### 4.7 Telemetry: keep the facts, add the traces
+
+**Adopt OpenTelemetry traces. Keep the SQL-views-over-facts design unchanged.
+Skip OTel metrics entirely.** These are complementary and the failure mode would
+be letting either impersonate the other.
+
+The existing principle — "metrics are SQL views over facts, not a dashboard's
+interpretation" — is not merely defensible, it is backed by Prometheus's own
+documentation: *"If you need 100% accuracy, such as for per-request billing,
+Prometheus is not a good choice."* `metrics.usage_facts` **is** per-request
+billing. Traces are lossy by design too: head sampling cannot guarantee capture.
+So anything that must be complete — every read for compliance, every token for
+cost — stays in Postgres, unsampled.
+
+But tables cannot express causality. `audit_log` can say a search took 900 ms;
+it cannot say 700 ms of that was the vector arm's sequential scan because the
+ACL predicate wasn't index-usable. That is what spans are for, and it is exactly
+the current blind spot.
+
+| Question | Home |
+|---|---|
+| Who read what, when, which tenant | `audit_log` — never sampled |
+| What did it cost | `llm_calls`, `usage_facts` |
+| recall@10 over the labeled set | `metrics.eval_runs` — a corpus property, no span to hang it on |
+| p95 latency by route | `audit_log.duration_ms` + a SQL view — exact, whole population |
+| **Why** was *this* search slow | **spans** |
+| Where did the agent's request originate | **spans**, via MCP context propagation |
+
+Join direction: one `SERVER` span per MCP tool call; write its `trace_id`/`span_id`
+into the audit row in the same transaction. Grafana already provisions a Postgres
+datasource — add a Tempo datasource and a data link on `audit_log.trace_id`. The
+sampling asymmetry is a feature: 100% of calls in the table, `trace_id` populated
+for the sampled subset.
+
+Conventions, with two currency warnings: the **GenAI semantic conventions moved
+out of the main semconv repo** into `semantic-conventions-genai`, and everything
+in it is `Development` stability — so wrap attribute names in a thin local
+constants module. There *are* applicable conventions:
+`gen_ai.operation.name = retrieval` with `gen_ai.data_source.id` (the natural
+per-arm hook), `embeddings`, `execute_tool`, plus MCP's `mcp.method.name`,
+`mcp.session.id`, and `network.transport = "pipe"` for stdio. MCP propagates
+trace context through `params._meta`, which is what lets an agent's trace
+continue *into* EIL — the single most valuable thing tracing buys here.
+
+Three hard constraints, all specific to EIL's process shape:
+
+1. **A stdio MCP server must never write telemetry to stdout.** `ConsoleSpanExporter`,
+   a stray `console.log`, or the OTel diag logger's default sink all corrupt the
+   JSON-RPC framing on fd 1 and hang the client. **Land this as a test before any
+   other OTel work.**
+2. **`BatchSpanProcessor` drops spans when a CLI exits.** Use `SimpleSpanProcessor`
+   or an exit hook that awaits `sdk.shutdown()`.
+3. **Off by default, zero cost when disabled.** App code imports
+   `@opentelemetry/api` only (no-op singletons when no SDK is registered); the SDK
+   lives in `optionalDependencies` behind a guarded `await import()`, so a CLI
+   invocation never pays tens of MB of module-graph evaluation. This is what
+   protects "runs on a laptop, no Docker."
+
+Rejected: the Prometheus pull exporter (a short-lived CLI and a per-client stdio
+spawn present no stable scrape target, and concurrent servers would fight over
+the port); OTel metrics as EIL's metrics system (Grafana already reads Postgres —
+a second, sampled, less accurate path buys nothing); deriving `audit_log` from
+spans or OTel logs (an audit trail that can drop records is not an audit trail);
+and double-writing any number to both a fact table and an OTel metric — they will
+diverge on different flush timing and you will spend an afternoon reconciling
+them. Leave `enhancedDatabaseReporting` **off** in `instrumentation-pg`: it
+attaches query parameters, which here are viewer principals and group lists.
+
+### 4.8 Evaluation and feedback
 
 ```sql
 CREATE TABLE eval_queries (
@@ -236,7 +425,7 @@ CREATE TABLE retrieval_events (      -- implicit relevance + future learning sig
 Qrels key on `documents.id`, never on chunk offset. Labeling at chunk granularity
 is the standard way people destroy an eval set the first time they re-chunk.
 
-### 4.7 Migration safety
+### 4.9 Migration safety
 
 Migration 0009 is the cautionary example: a full `chunks` rewrite plus a PK swap
 plus an immediately-validated FK, all inside one transaction, holding
@@ -264,6 +453,23 @@ Rules for everything in this spec:
 | Cursor-safe generator errors | The `try/catch` wraps only `upsertDocument`; an HTTP error inside the generator escapes the `for await` and skips `setCursor` entirely, discarding all progress. |
 | Retry with full-jitter backoff | `sleep = random(0, min(cap, base·2^attempt))`, base 1 s, cap 60 s (AWS Brooker). Nothing anywhere retries today, so one 429 aborts a sync — and combined with the cursor loss above, produces an unbreakable livelock. |
 | Per-chunk embed reuse | `upsertInTx` deletes and re-inserts every chunk on any edit, so a one-character typo fix re-embeds a 100-chunk runbook. `chunks.content_hash` is already computed and never used as a reuse gate. **This is the single largest recurring cost in the system.** |
+| Timestamp gate **in front of** the hash gate | EIL hashes every body on every re-sync even when the source already said nothing changed. Onyx's two-gate order is strictly cheaper. Keep the hash as fallback for sources with unreliable `updated_at`, and copy the ordering rule: when the timestamp *advanced*, an equal hash must not veto the update. |
+| 30-minute poll overlap (`window_start = last_end - 30min`) | The cursor is exact-boundary today. A source writing second-granularity `updated` values that commit out of order **will** drop documents. Free, because ingestion is hash-gated — re-seen docs are no-ops. Also: when the previous attempt failed mid-stream, reuse its window rather than advancing, or newly created entities are skipped. |
+
+**A live snippet bug.** `ts/core/chunker.ts` writes `text = headingPath + "\n\n" + piece`,
+and both snippet paths read that same column — `ts_headline(...)` over `text`, and
+`String(row.text).slice(0, 240)` in `vecArm`. So every snippet spends its opening
+characters on the breadcrumb. Measured on the shallow test fixture: **9–16% of the
+240-char vector snippet**, and a real Confluence hierarchy
+(`Space > Team > Runbooks > Payments > Retry`) is far worse. Onyx solves this by
+building the enriched string at embed time and stripping it before returning
+chunks. Either store `text` clean and enrich on the way into `tsv`/the embedder,
+or strip the known prefix on read.
+
+Related, from the same source: give the prefix a **budget with a content floor**.
+Onyx drops the metadata suffix when it exceeds 25% of the chunk, then drops
+contextual text, then drops the title — content always wins the last cascade.
+EIL prepends unconditionally inside the same `MAX_CHARS`, with no floor.
 
 ### 5.2 Throughput
 
@@ -278,7 +484,39 @@ Rules for everything in this spec:
 - **Default repo excludes** — lockfiles, `dist/`, minified, vendored,
   generated protobufs. `RepoFilter` starts empty today.
 
-### 5.3 Durable execution — job table, not Temporal
+### 5.3 `sync_state`: the table that unlocks scheduling
+
+`sync_cursors (tenant, source, cursor)` is doing the work of Onyx's whole
+connector-credential-pair with one text column, and `cursorKey()` already
+overloads `source` with the scope selector. Promote it:
+
+```sql
+CREATE TABLE sync_state (
+  tenant text NOT NULL, source text NOT NULL, scope text NOT NULL DEFAULT '',
+  cursor text, checkpoint jsonb,             -- typed, resumable mid-entity
+  refresh_freq interval, prune_freq interval,
+  last_success_at timestamptz,               -- distinct from updated_at (see below)
+  last_attempt_at timestamptz, last_pruned_at timestamptz,
+  consecutive_failures int NOT NULL DEFAULT 0,
+  in_repeated_error_state boolean NOT NULL DEFAULT false,
+  PRIMARY KEY (tenant, source, scope)
+);
+```
+
+`last_success_at` separate from `updated_at` is what fixes the stale-cursor alert
+that is currently defeated by the rot it detects — `setCursor` refreshes
+`updated_at` unconditionally, so a connector failing *every* document holds its
+cursor value (correct) while resetting its freshness clock to zero (wrong).
+
+`should_index()` becomes a pure predicate over this row — testable with no
+scheduler. And `in_repeated_error_state` must be **sticky**: not re-evaluated
+while set, so a user's manual retry isn't instantly re-paused. That
+counter-intuitive detail is the half people miss.
+
+Also persist per-item failures rather than printing them: you cannot build a
+repair pass over console output.
+
+### 5.4 Durable execution — job table, not Temporal
 
 A Postgres job table gives the guarantees this workload needs without a server:
 
@@ -306,7 +544,7 @@ self-hosting "significant engineering and ongoing effort." Temporal Cloud has no
 free tier ($100/month floor). Every one of those conflicts with "runs on a
 laptop, no Docker." Revisit if ingestion outgrows a single worker.
 
-### 5.4 Secrets — needs your decision
+### 5.5 Secrets — needs your decision
 
 There is **no scanning, redaction, or entropy check anywhere** in the ingest
 path. Every `.env.example`, committed `.pem`, hardcoded key, and Confluence page
@@ -315,7 +553,7 @@ served to agents through `get_doc`. Given that EIL's entire premise is feeding
 org knowledge to LLMs, this needs an explicit decision, not a default. Options
 are redact-at-ingest, detect-and-quarantine, both, or accepted-and-documented.
 
-### 5.5 Extraction gaps (ordered by retrieval value)
+### 5.6 Extraction gaps (ordered by retrieval value)
 
 1. **Git history** — commit messages are where the Jira-key↔code link physically
    lives, and `normalizeCode` hardcodes `links: []`, so that edge can never form.
@@ -354,15 +592,91 @@ not done, so a title term counts exactly as much as one buried in body prose.
 And fix the negation guard, which currently disables the loose fallback for the
 whole query, reintroducing the zero-result bug it was added to fix.
 
-### 6.2 Code: identifier tokenization and real executors
+### 6.2 Code: tokenization and a real scorer
 
-A `simple`-config `tsv_code` fed by camelCase/snake_case/path splitting, so
-`retryHandler` indexes as `retryhandler` + `retry` + `handler`. Zoekt-style
-weighting: A = symbol name, B = path and subtokens, C = content.
+Two independent defects. `ts/code-search.ts:47` matches with `ci.value = $4` —
+a single exact equality, so `handler` cannot find `retryHandler`. And
+`ts/code-search.ts:68` orders by `ci.path, ci.line_start, …` — **there is no
+ranking at all; results come back alphabetically by path.**
 
-This gives the `symbol`/`path`/`exact` routes something real to execute against.
-The `code_index` table added by ash-72 provides exact-identifier lookup but no
-tokenization at all, so it answers `retryHandler` and not `handler`.
+**One tokenizer, called at index time and query time.** Asymmetry between the two
+is the classic silent failure here, so this must be a single exported function
+with a test asserting symmetry:
+
+```ts
+const ACRO  = /(?<=[A-Z]{2})(?=[A-Z][a-z])/;   // HTTPResponse -> HTTP|Response
+const CAMEL = /(?<=[a-z0-9])(?=[A-Z])/;        // retryHandler -> retry|Handler
+const DIGIT = /(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])/;
+// hard-split on non-alphanumerics, then ACRO, then CAMEL; digit splits are
+// ADDITIVE (sha256Hash -> sha256, sha, 256, hash), lowercase, drop len < 2.
+```
+
+Requiring **two** uppercase before an acronym break is what makes this correct
+where Lucene's `WordDelimiterGraphFilter` is not — Lucene yields `HTTPResponse`
+as one token and splits `OAuth2Client` into `O|Auth2|Client`. Verified outputs:
+`parseHTTPResponse → [parse,http,response]`, `IOError → [io,error]`,
+`getURLFromID → [get,url,from,id]`, `MAX_RETRY_COUNT → [max,retry,count]`.
+
+**Paths expand to every suffix**, which is what makes `scheduler.py` find
+`src/retry/scheduler.py`: full path ∪ every suffix ∪ every segment ∪ basename ∪
+basename-sans-extension ∪ subtokens.
+
+Store the emitting rule as `match_class ∈ {exact, subtoken, path_suffix,
+path_segment}` — that column is how we recover Zoekt's exact-vs-partial
+distinction without a trigram index.
+
+**Zoekt's scorer, in SQL.** The critical property is that it composes by **MAX
+over matches, never SUM** — otherwise a file mentioning `handler` forty times in
+comments beats the one file that defines `retryHandler`:
+
+```sql
+SELECT ci.doc_id,
+       MAX( CASE ci.match_class WHEN 'exact' THEN 7000 WHEN 'path_suffix' THEN 7000
+                                ELSE 4000 END
+          + CASE WHEN ci.match_class = 'exact' THEN 500 ELSE 50 END
+          + 100 * COALESCE(k.factor, 1) )
+     + (1 - 1.0 / COUNT(DISTINCT ci.matched_term)) * 400 AS score
+  FROM code_index ci
+  LEFT JOIN symbol_kind_factor k ON k.kind = ci.symbol_kind
+ WHERE ci.tenant = $1 AND ci.value = ANY($2::text[])
+ GROUP BY ci.doc_id
+ ORDER BY score DESC, ci.path, ci.line_start, ci.doc_id
+```
+
+`symbol_kind_factor` is a 12-row table transcribing Zoekt's factors (Class 10,
+Struct 9.5, Interface/Type 8, Function/Method 7, Constant 5, Variable 4, else 1).
+The existing `code_index_lookup_idx (tenant, value, kind, …)` already serves
+`= ANY(...)` as index probes, so the match needs no new index. Zoekt's
+`ScoreOffset`/`repoRank` arithmetic exists only to stop tiebreakers perturbing
+the main score; a multi-column `ORDER BY` gives that for free.
+
+**Do not apply IDF/BM25 to the code arm.** Zoekt shipped it, made it opt-in, and
+documents why: *"idf can down-weight the score of some keywords too much,
+leading to a worse ranking"* for keyword-style queries. BM25 (§6.1) is for the
+**prose** arm; code gets the constant model. These are different problems.
+
+**`simple` instead of `english` for `tsv_code`** — a one-word change that stops
+stemming `retryHandler → retryhandl` and stops deleting `if`, `for`, `do`, `no`,
+`on`, `is`, `t`, `s`, all of which are real code tokens. Verified.
+
+**Prefix and suffix without trigrams**, both verified index-backed on PGlite:
+`btree (value text_pattern_ops)` for `value LIKE 'sched%'`, and
+`btree (reverse(value) text_pattern_ops)` for suffix matching. `reverse()` is a
+core builtin. Only true mid-token infix remains uncovered.
+
+**Symbol extraction** via web-tree-sitter (zero dependencies, pure WASM, offline
+once the `.wasm` files are vendored) using the `@definition.*` / `@name`
+convention. Two traps: only 14 tree-sitter repos ship a `tags.scm` at all, and
+**`tree-sitter-typescript`'s is a supplement** — it has no `function_declaration`
+or `class_declaration`, which live in the JavaScript grammar. Concatenate JS+TS
+or silently miss most TypeScript symbols. `#strip!` and `#select-adjacent!` are
+directives of the Rust `tree-sitter-tags` crate, not the query engine, so they
+must be dropped or hand-implemented.
+
+**Stop indexing whole lines.** `ts/ingest/codeindex.ts` adds an `export` entry
+whose value is the entire trimmed source line, and a `literal` for every quoted
+run ≥2 chars. Nobody queries an exact trimmed source line, so those rows are
+pure weight — and they are what drove the 23.4% btree-key-limit failure rate.
 
 ### 6.3 Vector: the funnel
 
@@ -385,6 +699,19 @@ projecting to ~200 ms on PGlite and ~70 ms native.
 - **Rebalance the tier/recency modifier** so a metadata prior cannot outrank
   relevance evidence — currently 2.4× against RRF's 1.6%/rank.
 - **Near-duplicate suppression** at cosine > 0.95.
+- **A `strict + phrase` prose arm.** `websearch_to_tsquery` already emits `<->`
+  for quoted input and the loose rewrite preserves it (`<->` binds tighter than
+  `|`), but a phrase hit and a term hit currently land in the same arm at the
+  same weight. Onyx boosts phrase 1.5× over term 1.0×; EIL gets the equivalent
+  for free by adding a third list — same "appears in more lists ⇒ ranks higher"
+  trick already used for `strict_hit`, no tuned constant.
+- **A title arm at low weight.** The breadcrumb is currently *inside* chunk text,
+  so title terms score at full content weight — precisely the failure Onyx names
+  ("irrelevant titles normalized to a score of 1"). They weight title at 0.10.
+- **Widen the candidate pool.** `limit * 3` = 24 documents per arm at `limit=8`
+  is thin for RRF, which differentiates better on deep lists. Onyx retrieves
+  1000 before its final cut of 50. Use `max(50, limit*6)`; the cost is linear
+  and the cut already happens in Postgres.
 - Move to **convex combination** over RRF once ~40 labeled pairs exist; it beats
   RRF in- and out-of-domain in the reference work.
 
@@ -398,6 +725,10 @@ projecting to ~200 ms on PGlite and ~70 ms native.
 - **Structured filters** in the tool schema (source, repo, path, updated_after,
   tier). Every column exists; none is filterable. `docs/ingestion.md` already
   documents a `source:` filter that does not exist.
+- **±1 neighbour chunk on `get_doc`.** `(tenant, doc_id, seq)` is the chunk PK,
+  so fetching `seq±1` is one index lookup. This is what makes zero-overlap prose
+  chunking safe — Onyx recovers cross-boundary context at query time rather than
+  paying for overlap at index time.
 
 ### 6.6 Reranking — a seam, not a feature
 
@@ -521,5 +852,11 @@ Cliff's δ = −1.0) · SCIP/LSIF/stack-graphs · ColBERT as first stage · IVFF
    prerequisite for any multi-user deployment and is not scoped here.
 3. **Migration 0009's lock profile** — needs a staged rewrite before any large
    corpus is migrated.
-4. Grounding research on Onyx, Zoekt/tree-sitter and OpenFGA/OTel is in flight;
-   §3, §6.2 and §7 may be revised.
+4. **Is "no extensions" still the right policy?** §1 shows both pgvector and
+   pg_trgm are reachable on PGlite. The recommendation is to keep the policy —
+   determinism and deployment symmetry, not availability, are the reasons — but
+   it should now be an explicit decision rather than an inherited constraint.
+5. Chunk size: EIL's ~800-token chunks are ~1.6× Onyx's 512. Defensible for an
+   agent consumer (fewer, fatter results, fewer round trips) but it is a recall
+   tradeoff — one 800-token embedding is a blurrier centroid. Revisit once §8
+   can measure it.
