@@ -150,4 +150,18 @@ describe("GitCloneSource (real git)", () => {
     expect(changes["src/c.ts"]).toBe("A");
     await src.dispose();
   });
+
+  it("rejects ref/branch/subpath starting with '-' (argv-injection guard)", () => {
+    const guardCache = join(root, "guard-cache");
+    expect(
+      () => new GitCloneSource({ ref: "--upload-pack=x", branch: "main", cacheDir: guardCache }),
+    ).toThrow(/argv-injection|starting with '-'/);
+    expect(() => new GitCloneSource({ ref: origin, branch: "-x", cacheDir: guardCache })).toThrow(
+      /argv-injection|starting with '-'/,
+    );
+    expect(
+      () =>
+        new GitCloneSource({ ref: origin, branch: "main", subpath: "--foo", cacheDir: guardCache }),
+    ).toThrow(/argv-injection|starting with '-'/);
+  });
 });

@@ -27,6 +27,9 @@ export class GitCloneSource implements RepoSource {
   private readonly dir: string;
   private ready: Promise<void> | null = null;
   constructor(cfg: { ref: string; branch?: string; subpath?: string; cacheDir?: string }) {
+    GitCloneSource.assertNoArgvInjection("ref", cfg.ref);
+    if (cfg.branch !== undefined) GitCloneSource.assertNoArgvInjection("branch", cfg.branch);
+    if (cfg.subpath !== undefined) GitCloneSource.assertNoArgvInjection("subpath", cfg.subpath);
     this.ref = cfg.ref;
     this.branch = cfg.branch ?? "main";
     if (cfg.subpath) this.subpath = cfg.subpath;
@@ -35,6 +38,15 @@ export class GitCloneSource implements RepoSource {
     } else {
       const base = process.env.EIL_REPO_CACHE ?? ".eil-repos";
       this.dir = join(base, this.ref.replace(/[^\w.-]+/g, "_"));
+    }
+  }
+  /** Refuse values that could be interpreted by git as a flag instead of a
+   *  positional operand (argv flag-smuggling / argument injection guard). */
+  private static assertNoArgvInjection(field: string, value: string): void {
+    if (value.startsWith("-")) {
+      throw new Error(
+        `refusing repo ref/branch/subpath starting with '-' (argv-injection guard): ${field}=${value}`,
+      );
     }
   }
   private async git(args: string[]): Promise<string> {
@@ -53,6 +65,7 @@ export class GitCloneSource implements RepoSource {
               "--single-branch",
               "--branch",
               this.branch,
+              "--end-of-options",
               this.ref,
               this.dir,
             ],
@@ -76,10 +89,12 @@ export class GitCloneSource implements RepoSource {
     for (const line of out.split("\n")) if (line) yield line;
   }
   async *changedSince(sha: string): AsyncGenerator<RepoChange> {
+    GitCloneSource.assertNoArgvInjection("sha", sha);
     await this.ensure();
     const out = await this.git([
       "diff",
       "--name-status",
+      "--end-of-options",
       sha,
       "HEAD",
       ...(this.subpath ? ["--", this.subpath] : []),
