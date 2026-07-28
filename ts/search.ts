@@ -43,9 +43,15 @@ const OFF_LEAN_WEIGHT = 0.6;
 
 function armWeights(route: Route): Record<string, number> {
   const leansCode = CODE_LEANING_ROUTES.has(route);
+  const prose = leansCode ? OFF_LEAN_WEIGHT : 1.0;
+  const code = leansCode ? 1.0 : OFF_LEAN_WEIGHT;
+  // strict and loose share a class weight; precision comes from strict matches
+  // appearing in both lists rather than from weighting them differently.
   return {
-    fts_prose: leansCode ? OFF_LEAN_WEIGHT : 1.0,
-    fts_code: leansCode ? 1.0 : OFF_LEAN_WEIGHT,
+    fts_prose: prose,
+    fts_prose_loose: prose,
+    fts_code: code,
+    fts_code_loose: code,
     vec: 1.0,
   };
 }
@@ -106,19 +112,35 @@ export async function searchDocs(
   //              that is not enough, because ts_rank has no IDF and no tf
   //              saturation, but it is a real improvement WITHIN an arm.
   const res = await client.query(
-    `WITH m AS (
+    `WITH q AS (
+       SELECT websearch_to_tsquery('english', $1) AS strict
+     ), qq AS (
+       -- websearch_to_tsquery ANDs every content word, so recall collapses as a
+       -- question gets longer: "how does the payment retry backoff policy work"
+       -- became 'payment'&'retri'&'backoff'&'polici'&'work' and matched NOTHING
+       -- in a corpus containing a page titled "Payment Retry Policy".
+       -- The loose form ORs the same terms. Phrases survive because <-> binds
+       -- tighter than |, but NEGATION must never be relaxed: 'retri' | !'jira'
+       -- would match every document that simply lacks the word jira.
+       SELECT strict,
+              CASE WHEN strict::text LIKE '%!%' THEN strict
+                   ELSE replace(strict::text, '&', '|')::tsquery END AS loose
+         FROM q
+     ), m AS (
        SELECT c.doc_id, c.seq, c.text, d.source, d.title, d.url, d.quality_tier, d.updated_at,
-              ts_rank(c.tsv, websearch_to_tsquery('english', $1), 1) AS rank
-         FROM chunks c JOIN documents d ON d.id = c.doc_id
-        WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND ${visibleSql(4, 5, 6)}
+              ts_rank(c.tsv, qq.loose, 1) AS rank,
+              (c.tsv @@ qq.strict) AS strict_hit
+         FROM chunks c JOIN documents d ON d.id = c.doc_id CROSS JOIN qq
+        WHERE c.tsv @@ qq.loose AND ${visibleSql(4, 5, 6)}
      ), best AS (
-       SELECT DISTINCT ON (doc_id) * FROM m ORDER BY doc_id, rank DESC, seq
+       SELECT DISTINCT ON (doc_id) * FROM m ORDER BY doc_id, strict_hit DESC, rank DESC, seq
      ), quota AS (
-       SELECT *, ROW_NUMBER() OVER (PARTITION BY (source = 'code') ORDER BY rank DESC, doc_id) AS rn
+       SELECT *, ROW_NUMBER() OVER (
+                   PARTITION BY (source = 'code'), strict_hit ORDER BY rank DESC, doc_id) AS rn
          FROM best
      )
-     SELECT doc_id, source, title, url, quality_tier, updated_at,
-            ts_headline('english', text, websearch_to_tsquery('english', $1), $2) AS snippet
+     SELECT doc_id, source, strict_hit, title, url, quality_tier, updated_at,
+            ts_headline('english', text, (SELECT loose FROM qq), $2) AS snippet
        FROM quota
       WHERE rn <= $3
       ORDER BY rank DESC, doc_id`,
@@ -126,8 +148,13 @@ export async function searchDocs(
   );
 
   const byDoc = new Map<string, SearchResult & { updated: Date | null }>();
-  const prose: string[] = [];
-  const code: string[] = [];
+  // Four lexical lists: {prose, code} x {matched every term, matched any term}.
+  const lists: Record<string, string[]> = {
+    fts_prose: [],
+    fts_prose_loose: [],
+    fts_code: [],
+    fts_code_loose: [],
+  };
   for (const row of res.rows) {
     if (byDoc.has(row.doc_id)) continue;
     byDoc.set(row.doc_id, {
@@ -138,14 +165,18 @@ export async function searchDocs(
       snippet: row.snippet,
       updated: row.updated_at,
     });
-    (row.source === "code" ? code : prose).push(row.doc_id);
+    const cls = row.source === "code" ? "fts_code" : "fts_prose";
+    // A doc matching every term is deliberately placed in BOTH lists, so RRF
+    // counts it twice and it outranks partial matches without needing a tuned
+    // precision constant anywhere.
+    if (row.strict_hit) lists[cls]!.push(row.doc_id);
+    lists[`${cls}_loose`]!.push(row.doc_id);
   }
-  // Separate arms is the actual fix. RRF is rank-based, so an inflated ts_rank
-  // inside the code arm can only ever outrank OTHER CODE — it cannot evict
-  // prose from the result set, whatever the raw scores look like.
+  // Separate arms is the actual fix for code crowding. RRF is rank-based, so an
+  // inflated ts_rank inside a code arm can only ever outrank OTHER CODE — it
+  // cannot evict prose from the result set, whatever the raw scores look like.
   const arms: Record<string, string[]> = {};
-  if (prose.length > 0) arms.fts_prose = prose;
-  if (code.length > 0) arms.fts_code = code;
+  for (const [name, ids] of Object.entries(lists)) if (ids.length > 0) arms[name] = ids;
   try {
     const vec = await vecArm(client, viewer, query, limit, byDoc, embedder);
     if (vec && vec.length > 0) arms.vec = vec;

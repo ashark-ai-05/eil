@@ -109,6 +109,23 @@ beforeAll(async () => {
       "export function retryHandler(job) { return schedule(job); } // retryHandler entry point",
     ),
   );
+  // For the negation test: mentions retry but NOT backoff, so `retry -backoff`
+  // must still find it...
+  await upsertDocument(
+    client,
+    doc(
+      "jira:issue:CHK-9",
+      "jira",
+      "Checkout exhausted its retry budget",
+      "The checkout service used its whole retry budget during the incident window.",
+    ),
+  );
+  // ...while this one mentions neither term, and would be dragged in by a
+  // wrongly-relaxed 'retri' | !'backoff'.
+  await upsertDocument(
+    client,
+    doc("confluence:page:9", "confluence", "Office wifi guide", "How to join the guest network."),
+  );
 });
 
 afterAll(async () => {
@@ -125,7 +142,10 @@ describe("per-source arms", () => {
   it("keeps prose on top for a natural-language question, despite 12 code docs", async () => {
     const got = await ids("retry backoff");
     expect(got.length).toBeGreaterThan(0);
-    expect(got[0]).toBe("confluence:page:1");
+    // Assert the property, not a specific winner: both prose docs are squarely
+    // about retry/backoff and either is a fine #1. What must never happen again
+    // is a test file taking the top slot.
+    expect(got[0]!.startsWith("code:")).toBe(false);
   });
 
   it("never lets code evict prose from the result set", async () => {
@@ -143,6 +163,27 @@ describe("per-source arms", () => {
         ? Number.POSITIVE_INFINITY
         : got.indexOf("confluence:page:2"),
     );
+  });
+
+  it("still answers a long natural-language question", async () => {
+    // websearch_to_tsquery ANDs every content word, so recall used to collapse
+    // as a question got longer. Measured before the fix on a real corpus:
+    //   "retries"                                        -> 2 docs
+    //   "how do payment retries work"                    -> 1 doc
+    //   "how does the payment retry backoff policy work" -> 0 docs
+    // ...against a corpus that contains a page titled "Payment Retry Policy".
+    const got = await ids("how does the payment retry backoff policy work");
+    expect(got.length).toBeGreaterThan(0);
+    expect(got).toContain("confluence:page:1");
+  });
+
+  it("does not relax a negated term into an OR", async () => {
+    // 'retri' | !'jira' would match every document that merely lacks "jira",
+    // so a query carrying a negation must keep strict AND semantics.
+    const got = await ids("retry -backoff");
+    expect(got).toContain("jira:issue:CHK-9"); // retry, no backoff -> kept
+    expect(got).not.toContain("confluence:page:1"); // mentions backoff -> excluded
+    expect(got).not.toContain("confluence:page:9"); // mentions neither -> must NOT be dragged in
   });
 
   it("reports which arms actually ran", async () => {
