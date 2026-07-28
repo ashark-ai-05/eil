@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GitCloneSource } from "../connectors/reposource.js";
+import type { Fetcher } from "../connectors/auth.js";
+import { BitbucketApiSource, GitCloneSource } from "../connectors/reposource.js";
 import { chunk } from "../core/chunker.js";
 import { detectSource, normalizeCode, repoKey } from "../ingest/code.js";
 import { RepoFilter, globToRegExp } from "../ingest/repofilter.js";
@@ -163,5 +164,43 @@ describe("GitCloneSource (real git)", () => {
       () =>
         new GitCloneSource({ ref: origin, branch: "main", subpath: "--foo", cacheDir: guardCache }),
     ).toThrow(/argv-injection|starting with '-'/);
+  });
+});
+
+const json = (b: unknown) =>
+  new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+
+describe("BitbucketApiSource (mock)", () => {
+  it("resolves head, lists, diffs, reads, and links", async () => {
+    const calls: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes("/commits")) return json({ values: [{ id: "abc123" }] });
+      if (u.includes("/files")) return json({ values: ["src/a.ts", "src/b.ts"], isLastPage: true });
+      if (u.includes("/compare/changes"))
+        return json({
+          values: [
+            { path: { toString: "src/a.ts" }, type: "MODIFY" },
+            { path: { toString: "src/b.ts" }, type: "DELETE" },
+          ],
+          isLastPage: true,
+        });
+      if (u.includes("/raw/")) return new Response("file contents", { status: 200 });
+      return json({});
+    };
+    const s = new BitbucketApiSource(
+      { ref: "PAY/retry", branch: "main", baseUrl: "http://localhost:7990", token: "fake-token" },
+      fetcher,
+    );
+    expect(await s.headSha()).toBe("abc123");
+    const files = [];
+    for await (const p of s.listFiles()) files.push(p);
+    expect(files).toEqual(["src/a.ts", "src/b.ts"]);
+    const changes: Record<string, string> = {};
+    for await (const ch of s.changedSince("old")) changes[ch.path] = ch.status;
+    expect(changes).toEqual({ "src/a.ts": "M", "src/b.ts": "D" });
+    expect(await s.readFile("src/a.ts")).toBe("file contents");
+    expect(s.blobUrl("src/a.ts")).toContain("/projects/PAY/repos/retry/browse/src/a.ts");
   });
 });

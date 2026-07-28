@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { type DcClient, type Fetcher, getJson, makeClient } from "./auth.js";
 
 const run = promisify(execFile);
 
@@ -120,4 +121,89 @@ export class GitCloneSource implements RepoSource {
     return m ? `${this.ref.replace(/\.git$/, "")}/browse/${path}?at=${this.branch}` : null;
   }
   async dispose(): Promise<void> {} // persistent cache
+}
+
+export class BitbucketApiSource implements RepoSource {
+  private readonly client: DcClient;
+  private readonly project: string;
+  private readonly repo: string;
+  private readonly branch: string;
+  private readonly subpath: string;
+  private head: string | null = null;
+  constructor(
+    cfg: { ref: string; branch?: string; subpath?: string; baseUrl?: string; token?: string },
+    fetcher?: Fetcher,
+  ) {
+    const [project, repo] = cfg.ref.split("/");
+    this.project = project!;
+    this.repo = repo!;
+    this.branch = cfg.branch ?? "main";
+    this.subpath = cfg.subpath ?? "";
+    this.client = makeClient("BITBUCKET", cfg.baseUrl, cfg.token, fetcher);
+  }
+  private base(): string {
+    return `/rest/api/1.0/projects/${this.project}/repos/${this.repo}`;
+  }
+  async headSha(): Promise<string> {
+    const d = await getJson(this.client, `${this.base()}/commits`, {
+      until: this.branch,
+      limit: 1,
+    });
+    this.head = d.values?.[0]?.id ?? "";
+    return this.head!;
+  }
+  async *listFiles(): AsyncGenerator<string> {
+    const at = this.head ?? (await this.headSha());
+    let start = 0;
+    for (;;) {
+      const d = await getJson(this.client, `${this.base()}/files/${this.subpath}`, {
+        at,
+        start,
+        limit: 1000,
+      });
+      for (const p of d.values ?? [])
+        yield this.subpath ? `${this.subpath.replace(/\/$/, "")}/${p}` : p;
+      if (d.isLastPage !== false) return;
+      start = d.nextPageStart ?? start + (d.values?.length ?? 0);
+    }
+  }
+  async *changedSince(sha: string): AsyncGenerator<RepoChange> {
+    const to = this.head ?? (await this.headSha());
+    const map: Record<string, "A" | "M" | "D"> = {
+      ADD: "A",
+      MODIFY: "M",
+      DELETE: "D",
+      COPY: "A",
+      MOVE: "M",
+    };
+    let start = 0;
+    for (;;) {
+      const d = await getJson(this.client, `${this.base()}/compare/changes`, {
+        from: sha,
+        to,
+        start,
+        limit: 1000,
+      });
+      for (const c of d.values ?? []) {
+        const p = typeof c.path === "string" ? c.path : c.path?.toString;
+        const st = map[c.type as string];
+        if (p && st) yield { path: p, status: st };
+      }
+      if (d.isLastPage !== false) return;
+      start = d.nextPageStart ?? start + (d.values?.length ?? 0);
+    }
+  }
+  async readFile(path: string): Promise<string> {
+    const at = this.head ?? (await this.headSha());
+    const res = await this.client.fetcher(
+      new URL(`${this.client.baseUrl}${this.base()}/raw/${path}?at=${at}`),
+      { headers: this.client.headers },
+    );
+    if (!res.ok) throw new Error(`raw ${path} -> ${res.status}`);
+    return res.text();
+  }
+  blobUrl(path: string): string | null {
+    return `${this.client.baseUrl}${this.base()}/browse/${path}?at=${this.branch}`;
+  }
+  async dispose(): Promise<void> {}
 }
