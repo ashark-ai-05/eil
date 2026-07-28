@@ -47,6 +47,9 @@
   }
   .wrap { max-width: 1180px; margin: 0 auto; padding: clamp(20px, 4vw, 44px) clamp(16px, 4vw, 40px) 64px; }
 
+  /* hidden checkboxes drive the expand — pure CSS, no JS */
+  .toggle { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
   .mark { display: flex; align-items: center; gap: 13px; }
   .glyph { width: 34px; height: 34px; flex: none; }
@@ -70,28 +73,24 @@
   /* ---------- flow band ---------- */
   .flowscroll { overflow-x: auto; overflow-y: hidden; margin: 0 calc(-1 * clamp(16px, 4vw, 40px)); padding: 26px clamp(16px, 4vw, 40px) 18px; scrollbar-width: thin; }
   .flow { display: flex; align-items: stretch; min-width: 1080px; }
-  .stage { flex: 1 1 0; min-width: 190px; padding: 0 4px; transition: opacity .2s; }
-  .flow.has-active .stage:not(.active) { opacity: .55; }
+  .stage { flex: 1 1 0; min-width: 190px; padding: 0 4px; }
 
   .conn { flex: 0 0 30px; align-self: stretch; position: relative; }
   .conn svg { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); overflow: visible; }
   .conn .rail { stroke: var(--faint); stroke-width: 2; }
   .conn .head { stroke: var(--faint); stroke-width: 2; fill: none; }
 
-  /* stage header is the expander */
+  /* stage header is a <label> toggling a hidden checkbox */
   .stage-h {
-    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-    font-family: var(--mono); background: transparent; border: 1px solid transparent;
-    border-radius: 7px; padding: 5px 8px; margin-bottom: 5px; cursor: pointer; color: inherit;
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: transparent; border: 1px solid transparent; border-radius: 7px;
+    padding: 5px 8px; margin-bottom: 5px; cursor: pointer; user-select: none; color: inherit;
     transition: background .15s, border-color .15s;
   }
   .stage-h:hover { background: var(--panel); border-color: var(--line); }
-  .stage-h:focus-visible { outline: 2px solid var(--lex); outline-offset: 2px; }
   .stage-h .n { font-size: 11px; color: var(--faint); letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
   .stage-h .t { font-size: 12.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
   .stage-h .cv { margin-left: auto; color: var(--faint); font-size: 12px; transition: transform .2s, color .15s; }
-  .stage-h[aria-expanded="true"] .cv { transform: rotate(180deg); color: var(--lex); }
-  .stage-h[aria-expanded="true"] { background: var(--panel); border-color: var(--line); }
   .stage-sub { font-size: 11px; color: var(--muted); margin: 0 0 14px; padding: 0 10px; letter-spacing: 0; min-height: 30px; line-height: 1.4; }
 
   .node {
@@ -113,15 +112,37 @@
   .arm-key { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
   .arm-key span { font-size: 10.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; letter-spacing: 0; }
 
-  /* ---------- expandable layer-below drawer ---------- */
-  .drawer .layer { display: none; }
-  .drawer .layer.open { display: block; animation: reveal .28s ease both; }
-  @keyframes reveal { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  /* ---------- expandable layer-below drawer (pure CSS) ---------- */
   .layer {
+    display: none;
     background: var(--panel-2); border: 1px solid var(--line);
     border-radius: var(--r); padding: 16px 18px; margin-top: 4px; box-shadow: var(--shadow);
   }
-  .layer .lh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  #s1:checked ~ .drawer #layer-1,
+  #s2:checked ~ .drawer #layer-2,
+  #s3:checked ~ .drawer #layer-3,
+  #s4:checked ~ .drawer #layer-4,
+  #s5:checked ~ .drawer #layer-5 { display: block; animation: reveal .28s ease both; }
+  @keyframes reveal { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+  /* chevron + active header state, driven by :checked */
+  #s1:checked ~ .flowscroll [data-stage="1"] .cv,
+  #s2:checked ~ .flowscroll [data-stage="2"] .cv,
+  #s3:checked ~ .flowscroll [data-stage="3"] .cv,
+  #s4:checked ~ .flowscroll [data-stage="4"] .cv,
+  #s5:checked ~ .flowscroll [data-stage="5"] .cv { transform: rotate(180deg); color: var(--lex); }
+  #s1:checked ~ .flowscroll [data-stage="1"] .stage-h,
+  #s2:checked ~ .flowscroll [data-stage="2"] .stage-h,
+  #s3:checked ~ .flowscroll [data-stage="3"] .stage-h,
+  #s4:checked ~ .flowscroll [data-stage="4"] .stage-h,
+  #s5:checked ~ .flowscroll [data-stage="5"] .stage-h { background: var(--panel); border-color: var(--line); }
+  #s1:focus-visible ~ .flowscroll [data-stage="1"] .stage-h,
+  #s2:focus-visible ~ .flowscroll [data-stage="2"] .stage-h,
+  #s3:focus-visible ~ .flowscroll [data-stage="3"] .stage-h,
+  #s4:focus-visible ~ .flowscroll [data-stage="4"] .stage-h,
+  #s5:focus-visible ~ .flowscroll [data-stage="5"] .stage-h { outline: 2px solid var(--lex); outline-offset: 2px; }
+
+  .layer .lh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
   .layer .lh b { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
   .layer .lh i { font-style: normal; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
   .layer .lh .file { margin-left: auto; font-size: 11px; color: var(--faint); }
@@ -133,6 +154,7 @@
   .chip b { color: var(--text); font-weight: 600; }
   .chip.lex { border-color: color-mix(in oklab, var(--lex) 45%, var(--line)); }
   .chip.vec { border-color: color-mix(in oklab, var(--vec) 45%, var(--line)); }
+  .chip.ok  { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
 
   /* ---------- explanatory band ---------- */
   .read { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
@@ -154,21 +176,83 @@
   .foot { margin-top: 30px; font-size: 11.5px; color: var(--faint); letter-spacing: 0.02em; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .foot code { color: var(--muted); }
 
+  /* ---------- governance substrate ---------- */
+  .gov { margin: 10px 0 0; background: linear-gradient(180deg, var(--panel-2), transparent); border: 1px solid var(--line-soft); border-radius: var(--r); padding: 11px 14px; }
+  .gov-h { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; padding: 4px 6px; margin: -2px; border-radius: 6px; flex-wrap: wrap; }
+  .gov-h:hover { background: var(--panel); }
+  .gov-h .t { font-size: 11.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
+  .gov-h .s { font-size: 11.5px; color: var(--muted); letter-spacing: 0; }
+  .gov-h .cv { margin-left: auto; color: var(--faint); font-size: 12px; transition: transform .2s, color .15s; }
+  .gov-rail { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+  .gchip { font-size: 11.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 7px; letter-spacing: 0; }
+  .gchip b { color: var(--text); font-weight: 600; }
+  .gov-layer { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+  .gov-layer p { margin: 0 0 11px; font-size: 12.5px; color: var(--muted); line-height: 1.55; max-width: 82ch; }
+  .gov-layer p em { color: var(--text); font-style: normal; }
+
+  /* ---------- learning loop + agents + observability ---------- */
+  .loop { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
+  .loop h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .loop .cap { font-size: 12.5px; color: var(--muted); margin: 0 0 16px; max-width: 82ch; line-height: 1.55; }
+  .loop .cap b { color: var(--text); font-weight: 600; }
+  .loopscroll { overflow-x: auto; overflow-y: hidden; padding: 2px 2px 6px; }
+  .loop-flow { display: flex; align-items: stretch; min-width: 760px; }
+  .lnode { flex: 1 1 0; min-width: 156px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 13px; box-shadow: var(--shadow); }
+  .lnode.agent { border-color: color-mix(in oklab, var(--ok) 40%, var(--line)); }
+  .lnode.obs { cursor: pointer; user-select: none; }
+  .lnode.obs:hover { border-color: color-mix(in oklab, var(--text) 30%, var(--line)); }
+  .lnode .lt { font-size: 12.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
+  .lnode .lt .cv { margin-left: auto; color: var(--faint); font-size: 11px; transition: transform .2s, color .15s; }
+  .lnode .lm { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; letter-spacing: 0; }
+  .lnode .lm code { color: var(--faint); }
+  .lconn { flex: 0 0 26px; position: relative; }
+  .lconn svg { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); overflow: visible; }
+  .lconn .rail { stroke: var(--faint); stroke-width: 2; }
+  .lconn .head { stroke: var(--faint); stroke-width: 2; fill: none; }
+
+  .loop-return { position: relative; height: 46px; margin-top: 2px; }
+  .loop-return svg { width: 100%; height: 46px; overflow: visible; display: block; }
+  .loop-return .rr { stroke: var(--lex); stroke-width: 2; fill: none; opacity: .85; }
+  .loop-return .rh { stroke: var(--lex); stroke-width: 2; fill: none; }
+  .loop-return .rlbl { position: absolute; left: 50%; top: 15px; transform: translateX(-50%); font-size: 11px; color: var(--lex); letter-spacing: 0.02em; background: var(--ink); padding: 0 8px; white-space: nowrap; }
+
+  .obs-layer { display: none; margin-top: 14px; }
+  .obs-layer .layer { display: block; margin-top: 0; }
+
+  /* pure-CSS reveals for governance (sg) + observability (so) */
+  #sg:checked ~ .gov .gov-layer,
+  #so:checked ~ .loop .obs-layer { display: block; animation: reveal .28s ease both; }
+  #sg:checked ~ .gov .gov-h .cv,
+  #so:checked ~ .loop .obs .cv { transform: rotate(180deg); color: var(--lex); }
+  #sg:checked ~ .gov .gov-h,
+  #so:checked ~ .loop .obs { background: var(--panel); }
+  #sg:focus-visible ~ .gov .gov-h,
+  #so:focus-visible ~ .loop .obs { outline: 2px solid var(--lex); outline-offset: 2px; }
+
   /* ---------- subtle motion ---------- */
   @keyframes dash { to { stroke-dashoffset: -1000; } }
   @keyframes drift { to { stroke-dashoffset: -240; } }
   @media (prefers-reduced-motion: no-preference) {
     .signal { stroke-dasharray: 6 10; animation: dash 14s linear infinite; }
-    .conn .rail { stroke-dasharray: 3 6; animation: drift 6s linear infinite; }
+    .conn .rail, .lconn .rail { stroke-dasharray: 3 6; animation: drift 6s linear infinite; }
+    .loop-return .rr { stroke-dasharray: 5 8; animation: dash 20s linear infinite; }
     .pulse { animation: pulseMove 3.2s ease-in-out infinite; }
     @keyframes pulseMove { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
   }
-  @media (prefers-reduced-motion: reduce) { .drawer .layer.open { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .layer { animation: none !important; } }
   @media (max-width: 560px) { body { font-size: 14px; } }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <input type="checkbox" class="toggle" id="s1" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s2" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s3" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s4" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="s5" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="sg" aria-hidden="true">
+  <input type="checkbox" class="toggle" id="so" aria-hidden="true">
+
   <header>
     <div>
       <div class="mark">
@@ -193,11 +277,10 @@
   <div class="rule"></div>
 
   <div class="flowscroll" aria-label="EIL pipeline: sources → ingest → index → search → serve.">
-    <div class="flow" id="flow">
+    <div class="flow">
 
       <section class="stage" data-stage="1">
-        <button class="stage-h" type="button" aria-expanded="false" aria-controls="layer-1">
-          <span class="n">01</span><span class="t">Sources</span><span class="cv" aria-hidden="true">⌄</span></button>
+        <label class="stage-h" for="s1"><span class="n">01</span><span class="t">Sources</span><span class="cv" aria-hidden="true">⌄</span></label>
         <div class="stage-sub">what you can already read</div>
         <div class="node"><div class="lbl"><span class="dot"></span>Confluence</div><div class="meta">CQL · spaces / pages</div></div>
         <div class="node"><div class="lbl"><span class="dot"></span>Jira</div><div class="meta">JQL · projects / issues</div></div>
@@ -209,8 +292,7 @@
         <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
 
       <section class="stage" data-stage="2">
-        <button class="stage-h" type="button" aria-expanded="false" aria-controls="layer-2">
-          <span class="n">02</span><span class="t">Ingest</span><span class="cv" aria-hidden="true">⌄</span></button>
+        <label class="stage-h" for="s2"><span class="n">02</span><span class="t">Ingest</span><span class="cv" aria-hidden="true">⌄</span></label>
         <div class="stage-sub">incremental, scoped, deletable</div>
         <div class="node"><div class="lbl">Connectors</div><div class="meta">personal PAT · fail-closed ACL</div></div>
         <div class="node"><div class="lbl">Cursor sync</div><div class="meta"><code>sync_cursors</code> · per-scope / repo SHA</div></div>
@@ -222,8 +304,7 @@
         <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
 
       <section class="stage" data-stage="3">
-        <button class="stage-h" type="button" aria-expanded="false" aria-controls="layer-3">
-          <span class="n">03</span><span class="t">Index</span><span class="cv" aria-hidden="true">⌄</span></button>
+        <label class="stage-h" for="s3"><span class="n">03</span><span class="t">Index</span><span class="cv" aria-hidden="true">⌄</span></label>
         <div class="stage-sub">one Postgres, no extension</div>
         <div class="node"><div class="lbl">Chunker</div><div class="meta">prose sections · code line-windows</div></div>
         <div class="node"><div class="lbl"><span class="dot lex"></span>Full-text</div><div class="meta"><code>tsvector</code> · GIN index</div></div>
@@ -235,8 +316,7 @@
         <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
 
       <section class="stage" data-stage="4">
-        <button class="stage-h" type="button" aria-expanded="false" aria-controls="layer-4">
-          <span class="n">04</span><span class="t">Search</span><span class="cv" aria-hidden="true">⌄</span></button>
+        <label class="stage-h" for="s4"><span class="n">04</span><span class="t">Search</span><span class="cv" aria-hidden="true">⌄</span></label>
         <div class="stage-sub">two arms, fused by <code>rrf()</code></div>
         <div class="node search-node">
           <figure class="fuse">
@@ -272,8 +352,7 @@
         <line class="rail" x1="0" y1="12" x2="23" y2="12"/><path class="head" d="M21 7l7 5-7 5"/></svg></div>
 
       <section class="stage" data-stage="5">
-        <button class="stage-h" type="button" aria-expanded="false" aria-controls="layer-5">
-          <span class="n">05</span><span class="t">Serve</span><span class="cv" aria-hidden="true">⌄</span></button>
+        <label class="stage-h" for="s5"><span class="n">05</span><span class="t">Serve</span><span class="cv" aria-hidden="true">⌄</span></label>
         <div class="stage-sub">two-phase · zero tokens</div>
         <div class="node"><div class="lbl"><span class="dot ok"></span>MCP server</div><div class="meta">stdio · audited</div></div>
         <div class="node"><div class="lbl">Tools</div><div class="meta"><code>search_docs · get_doc · expand</code><br/><code>search_code · fetch_logs</code></div></div>
@@ -284,9 +363,9 @@
     </div>
   </div>
 
-  <!-- the layer below, revealed on expand -->
-  <div class="drawer" id="drawer">
-    <div class="layer" id="layer-1" role="region" aria-label="Sources — detail">
+  <!-- the layer below, revealed when a stage's checkbox is checked -->
+  <div class="drawer">
+    <div class="layer" id="layer-1">
       <div class="lh"><i>01</i><b>Sources — the connector contract</b><span class="file">ts/connectors/</span></div>
       <p>Each source is a small connector you drive with <em>your own credentials</em>, so you can only ever index what you're already allowed to read. Live syncs speak the source's own query language.</p>
       <div class="chips">
@@ -297,7 +376,7 @@
         <span class="chip">Bearer PAT / Basic</span>
       </div>
     </div>
-    <div class="layer" id="layer-2" role="region" aria-label="Ingest — detail">
+    <div class="layer" id="layer-2">
       <div class="lh"><i>02</i><b>Ingest — fetch → normalize → chunk → upsert</b><span class="file">ts/ingest/pipeline.ts</span></div>
       <p>Per-doc transaction, content-hash gated so unchanged docs are no-ops. The cursor advances <em>only</em> on success and holds at the earliest failure. Scope it as tight or wide as you like; deletions tombstone.</p>
       <div class="chips">
@@ -308,7 +387,7 @@
         <span class="chip"><b>sync_cursors</b> · timestamp / commit-SHA</span>
       </div>
     </div>
-    <div class="layer" id="layer-3" role="region" aria-label="Index — detail">
+    <div class="layer" id="layer-3">
       <div class="lh"><i>03</i><b>Index — one row per doc, one per chunk</b><span class="file">migrations/0001–0007</span></div>
       <p>Full-text and vector live <em>side by side on the chunk</em>; the ACL lives on the doc. No <span class="kv">pgvector</span> and no server needed — embeddings are packed float32 in <code>bytea</code>, cosine runs in-process, so it works on zero-install PGlite too.</p>
       <div class="chips">
@@ -318,7 +397,7 @@
         <span class="chip">ACL: ingested_by = $p OR acl_groups ?| $g</span>
       </div>
     </div>
-    <div class="layer" id="layer-4" role="region" aria-label="Search — detail">
+    <div class="layer" id="layer-4">
       <div class="lh"><i>04</i><b>Search — two passes, fused in-process</b><span class="file">ts/search.ts · core/fusion.ts</span></div>
       <p>The <span class="kx">lexical</span> and <span class="kv">semantic</span> arms each return a ranking; <span class="kf">rrf()</span> fuses them, then tier/recency modifiers and the ACL predicate finish the sort. The vector arm is best-effort — no embeddings or model, and search degrades cleanly to FTS-only.</p>
       <div class="chips">
@@ -329,7 +408,7 @@
         <span class="chip">entity route · expand() link graph</span>
       </div>
     </div>
-    <div class="layer" id="layer-5" role="region" aria-label="Serve — detail">
+    <div class="layer" id="layer-5">
       <div class="lh"><i>05</i><b>Serve — five MCP tools, two-phase</b><span class="file">ts/tools.ts · mcp-server.ts</span></div>
       <p>A standard stdio MCP server, every call audited. <em>Two-phase by design</em>: search returns ids + snippets, the agent fetches only what it needs — deterministic, and zero tokens spent searching. Hosts can index the tools without spawning via the manifest.</p>
       <div class="chips">
@@ -338,6 +417,66 @@
         <span class="chip">eil tools · JSON manifest</span>
         <span class="chip">in-proc callTool / REGISTRY</span>
         <span class="chip">metrics views · eval · report</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- governance: the substrate under every stage -->
+  <div class="gov">
+    <label class="gov-h" for="sg">
+      <span class="t">Governance</span>
+      <span class="s">— the substrate every stage sits on</span>
+      <span class="cv" aria-hidden="true">⌄</span>
+    </label>
+    <div class="gov-rail">
+      <span class="gchip"><span class="dot ok"></span><b>Fail-closed ACL</b> · every read path</span>
+      <span class="gchip"><b>Audit log</b> · every tool call</span>
+      <span class="gchip"><b>Personal credentials</b> · index only what you can read</span>
+      <span class="gchip"><b>Tenant isolation</b></span>
+      <span class="gchip"><b>Data-trust</b> · integrity + drift</span>
+    </div>
+    <div class="gov-layer">
+      <p>Access control isn't a stage — it's the ground the whole plane rests on. Every query is filtered by the <em>same</em> predicate; a doc with no groups is <em>owner-only</em> until an ACL sync stamps it, so a bug fails closed, never open. And nothing is deterministic-but-unaccountable: each tool call and model call is a logged row you can audit.</p>
+      <div class="chips">
+        <span class="chip">visibleSql · <b>ingested_by = $p OR acl_groups ?| $g</b></span>
+        <span class="chip">tool audit · llm_calls · cost/run</span>
+        <span class="chip">eil audit --strict · integrity invariants (CI-gated)</span>
+        <span class="chip">drift() · re-fetch a sample, compare hashes</span>
+        <span class="chip">per-tenant · service accounts only on kube</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- the learning loop: agents + observability + feedback -->
+  <div class="loop">
+    <h3>The learning loop — how agents steer what gets built</h3>
+    <p class="cap">Agents don't just consume the plane; their <b>usage is the signal</b>. What they search, what returns nothing, how often the two-phase pull is really used — it all flows into observability, and that data decides what gets ingested, indexed, or built next.</p>
+    <div class="loopscroll">
+      <div class="loop-flow">
+        <div class="lnode agent"><div class="lt"><span class="dot ok"></span>Agents</div><div class="lm">Amp · Claude Code · work connector — pull ranked, ACL-filtered context; <code>search → get_doc</code>, two calls, zero search tokens</div></div>
+        <div class="lconn"><svg width="26" height="24" viewBox="0 0 26 24" fill="none" aria-hidden="true"><line class="rail" x1="0" y1="12" x2="19" y2="12"/><path class="head" d="M17 7l7 5-7 5"/></svg></div>
+        <div class="lnode"><div class="lt">Usage &amp; queries</div><div class="lm">real queries · zero-result hits · <code>golden-queries.md</code> grows</div></div>
+        <div class="lconn"><svg width="26" height="24" viewBox="0 0 26 24" fill="none" aria-hidden="true"><line class="rail" x1="0" y1="12" x2="19" y2="12"/><path class="head" d="M17 7l7 5-7 5"/></svg></div>
+        <label class="lnode obs" for="so"><div class="lt">Observability<span class="cv" aria-hidden="true">⌄</span></div><div class="lm">metrics views · eval recall@k · HTML report</div></label>
+        <div class="lconn"><svg width="26" height="24" viewBox="0 0 26 24" fill="none" aria-hidden="true"><line class="rail" x1="0" y1="12" x2="19" y2="12"/><path class="head" d="M17 7l7 5-7 5"/></svg></div>
+        <div class="lnode"><div class="lt">Decide</div><div class="lm">what to ingest / index / build next — Zoekt, embeddings, or nothing</div></div>
+      </div>
+    </div>
+    <div class="loop-return">
+      <svg viewBox="0 0 1000 46" preserveAspectRatio="none" aria-hidden="true"><path class="rr" d="M992 3 C 992 42, 8 42, 8 5"/></svg>
+      <span class="rlbl">↻ feeds back into 02 Ingest &amp; 03 Index</span>
+    </div>
+    <div class="obs-layer">
+      <div class="layer">
+        <div class="lh"><i>OBS</i><b>Observability — metrics are SQL views over the facts</b><span class="file">observability/ · migrations/0005</span></div>
+        <p>Nothing bolts on a separate metrics store: the <span class="kf">vw_*</span> views <em>are</em> the metric definitions — versioned and independently tested. <code>eil eval</code> records recall per run for the trend; <code>eil report</code> writes a self-contained HTML report; Grafana reads the very same views.</p>
+        <div class="chips">
+          <span class="chip">migrations/0005 · <b>metrics.vw_*</b> views</span>
+          <span class="chip">eil eval · recall@k vs golden queries</span>
+          <span class="chip">eil report · adoption · zero-result · two-phase ratio</span>
+          <span class="chip">connector health · cursor age</span>
+          <span class="chip">Grafana provisioning</span>
+        </div>
       </div>
     </div>
   </div>
@@ -389,34 +528,11 @@
 <script>
   (function () {
     var root = document.documentElement, btn = document.getElementById('themeBtn');
+    if (!btn) return;
     function sysDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
     btn.addEventListener('click', function () {
       var cur = root.getAttribute('data-theme') || (sysDark() ? 'dark' : 'light');
       root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
-    });
-
-    var flow = document.getElementById('flow');
-    var headers = Array.prototype.slice.call(document.querySelectorAll('.stage-h'));
-    var stages = Array.prototype.slice.call(document.querySelectorAll('.stage'));
-    function closeAll() {
-      headers.forEach(function (h) { h.setAttribute('aria-expanded', 'false'); });
-      stages.forEach(function (s) { s.classList.remove('active'); });
-      document.querySelectorAll('.drawer .layer').forEach(function (l) { l.classList.remove('open'); });
-      flow.classList.remove('has-active');
-    }
-    headers.forEach(function (h) {
-      h.addEventListener('click', function () {
-        var open = h.getAttribute('aria-expanded') === 'true';
-        var id = h.getAttribute('aria-controls');
-        var stage = h.closest('.stage');
-        closeAll();
-        if (!open) {
-          h.setAttribute('aria-expanded', 'true');
-          stage.classList.add('active');
-          flow.classList.add('has-active');
-          document.getElementById(id).classList.add('open');
-        }
-      });
     });
   })();
 </script>
