@@ -95,7 +95,7 @@ probed. Fix the oversample at 8× and tune nprobe.
 
 This corpus is too small to set nprobe from — 21 chunks/cluster means the true
 top-10 scatter across many clusters, where at ~4400/cluster they co-locate. So
-the mechanism is validated and the **parameter is explicitly uncalibrated**; §13.4
+the mechanism is validated and the **parameter is explicitly uncalibrated**; §12.1
 specifies the calibration procedure and the recall gate that replaces guessing.
 
 **BM25 is computable in stock SQL.** `unnest(tsvector)` returns
