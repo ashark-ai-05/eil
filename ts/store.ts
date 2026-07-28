@@ -111,17 +111,66 @@ export async function reconcile(
   }
 }
 
+/**
+ * Tombstone code documents that vanished from a full repo listing.
+ *
+ * `subpath` is not optional bookkeeping — it bounds the blast radius. A resync
+ * scoped to one subtree yields a listing containing only that subtree, but the
+ * tombstone matched on repo alone, so ingesting `svcB` quarantined every file
+ * under `svcA`. In a monorepo where teams ingest their own subpath, each team's
+ * run silently deleted every other team's code.
+ *
+ * Runs in a transaction and records a reconcile_runs row, matching the contract
+ * reconcile() establishes for prose sources; the code path previously wrote no
+ * audit trail at all, and the full-resync fallback that reaches it is entered
+ * precisely when changedSince() failed (force-push, GC'd sha, shallow clone) —
+ * exactly when the listing is least trustworthy.
+ */
 export async function reconcileCodeRepo(
   client: Db,
   repo: string,
   ids: string[],
   tenant = "default",
+  subpath?: string,
 ): Promise<string[]> {
-  const res = await client.query(
-    "UPDATE documents SET tombstoned_at = now(), quarantine_until = now() + interval '7 days' WHERE tenant = $1 AND source = 'code' AND code_repo = $2 AND tombstoned_at IS NULL AND NOT (id = ANY($3::text[])) RETURNING id",
-    [tenant, repo, ids],
-  );
-  return res.rows.map((r) => r.id as string);
+  const scope = subpath ? `${subpath.replace(/\/+$/, "")}/` : null;
+  await client.query("BEGIN");
+  try {
+    const live = await client.query(
+      "SELECT count(*)::int AS n FROM documents WHERE tenant = $1 AND source = 'code'" +
+        " AND code_repo = $2 AND tombstoned_at IS NULL" +
+        " AND ($3::text IS NULL OR code_path LIKE $3 || '%')",
+      [tenant, repo, scope],
+    );
+    const before = Number(live.rows[0]?.n ?? 0);
+    if (before > 0 && ids.length < before * (1 - MAX_RECONCILE_SHRINK)) {
+      await client.query(
+        "INSERT INTO reconcile_runs (tenant, source, status, listed_count) VALUES ($1, $2, 'incomplete', $3)",
+        [tenant, `code:${repo}`, ids.length],
+      );
+      await client.query("COMMIT");
+      const pct = Math.round(MAX_RECONCILE_SHRINK * 100);
+      throw new Error(
+        `reconcile refused for code:${repo}: listing has ${ids.length} files but ${before} are live (>${pct}% shrink). Re-run when the repo is reachable, or set EIL_RECONCILE_MAX_SHRINK to override.`,
+      );
+    }
+    const res = await client.query(
+      "UPDATE documents SET tombstoned_at = now(), quarantine_until = now() + interval '7 days'" +
+        " WHERE tenant = $1 AND source = 'code' AND code_repo = $2 AND tombstoned_at IS NULL" +
+        " AND ($4::text IS NULL OR code_path LIKE $4 || '%')" +
+        " AND NOT (id = ANY($3::text[])) RETURNING id",
+      [tenant, repo, ids, scope],
+    );
+    await client.query(
+      "INSERT INTO reconcile_runs (tenant, source, status, listed_count, tombstoned_count) VALUES ($1, $2, 'complete', $3, $4)",
+      [tenant, `code:${repo}`, ids.length, res.rows.length],
+    );
+    await client.query("COMMIT");
+    return res.rows.map((r) => r.id as string);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  }
 }
 
 /**
@@ -247,27 +296,40 @@ export async function replaceCodeIndex(
   ref: string,
 ): Promise<void> {
   const entries = extractCodeIndex(path, doc.body);
-  await client.query("DELETE FROM code_index WHERE tenant = $1 AND doc_id = $2", [
-    doc.tenant,
-    doc.id,
-  ]);
-  for (const e of entries)
-    await client.query(
-      "INSERT INTO code_index (tenant, doc_id, repo, path, ref, kind, value, raw_value, line_start, line_end, symbol_kind, language, extractor_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
-      [
-        doc.tenant,
-        doc.id,
-        repo,
-        path,
-        ref,
-        e.kind,
-        e.value,
-        e.rawValue,
-        e.lineStart,
-        e.lineEnd,
-        e.symbolKind ?? null,
-        e.language,
-        e.extractorVersion,
-      ],
-    );
+  // Own the transaction. The delete + N inserts previously ran in autocommit
+  // AFTER upsertDocument had already committed, so any failure mid-loop left a
+  // document committed with a truncated index and no way to detect it — and the
+  // window between the DELETE and the last INSERT exposed a partially-emptied
+  // index for an existing file to concurrent readers.
+  await client.query("BEGIN");
+  try {
+    await client.query("DELETE FROM code_index WHERE tenant = $1 AND doc_id = $2", [
+      doc.tenant,
+      doc.id,
+    ]);
+    for (const e of entries)
+      await client.query(
+        "INSERT INTO code_index (tenant, doc_id, repo, path, ref, kind, value, raw_value, line_start, line_end, symbol_kind, language, extractor_version)" +
+          " VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING",
+        [
+          doc.tenant,
+          doc.id,
+          repo,
+          path,
+          ref,
+          e.kind,
+          e.value,
+          e.rawValue,
+          e.lineStart,
+          e.lineEnd,
+          e.symbolKind ?? null,
+          e.language,
+          e.extractorVersion,
+        ],
+      );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  }
 }

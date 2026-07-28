@@ -22,4 +22,10 @@ CREATE TABLE code_index (
   PRIMARY KEY (tenant, doc_id, kind, value, line_start, line_end),
   FOREIGN KEY (tenant, doc_id) REFERENCES documents(tenant, id) ON DELETE CASCADE
 );
-CREATE INDEX code_index_lookup_idx ON code_index (tenant, repo, ref, kind, value, path, line_start);
+-- Leading columns must match what searchCodeIndex actually pins: tenant + value
+-- (+ optional kind). Putting repo/ref first made the index unusable for every
+-- query the product issues — neither the MCP tool nor search.ts supplies them —
+-- so the planner inverted the join and probed code_index_pkey once PER VISIBLE
+-- DOCUMENT. Measured at 200k rows / 20k docs: 245 ms and 60k buffers, scaling
+-- with the document count rather than the match count.
+CREATE INDEX code_index_lookup_idx ON code_index (tenant, value, kind, repo, ref, path, line_start);

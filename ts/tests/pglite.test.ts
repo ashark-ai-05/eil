@@ -360,4 +360,47 @@ describe("pglite zero-install backend", () => {
     expect((unreadable as any).error).toBe("not found: confluence:page:12345");
     delete process.env.EIL_CONFLUENCE_URL;
   });
+
+  // Regression: two identical literals on one line collide on code_index's PK,
+  // and an incompressible literal over ~2700 bytes blows the btree key limit.
+  // Either aborted the whole repo ingest with the cursor unadvanced, so the
+  // repo could never be ingested — 23.4% of this repo's own files trigger it.
+  it("indexes a file with duplicate and oversized literals without failing", async () => {
+    const blob = Buffer.from(Array.from({ length: 6000 }, (_, i) => i % 251)).toString("base64");
+    const body = `console.log("dup", "dup");\nconst DATA = "${blob}";\nexport function ok() {}`;
+    const doc = normalizeCode("org/hard", "src/hard.ts", body, null, "default", "sha-hard");
+    await upsertDocument(client, doc);
+    await expect(
+      replaceCodeIndex(client, doc, "org/hard", "src/hard.ts", "sha-hard"),
+    ).resolves.toBeUndefined();
+    const hit = await searchCodeIndex(client, VIEWER, { query: "ok", kind: "symbol" });
+    expect(hit.results.length).toBeGreaterThan(0);
+  });
+
+  // Regression: the tombstone matched on repo alone while the listing was
+  // subpath-restricted, so ingesting one subtree quarantined every other.
+  it("a subpath resync does not quarantine the rest of the repo", async () => {
+    const { reconcileCodeRepo } = await import("../store.js");
+    for (const [path, dir] of [
+      ["svcA/x.ts", "svcA"],
+      ["svcA/y.ts", "svcA"],
+      ["svcB/z.ts", "svcB"],
+    ] as const) {
+      const d = normalizeCode(
+        "org/mono",
+        path,
+        `export function f_${dir}() {}`,
+        null,
+        "default",
+        "sha-mono",
+      );
+      await upsertDocument(client, d);
+    }
+    // resync scoped to svcB: its listing mentions nothing under svcA
+    await reconcileCodeRepo(client, "org/mono", ["code:org/mono:svcB/z.ts"], "default", "svcB");
+    const live = await client.query(
+      "SELECT code_path FROM documents WHERE code_repo = 'org/mono' AND tombstoned_at IS NULL ORDER BY code_path",
+    );
+    expect(live.rows.map((r: any) => r.code_path)).toEqual(["svcA/x.ts", "svcA/y.ts", "svcB/z.ts"]);
+  });
 });

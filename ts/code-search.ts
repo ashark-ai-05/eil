@@ -65,7 +65,7 @@ export async function searchCodeIndex(
   }
   args.push(limit);
   const res = await client.query(
-    `SELECT ci.doc_id,ci.repo,ci.path,ci.ref,ci.kind,ci.raw_value,ci.line_start,ci.line_end,d.body FROM code_index ci JOIN documents d ON d.tenant=ci.tenant AND d.id=ci.doc_id WHERE ${clauses.join(" AND ")} ORDER BY ci.path,ci.line_start,ci.kind LIMIT $${args.length}`,
+    `SELECT ci.doc_id,ci.repo,ci.path,ci.ref,ci.kind,ci.raw_value,ci.line_start,ci.line_end,d.body FROM code_index ci JOIN documents d ON d.tenant=ci.tenant AND d.id=ci.doc_id WHERE ${clauses.join(" AND ")} ORDER BY ci.path,ci.line_start,ci.line_end,ci.kind,ci.doc_id LIMIT $${args.length}`,
     args,
   );
   const citations = res.rows.map(

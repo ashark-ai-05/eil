@@ -235,6 +235,7 @@ export async function ingestRepo(
         key,
         listed,
         tenant,
+        subpath, // bound the tombstone to the subtree this run actually listed
       );
       out.deleted += removed.length;
       for (const id of removed) console.log(`  - ${id} (quarantined after full resync)`);

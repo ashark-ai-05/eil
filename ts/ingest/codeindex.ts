@@ -10,6 +10,17 @@ export interface CodeIndexEntry {
   extractorVersion: string;
 }
 export const EXTRACTOR_VERSION = "regex-v1";
+
+/**
+ * `value` is part of code_index's primary key, and a btree key tops out at 2704
+ * bytes. An incompressible literal past that limit — a base64 blob, a data URI,
+ * a minified JS or CSS line, an embedded certificate — made the INSERT raise
+ * "index row size exceeds btree maximum" and aborted the whole repo ingest with
+ * the cursor unadvanced, so every retry failed at the same file and the repo
+ * could never be ingested. Measured: 26 of 111 supported-language files in this
+ * very repo (23.4%) hit it. Nothing over this length is a searchable identifier.
+ */
+export const MAX_INDEX_VALUE_CHARS = 256;
 export function detectLanguage(path: string): string | null {
   const ext = path.toLowerCase().split(".").pop();
   return (
@@ -33,7 +44,8 @@ const add = (
   line: number,
   language: string,
   symbolKind?: string,
-) =>
+) => {
+  if (raw.length > MAX_INDEX_VALUE_CHARS) return;
   out.push({
     kind,
     value: raw.toLowerCase(),
@@ -44,6 +56,7 @@ const add = (
     language,
     extractorVersion: EXTRACTOR_VERSION,
   });
+};
 export function extractCodeIndex(path: string, content: string): CodeIndexEntry[] {
   const language = detectLanguage(path);
   if (!language) return [];
