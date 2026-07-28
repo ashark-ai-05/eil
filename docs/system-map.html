@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EIL — System Map</title>
+<style>
+  :root {
+    --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e; --warn:#ef7d6b;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --r:10px; color-scheme:dark;
+    --cols: repeat(6, minmax(186px, 1fr));
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63; --warn:#c0442f;
+      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+  }
+  :root[data-theme="dark"]{ --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e; --warn:#ef7d6b;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc; color-scheme:dark; }
+  :root[data-theme="light"]{ --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+    --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63; --warn:#c0442f;
+    --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--ink); color:var(--text); font-family:var(--mono); font-size:15px; line-height:1.5;
+    -webkit-font-smoothing:antialiased; letter-spacing:-0.01em;
+    background-image: radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--lex) 8%, transparent), transparent 60%),
+      radial-gradient(110% 70% at 6% 108%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
+    background-attachment:fixed; }
+  .wrap { max-width:1380px; margin:0 auto; padding:clamp(20px,3vw,40px) clamp(14px,3vw,30px) 56px; }
+
+  header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+  .mark { display:flex; align-items:center; gap:12px; }
+  .glyph { width:32px; height:32px; flex:none; }
+  .word { font-size:19px; font-weight:700; letter-spacing:0.02em; }
+  .word span { color:var(--muted); font-weight:500; }
+  .tag { color:var(--muted); font-size:13px; margin:6px 0 0; max-width:64ch; letter-spacing:0; line-height:1.55; }
+  .tag b { color:var(--text); font-weight:600; }
+  .toolbar { display:flex; align-items:center; gap:9px; flex-wrap:wrap; justify-content:flex-end; }
+  .stat { font-size:11px; color:var(--faint); letter-spacing:0.04em; text-align:right; line-height:1.7; width:100%; }
+  .stat b { color:var(--ok); font-weight:600; }
+
+  .btn { font-family:var(--mono); font-size:11px; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted);
+    background:var(--panel); border:1px solid var(--line); padding:8px 12px; border-radius:7px; cursor:pointer;
+    user-select:none; white-space:nowrap; transition:color .15s, border-color .15s, background .15s; }
+  .btn:hover { color:var(--text); border-color:var(--muted); }
+  .btn.pri { color:var(--lex); border-color:color-mix(in oklab, var(--lex) 42%, var(--line)); }
+  .btn.pri:hover { background:var(--panel-2); border-color:var(--lex); }
+  .btn:focus-visible { outline:2px solid var(--lex); outline-offset:2px; }
+
+  nav.xref { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0 0; font-size:11.5px; letter-spacing:0.02em; }
+  nav.xref a { color:var(--faint); text-decoration:none; border-bottom:1px dashed var(--line); padding-bottom:1px; }
+  nav.xref a:hover { color:var(--lex); border-color:var(--lex); }
+
+  .controls { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:20px 0 12px; }
+  .hint { font-size:11.5px; color:var(--faint); letter-spacing:0.02em; margin:0; }
+  .hint b { color:var(--lex); font-weight:600; }
+
+  /* ── canvas ───────────────────────────────────────────── */
+  .scroll { overflow-x:auto; overflow-y:hidden; padding-bottom:4px; }
+  .canvas { position:relative; min-width:1300px; padding-bottom:52px; }
+  /* behind the boxes, so rails read as wiring passing under the plane */
+  .edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; z-index:0; }
+  .grid6 { display:grid; grid-template-columns:var(--cols); column-gap:38px; row-gap:18px; }
+
+  .plane { display:flex; flex-direction:column; gap:8px; position:relative; z-index:1; min-width:0; }
+  .plane > h3 { margin:0 0 2px; font-size:10.5px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--faint); }
+  .plane > h3 .pn { color:var(--line); margin-right:6px; font-variant-numeric:tabular-nums; }
+  .pnote { font-size:10px; color:var(--faint); letter-spacing:0; line-height:1.45; margin:2px 2px 0; }
+  .pnote b { color:var(--muted); font-weight:600; }
+
+  .node { background:var(--panel); border:1px solid var(--line); border-radius:9px; box-shadow:var(--shadow); }
+  .node.acc { border-color:color-mix(in oklab, var(--ok) 34%, var(--line)); }
+  .nh { display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:9px 10px; cursor:pointer;
+    background:none; border:0; border-radius:9px; color:inherit; font:inherit; font-size:11.5px; letter-spacing:0.01em; }
+  .nh:hover { background:var(--panel-2); }
+  .nh:focus-visible { outline:2px solid var(--lex); outline-offset:2px; }
+  .nh .lbl { font-weight:600; color:var(--text); flex:1; min-width:0; }
+  .nh .cv { color:var(--faint); font-size:11px; flex:none; transition:transform .3s cubic-bezier(.4,0,.2,1), color .15s; }
+  .node.open > .nh { background:var(--panel-2); border-radius:9px 9px 0 0; }
+  .node.open > .nh .cv { transform:rotate(90deg); color:var(--lex); }
+
+  .dot { width:6px; height:6px; border-radius:50%; flex:none; background:var(--muted); }
+  .dot.lex { background:var(--lex); box-shadow:0 0 7px var(--lex); }
+  .dot.vec { background:var(--vec); box-shadow:0 0 7px var(--vec); }
+  .dot.fuse{ background:var(--fuse); box-shadow:0 0 7px var(--fuse); }
+  .dot.ok  { background:var(--ok);  box-shadow:0 0 7px var(--ok); }
+
+  /* 0fr → 1fr animates to the content's real height, so the router lands on the true box edge */
+  .nb { display:grid; grid-template-rows:0fr; transition:grid-template-rows .34s cubic-bezier(.4,0,.2,1); }
+  .node.open .nb { grid-template-rows:1fr; }
+  .nb > .nbi { overflow:hidden; min-height:0; }
+  .nb .pad { padding:2px 10px 11px; }
+  html:not(.js) .nb { grid-template-rows:1fr; }
+  html:not(.js) .cv { display:none; }
+
+  .vig { display:block; width:100%; height:auto; margin-bottom:7px; }
+  .vig text { font-family:var(--mono); }
+  .cap { font-size:10.5px; color:var(--muted); line-height:1.5; letter-spacing:0; margin:0; }
+  .cap + .cap { margin-top:5px; }
+  .cap b { color:var(--text); font-weight:600; }
+  .cap .kx { color:var(--lex); } .cap .kv { color:var(--vec); } .cap .ko { color:var(--ok); } .cap .kw { color:var(--warn); }
+  .cap code { font-size:10px; color:var(--muted); }
+
+  /* ── loop lane ─────────────────────────────────────────── */
+  .lane { margin-top:18px; align-items:start; }
+  /* cols 2-4 + bottom-aligned keeps the label clear of the loop's rail and its bottom lane */
+  .lane .loopmsg { grid-column:2 / span 3; display:flex; align-items:center; gap:9px; align-self:end; padding-bottom:6px;
+    font-size:11.5px; color:var(--lex); letter-spacing:0.01em; }
+  .lane .loopmsg b { font-weight:700; }
+  .lane .obs { grid-column:5 / span 2; }
+
+  /* ── governance floor ──────────────────────────────────── */
+  .floorwrap { min-width:1300px; }
+  .govticks { margin-top:2px; height:20px; }
+  .govticks i { display:block; height:100%; margin:0 auto; width:0;
+    border-left:2px dashed color-mix(in oklab, var(--ok) 34%, var(--line)); }
+  .floor { border:1px solid color-mix(in oklab, var(--ok) 36%, var(--line)); border-radius:9px;
+    background:linear-gradient(180deg, color-mix(in oklab, var(--ok) 7%, var(--panel)), var(--panel)); box-shadow:var(--shadow); }
+  .floor .nh .lbl { color:var(--ok); letter-spacing:0.11em; text-transform:uppercase; font-size:11px; }
+  .floor .nh .sub { color:var(--muted); font-size:10.5px; font-weight:400; letter-spacing:0; }
+  .floor .pad { max-width:820px; }
+  .floor .vig { max-width:420px; }
+
+  /* ── legend / foot ─────────────────────────────────────── */
+  .legend { display:flex; gap:20px 34px; flex-wrap:wrap; margin-top:30px; padding-top:20px; border-top:1px solid var(--line-soft); }
+  .legend .grp { display:flex; flex-direction:column; gap:5px; }
+  .legend h4 { margin:0 0 3px; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:var(--faint); font-weight:600; }
+  .legend .li { font-size:12px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .legend .li b { color:var(--text); font-weight:600; }
+  .legend .wire { width:26px; height:2px; flex:none; border-radius:2px; }
+  .foot { margin-top:26px; font-size:11px; color:var(--faint); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .foot code { color:var(--muted); }
+
+  /* ── motion ────────────────────────────────────────────── */
+  @keyframes dash { to { stroke-dashoffset:-1000; } }
+  @keyframes floaty { 0%,100%{ opacity:.4 } 50%{ opacity:1 } }
+  @keyframes draw { from { stroke-dashoffset:var(--len,200); } to { stroke-dashoffset:0; } }
+  .edge { fill:none; stroke-width:1.5; stroke-linecap:round; }
+  .edge.k-faint { stroke:var(--faint); }
+  .edge.k-lex   { stroke:var(--lex); }
+  .edge.k-vec   { stroke:var(--vec); }
+  .edge.k-fuse  { stroke:var(--fuse); stroke-width:1.8; }
+  .edge.k-ok    { stroke:var(--ok); }
+  .edge.k-loop  { stroke:var(--lex); stroke-width:1.8; opacity:.85; }
+  @media (prefers-reduced-motion: no-preference) {
+    .edge { stroke-dasharray:5 8; animation:dash 14s linear infinite; }
+    .edge.k-loop { stroke-dasharray:5 7; animation:dash 18s linear infinite; }
+    .signal { stroke-dasharray:6 9; animation:dash 13s linear infinite; }
+    .pulse { animation:floaty 2.6s ease-in-out infinite; }
+    .spark { stroke-dasharray:var(--len,200); animation:draw 4.5s ease-in-out infinite alternate; }
+  }
+
+  /* ── narrow: fold to one column, wires re-route themselves ── */
+  @media (max-width: 860px) {
+    :root { --cols: minmax(0, 1fr); }
+    .canvas, .floorwrap { min-width:0; }
+    .scroll { overflow-x:visible; }
+    .grid6 { column-gap:14px; row-gap:14px; }
+    .lane .loopmsg, .lane .obs { grid-column:1; }
+    .govticks { display:none; }
+    body { font-size:14px; }
+  }
+</style>
+</head>
+<body>
+<script>document.documentElement.className += " js";</script>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="mark">
+        <svg class="glyph" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="38" height="38" rx="9" stroke="var(--line)"/>
+          <path d="M11 14h18M11 20h18M11 26h11" stroke="var(--lex)" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="27.5" cy="26" r="2.6" fill="var(--vec)"/></svg>
+        <div class="word"><b>EIL</b> <span>· system map</span></div>
+      </div>
+      <p class="tag">The whole ecosystem in one picture — <b>sources to agents</b>, the learning loop underneath, governance beneath all of it. Open any node in place; the wiring re-routes around it.</p>
+      <nav class="xref">
+        <a href="architecture-schematic.html">↗ schematic — stage by stage</a>
+        <a href="knowledge-plane.html">↗ knowledge plane</a>
+        <a href="observability-plane.html">↗ observability plane</a>
+        <a href="eil-architecture.html">↗ architecture</a>
+      </nav>
+    </div>
+    <div class="toolbar">
+      <div class="stat">status &nbsp;<b>local ● online</b><br/>node 22 · postgres / pglite</div>
+      <button class="btn pri" id="expandBtn" type="button">⊕&nbsp; expand all</button>
+      <button class="btn pri" id="collapseBtn" type="button">⊖&nbsp; collapse all</button>
+      <button class="btn" id="themeBtn" type="button" aria-label="Toggle color theme">◐ theme</button>
+    </div>
+  </header>
+
+  <div class="controls">
+    <p class="hint">▸ <b>click any node</b> to open it in place — the columns are the flow, the arc below is the loop, the bar at the bottom is under everything.</p>
+  </div>
+
+  <div class="scroll">
+  <div class="canvas" id="canvas">
+    <svg class="edges" id="edges" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"></svg>
+
+    <div class="grid6">
+
+      <!-- ══ 01 SOURCES ══ -->
+      <div class="plane">
+        <h3><span class="pn">01</span>Sources</h3>
+
+        <section class="node" data-id="src.confluence">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Confluence</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 46" fill="none" aria-hidden="true">
+              <g font-size="7.5">
+                <rect x="2" y="6" width="62" height="14" rx="3" fill="var(--panel-2)" stroke="var(--line)"/><text x="9" y="16" fill="var(--muted)">space · ENG</text>
+                <rect x="2" y="26" width="62" height="14" rx="3" fill="var(--panel-2)" stroke="var(--line)"/><text x="9" y="36" fill="var(--muted)">space · OPS</text>
+                <rect x="98" y="16" width="68" height="15" rx="4" fill="color-mix(in oklab,var(--lex) 12%,transparent)" stroke="var(--lex)"/><text x="106" y="27" fill="var(--lex)">CQL query</text>
+              </g>
+              <path class="signal" d="M64 13 C 82 13, 82 23, 98 23" stroke="var(--faint)" stroke-width="1.4"/>
+              <path class="signal" d="M64 33 C 82 33, 82 23, 98 23" stroke="var(--faint)" stroke-width="1.4"/>
+            </svg>
+            <p class="cap">Only the spaces you name, selected by <span class="kx">CQL</span> — pages and their attachments, on <b>your credentials</b>.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="src.jira">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Jira</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">Projects scoped by <span class="kx">JQL</span> — issues, descriptions and comment threads become docs.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="src.git">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Git repos</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 96" fill="none" aria-hidden="true">
+              <text x="2" y="8" fill="var(--faint)" font-size="6.5">clone → walk → filter</text>
+              <g font-size="7">
+                <rect x="2" y="14" width="132" height="15" rx="3" fill="color-mix(in oklab,var(--lex) 11%,transparent)" stroke="var(--lex)"/>
+                <text x="8" y="24" fill="var(--lex)">src/retry.ts</text><text x="129" y="24" fill="var(--ok)" text-anchor="end">✓</text>
+                <rect x="2" y="33" width="132" height="15" rx="3" fill="var(--panel-2)" stroke="var(--line)"/>
+                <text x="8" y="43" fill="var(--muted)">logo.png</text><text x="129" y="43" fill="var(--warn)" text-anchor="end">✗ binary</text>
+                <rect x="2" y="52" width="132" height="15" rx="3" fill="var(--panel-2)" stroke="var(--line)"/>
+                <text x="8" y="62" fill="var(--muted)">bundle.min.js</text><text x="129" y="62" fill="var(--warn)" text-anchor="end">✗ &gt;512KB</text>
+                <rect x="2" y="71" width="132" height="15" rx="3" fill="var(--panel-2)" stroke="var(--line)"/>
+                <text x="8" y="81" fill="var(--muted)">vendor/dep.ts</text><text x="129" y="81" fill="var(--warn)" text-anchor="end">✗ exclude</text>
+              </g>
+              <path class="signal" d="M136 21 h22" stroke="var(--lex)" stroke-width="1.4"/>
+              <path d="M154 18l5 3-5 3" stroke="var(--ok)" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              <text x="2" y="94" fill="var(--faint)" font-size="6">--include **/*.ts · --exclude vendor/**</text>
+            </svg>
+            <p class="cap">Clone, walk, <b>filter by glob</b> — binaries and oversize files never enter the index.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="src.notes">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Notes · Logs</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">Local markdown, runbooks and log archives — the long tail that never had a home.</p>
+          </div></div></div>
+        </section>
+
+        <p class="pnote"><b>Your credentials.</b> You can only index what you could already read.</p>
+      </div>
+
+      <!-- ══ 02 INGEST ══ -->
+      <div class="plane">
+        <h3><span class="pn">02</span>Ingest</h3>
+
+        <section class="node" data-id="ing.cursor">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Cursor sync</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 40" fill="none" aria-hidden="true">
+              <line x1="6" y1="22" x2="164" y2="22" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
+              <line class="signal" x1="6" y1="22" x2="104" y2="22" stroke="var(--lex)" stroke-width="2"/>
+              <path d="M104 16 v12" stroke="var(--lex)" stroke-width="2"/>
+              <text x="104" y="12" fill="var(--lex)" font-size="7" text-anchor="middle">cursor ►</text>
+              <g fill="var(--panel-2)" stroke="var(--line)"><rect x="112" y="17" width="7" height="10" rx="2"/><rect x="122" y="17" width="7" height="10" rx="2"/><rect x="132" y="17" width="7" height="10" rx="2"/></g>
+              <text x="152" y="36" fill="var(--muted)" font-size="7" text-anchor="middle">Δ only</text>
+            </svg>
+            <p class="cap">Each connector resumes from a <b>saved cursor</b> — a re-sync moves the mark, it doesn't re-read the world.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="ing.diff">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">git diff</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 34" fill="none" aria-hidden="true">
+              <g font-size="8" font-weight="700">
+                <rect x="4" y="8" width="16" height="14" rx="3" fill="color-mix(in oklab,var(--ok) 20%,transparent)" stroke="var(--ok)"/><text x="12" y="18" fill="var(--ok)" text-anchor="middle">A</text>
+                <rect x="26" y="8" width="16" height="14" rx="3" fill="color-mix(in oklab,var(--vec) 20%,transparent)" stroke="var(--vec)"/><text x="34" y="18" fill="var(--vec)" text-anchor="middle">M</text>
+                <rect x="48" y="8" width="16" height="14" rx="3" fill="color-mix(in oklab,var(--warn) 20%,transparent)" stroke="var(--warn)"/><text x="56" y="18" fill="var(--warn)" text-anchor="middle">D</text>
+              </g>
+              <g font-size="7" fill="var(--faint)"><text x="72" y="13">add · modify</text><text x="72" y="23">delete → tombstone</text></g>
+            </svg>
+            <p class="cap">Re-indexing a repo is a <b>diff</b>, not a re-read. Deletions leave a <span class="kw">tombstone</span> so results can't outlive the file.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="ing.chunk">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">Chunker</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 76" fill="none" aria-hidden="true">
+              <rect x="42" y="32" width="72" height="13" fill="color-mix(in oklab,var(--lex) 15%,transparent)"/>
+              <g stroke="var(--faint)" stroke-width="1.8" stroke-linecap="round">
+                <line x1="56" y1="20" x2="106" y2="20"/><line x1="56" y1="25" x2="92" y2="25"/><line x1="56" y1="30" x2="102" y2="30"/>
+                <line x1="56" y1="35" x2="84" y2="35"/><line x1="56" y1="40" x2="108" y2="40"/><line x1="56" y1="45" x2="90" y2="45"/>
+                <line x1="56" y1="50" x2="100" y2="50"/><line x1="56" y1="55" x2="80" y2="55"/><line x1="56" y1="60" x2="104" y2="60"/>
+              </g>
+              <path d="M50 17 h-8 v30 h8" stroke="var(--lex)" stroke-width="1.4" fill="none"/>
+              <text x="38" y="22" fill="var(--lex)" font-size="6.5" text-anchor="end">L1–60</text>
+              <path d="M112 30 h8 v33 h-8" stroke="var(--vec)" stroke-width="1.4" fill="none"/>
+              <text x="124" y="66" fill="var(--vec)" font-size="6.5">L51–110</text>
+              <text x="124" y="38" fill="var(--faint)" font-size="6.5">~10-line</text>
+              <text x="124" y="47" fill="var(--faint)" font-size="6.5">overlap</text>
+              <text x="4" y="73" fill="var(--faint)" font-size="6.5">chunks stay line-cited</text>
+            </svg>
+            <p class="cap">Overlapping line-windows, so an answer that straddles a boundary is still found — and still cites a line range.</p>
+          </div></div></div>
+        </section>
+
+        <p class="pnote"><b>Only what changed.</b> Hash-gated, incremental, tombstoned.</p>
+      </div>
+
+      <!-- ══ 03 INDEX ══ -->
+      <div class="plane">
+        <h3><span class="pn">03</span>Index</h3>
+
+        <section class="node" data-id="idx.fts">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">full-text · tsvector</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 30" fill="none" aria-hidden="true">
+              <g stroke="var(--lex)" stroke-width="2.4" stroke-linecap="round">
+                <line x1="4" y1="12" x2="26" y2="12"/><line x1="32" y1="12" x2="70" y2="12"/><line x1="76" y1="12" x2="96" y2="12"/>
+                <line x1="102" y1="12" x2="140" y2="12"/><line x1="146" y1="12" x2="166" y2="12"/>
+              </g>
+              <text x="4" y="27" fill="var(--faint)" font-size="7">GIN index · ts_rank</text>
+            </svg>
+            <p class="cap">Exact terms, identifiers, error strings — the things an embedding blurs. Plain Postgres full-text.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="idx.vec">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">vector · bytea f32</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 30" fill="none" aria-hidden="true">
+              <g fill="var(--vec)"><circle cx="8" cy="12" r="2.6"/><circle cx="24" cy="12" r="2.6"/><circle cx="40" cy="12" r="2.6"/><circle cx="56" cy="12" r="2.6"/>
+                <circle cx="72" cy="12" r="2.6"/><circle cx="88" cy="12" r="2.6"/><circle cx="104" cy="12" r="2.6"/><circle cx="120" cy="12" r="2.6"/>
+                <circle cx="136" cy="12" r="2.6"/><circle cx="152" cy="12" r="2.6"/></g>
+              <text x="4" y="27" fill="var(--faint)" font-size="7">local model · cosine · no pgvector</text>
+            </svg>
+            <p class="cap">Meaning, embedded <b>locally</b> and stored as raw <code>bytea</code> floats — <span class="kv">no extension</span> to install anywhere.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node acc" data-id="idx.acl">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">ACL stamp</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 40" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="30" height="32" rx="4" fill="var(--panel-2)" stroke="var(--line)"/>
+              <path d="M10 12h18M10 18h18M10 24h12" stroke="var(--faint)" stroke-width="1.2" stroke-linecap="round"/>
+              <g transform="translate(44,12)"><rect x="0" y="4" width="14" height="11" rx="2" fill="var(--panel)" stroke="var(--ok)"/>
+                <path d="M3 4 V1 a4 4 0 0 1 8 0 v3" fill="none" stroke="var(--ok)" stroke-width="1.3"/></g>
+              <text x="66" y="18" fill="var(--ok)" font-size="7">owner + groups</text>
+              <text x="66" y="29" fill="var(--faint)" font-size="7">stamped on the doc</text>
+            </svg>
+            <p class="cap">Visibility lives on the <b>doc</b>, not the query. An <span class="ko">unstamped</span> doc is owner-only — so a bug fails <em style="font-style:normal;color:var(--text)">closed</em>.</p>
+          </div></div></div>
+        </section>
+
+        <p class="pnote"><b>One Postgres.</b> PGlite · embedded PG · system PG · org DSN — no extension, no Docker.</p>
+      </div>
+
+      <!-- ══ 04 SEARCH ══ -->
+      <div class="plane">
+        <h3><span class="pn">04</span>Search</h3>
+
+        <section class="node" data-id="sea.fts">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot lex"></span><span class="lbl">FTS arm · ts_rank</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">Ranks by term match. Wins on <span class="kx">exact</span> — a stack trace, a flag name, a ticket key.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="sea.vec">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot vec"></span><span class="lbl">Vector arm · cosine</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">Ranks by meaning. Wins when the asker doesn't know the vocabulary.</p>
+            <p class="cap"><b>Best-effort</b> — if the model is unavailable the arm drops and search <span class="kv">degrades to FTS-only</span> rather than failing.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="sea.rrf">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">rrf() fusion</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 62" fill="none" aria-hidden="true">
+              <rect x="4" y="6" width="52" height="16" rx="4" fill="color-mix(in oklab,var(--lex) 15%,transparent)" stroke="var(--lex)"/><text x="30" y="17" fill="var(--lex)" font-size="7" text-anchor="middle">lexical</text>
+              <rect x="4" y="40" width="52" height="16" rx="4" fill="color-mix(in oklab,var(--vec) 15%,transparent)" stroke="var(--vec)"/><text x="30" y="51" fill="var(--vec)" font-size="7" text-anchor="middle">vector</text>
+              <path class="signal" d="M56 14 C 82 14, 82 31, 100 31" stroke="var(--lex)" stroke-width="1.6"/>
+              <path class="signal" d="M56 48 C 82 48, 82 31, 100 31" stroke="var(--vec)" stroke-width="1.6"/>
+              <circle class="pulse" cx="104" cy="31" r="5" fill="var(--fuse)"/>
+              <text x="104" y="19" fill="var(--fuse)" font-size="7.5" font-weight="700" text-anchor="middle">rrf()</text>
+              <g fill="none" stroke="var(--fuse)" stroke-width="1.8" stroke-linecap="round" opacity=".9">
+                <line x1="120" y1="22" x2="166" y2="22"/><line x1="120" y1="31" x2="156" y2="31"/><line x1="120" y1="40" x2="146" y2="40"/></g>
+            </svg>
+            <p class="cap"><b>Reciprocal-rank fusion</b> — one list from two rankings, with no score normalisation to tune and <b>no LLM in the hot loop</b>.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node acc" data-id="sea.rank">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">tier · recency · ACL</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">The final sort: source tier, then freshness — and the <span class="ko">ACL filter</span> that decides what you were ever allowed to see.</p>
+          </div></div></div>
+        </section>
+
+        <p class="pnote"><b>Deterministic.</b> Same query, same corpus, same order — every time.</p>
+      </div>
+
+      <!-- ══ 05 SERVE ══ -->
+      <div class="plane">
+        <h3><span class="pn">05</span>Serve</h3>
+
+        <section class="node" data-id="srv.mcp">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">MCP server</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 62" fill="none" aria-hidden="true">
+              <rect x="2" y="18" width="34" height="26" rx="5" fill="var(--panel-2)" stroke="var(--ok)"/><text x="19" y="34" fill="var(--ok)" font-size="7" text-anchor="middle">agent</text>
+              <rect x="134" y="18" width="34" height="26" rx="5" fill="var(--panel-2)" stroke="var(--line)"/><text x="151" y="34" fill="var(--text)" font-size="7" text-anchor="middle">EIL</text>
+              <text x="85" y="8" fill="var(--faint)" font-size="6">phase 1</text>
+              <path class="signal" d="M36 22 h94" stroke="var(--lex)" stroke-width="1.5"/><path d="M126 19l5 3-5 3" stroke="var(--lex)" stroke-width="1.6" fill="none"/>
+              <text x="85" y="19" fill="var(--lex)" font-size="6.5" text-anchor="middle">search_docs(q)</text>
+              <path class="signal" d="M130 32 h-94" stroke="var(--muted)" stroke-width="1.4"/><path d="M41 29l-5 3 5 3" stroke="var(--muted)" stroke-width="1.6" fill="none"/>
+              <text x="85" y="41" fill="var(--muted)" font-size="6.5" text-anchor="middle">ids + snippets</text>
+              <text x="85" y="52" fill="var(--faint)" font-size="6">phase 2</text>
+              <path class="signal" d="M36 58 h94" stroke="var(--fuse)" stroke-width="1.5"/><path d="M126 55l5 3-5 3" stroke="var(--fuse)" stroke-width="1.6" fill="none"/>
+              <text x="85" y="56" fill="var(--fuse)" font-size="6.5" text-anchor="middle">get_doc(id) → content</text>
+            </svg>
+            <p class="cap"><b>Two calls, deterministic.</b> Search returns ids and snippets; the agent fetches only the ones it wants — <b>zero tokens spent searching</b>.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="srv.tools">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot fuse"></span><span class="lbl">5 tools</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap"><code>search_docs</code> · <code>get_doc</code> · <code>expand</code> · <code>search_code</code> · <code>fetch_logs</code></p>
+            <p class="cap">A small, closed surface — nothing that writes, nothing that reasons.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node acc" data-id="srv.audit">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">audit row</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">Every tool call and every model call lands as a <b>logged row</b> — who asked, what matched, what came back.</p>
+          </div></div></div>
+        </section>
+
+        <p class="pnote"><b>No LLM in the hot loop.</b> Retrieval is a query, not a completion.</p>
+      </div>
+
+      <!-- ══ 06 AGENTS ══ -->
+      <div class="plane">
+        <h3><span class="pn">06</span>Agents</h3>
+
+        <section class="node acc" data-id="agt.amp">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">Amp</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">Connected over MCP — pulls ranked, ACL-filtered context before it answers.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="agt.cc">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">Claude Code</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <p class="cap">Same two-phase contract — grep the org the way it greps the repo.</p>
+          </div></div></div>
+        </section>
+
+        <section class="node" data-id="agt.any">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot"></span><span class="lbl">any MCP client</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 170 36" fill="none" aria-hidden="true">
+              <rect x="2" y="8" width="58" height="20" rx="5" fill="var(--panel-2)" stroke="var(--lex)"/><text x="31" y="21" fill="var(--lex)" font-size="7" text-anchor="middle">EIL tools</text>
+              <path class="signal" d="M60 18 h34" stroke="var(--fuse)" stroke-width="1.6"/><path d="M90 15l5 3-5 3" stroke="var(--fuse)" stroke-width="1.6" fill="none"/>
+              <text x="132" y="16" fill="var(--fuse)" font-size="7.5" text-anchor="middle">grounded</text>
+              <text x="132" y="26" fill="var(--muted)" font-size="7" text-anchor="middle">answer</text>
+            </svg>
+            <p class="cap">The contract is the protocol, not the vendor. Anything that speaks MCP gets the same guarantees.</p>
+          </div></div></div>
+        </section>
+
+        <p class="pnote"><b>What they ask</b> — and what returns nothing — becomes the signal below.</p>
+      </div>
+
+    </div><!-- /grid6 -->
+
+    <!-- ══ LOOP LANE ══ -->
+    <div class="grid6 lane">
+      <div class="loopmsg">
+        <svg width="26" height="22" viewBox="0 0 26 22" fill="none" aria-hidden="true">
+          <path d="M23 20 C 23 5, 6 5, 6 7" stroke="var(--lex)" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+          <path d="M2 11 L6 4 L10 11" stroke="var(--lex)" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span><b>↻ learning loop</b> — usage steers <b>02 Ingest</b> &amp; <b>03 Index</b></span>
+      </div>
+      <div class="obs">
+        <section class="node" data-id="obs.metrics">
+          <button class="nh" type="button" aria-expanded="false"><span class="dot ok"></span><span class="lbl">07 · Observability</span><span class="cv" aria-hidden="true">›</span></button>
+          <div class="nb"><div class="nbi"><div class="pad">
+            <svg class="vig" viewBox="0 0 340 74" fill="none" aria-hidden="true" style="max-width:340px">
+              <text x="4" y="10" fill="var(--muted)" font-size="8">recall@k · trend</text>
+              <rect x="4" y="16" width="146" height="52" rx="5" fill="var(--panel-2)" stroke="var(--line)"/>
+              <g stroke="var(--line-soft)" stroke-width="1"><line x1="12" y1="30" x2="142" y2="30"/><line x1="12" y1="44" x2="142" y2="44"/><line x1="12" y1="58" x2="142" y2="58"/></g>
+              <polyline class="spark" style="--len:170" points="12,60 36,54 60,56 84,42 108,37 134,26" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle class="pulse" cx="134" cy="26" r="3" fill="var(--ok)"/>
+              <g font-size="8" fill="var(--muted)">
+                <text x="166" y="24">▸ metrics.vw_* views</text><text x="166" y="40">▸ eil eval · recall</text>
+                <text x="166" y="56">▸ eil report · adoption</text><text x="166" y="70">▸ zero-result · two-phase</text></g>
+            </svg>
+            <p class="cap"><b>Metrics are SQL views over the facts</b> — the <span class="ko">vw_*</span> views <em style="font-style:normal;color:var(--text)">are</em> the definitions, not a dashboard's interpretation of them.</p>
+            <p class="cap">Recall trend and adoption decide what gets indexed or built next — which is the arrow curving back into <b>Ingest</b>.</p>
+          </div></div></div>
+        </section>
+      </div>
+    </div>
+
+  </div><!-- /canvas -->
+  </div><!-- /scroll -->
+
+  <!-- ══ GOVERNANCE FLOOR ══ -->
+  <div class="scroll">
+    <div class="floorwrap">
+      <div class="grid6 govticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <!-- ticks reuse the same grid template, so they stay column-aligned with zero JS -->
+      <section class="node floor" data-id="gov">
+        <button class="nh" type="button" aria-expanded="false">
+          <span class="dot ok"></span><span class="lbl">◆ Governance</span>
+          <span class="sub">not a stage — the ground every stage rests on</span><span class="cv" aria-hidden="true">›</span></button>
+        <div class="nb"><div class="nbi"><div class="pad">
+          <svg class="vig" viewBox="0 0 400 90" fill="none" aria-hidden="true">
+            <text x="4" y="14" fill="var(--muted)" font-size="9">read request</text>
+            <circle cx="28" cy="44" r="3.5" fill="var(--text)"/>
+            <path class="signal" d="M32 44 h80" stroke="var(--faint)" stroke-width="1.8"/>
+            <rect x="114" y="18" width="56" height="52" rx="7" fill="color-mix(in oklab,var(--ok) 10%,transparent)" stroke="var(--ok)"/>
+            <text x="142" y="42" fill="var(--ok)" font-size="9" text-anchor="middle">ACL</text>
+            <text x="142" y="54" fill="var(--muted)" font-size="8" text-anchor="middle">gate</text>
+            <path class="signal" d="M170 36 h54" stroke="var(--ok)" stroke-width="1.8"/><path d="M218 32l6 4-6 4" stroke="var(--ok)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="230" y="24" width="168" height="24" rx="6" fill="color-mix(in oklab,var(--ok) 12%,transparent)" stroke="var(--ok)"/>
+            <text x="239" y="39" fill="var(--ok)" font-size="8.5">✓ visible — you own / in group</text>
+            <path d="M170 58 h42" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="3 4"/>
+            <g transform="translate(220,58)" stroke="var(--warn)" stroke-width="1.8"><line x1="-4" y1="-4" x2="4" y2="4"/><line x1="4" y1="-4" x2="-4" y2="4"/></g>
+            <text x="240" y="62" fill="var(--warn)" font-size="9">✗ blocked — fail-closed</text>
+          </svg>
+          <p class="cap"><b>Every read passes the same gate</b>, at every stage — there is no path around it. An unstamped doc is owner-only, so a bug fails <em style="font-style:normal;color:var(--text)">closed</em> rather than leaking. Every tool and model call is a logged, auditable row.</p>
+        </div></div></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="grp"><h4>Wires</h4>
+      <div class="li"><span class="wire" style="background:var(--lex)"></span><b>Lexical</b> — exact terms</div>
+      <div class="li"><span class="wire" style="background:var(--vec)"></span><b>Semantic</b> — meaning</div>
+      <div class="li"><span class="wire" style="background:var(--fuse)"></span><b>Fused</b> — served to agents</div>
+      <div class="li"><span class="wire" style="background:var(--ok)"></span><b>Governance</b> — ACL &amp; audit</div></div>
+    <div class="grp"><h4>Guarantees</h4>
+      <div class="li">Fail-closed ACL, everywhere</div>
+      <div class="li">Deterministic — no LLM in the hot loop</div>
+      <div class="li">Incremental · hash-gated · tombstoned</div></div>
+    <div class="grp"><h4>Runs on</h4>
+      <div class="li">PGlite · embedded PG · system PG</div>
+      <div class="li">org DSN · kube</div>
+      <div class="li">macOS · Linux · WSL2 — no Docker</div></div>
+  </div>
+
+  <div class="foot"><span>Enterprise Intelligence Layer — the whole ecosystem</span><span><code>sources → … → agents ↻</code></span></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("canvas");
+  var svg    = document.getElementById("edges");
+  if (!canvas || !svg) return;
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+
+  /* Edges are data, never coordinates — the router measures the real boxes. */
+  var EDGES = [
+    { from: "src.confluence", to: "ing.cursor", kind: "faint" },
+    { from: "src.jira",       to: "ing.cursor", kind: "faint" },
+    { from: "src.notes",      to: "ing.cursor", kind: "faint" },
+    { from: "src.git",        to: "ing.diff",   kind: "lex"   },
+
+    { from: "ing.cursor",     to: "ing.chunk",  kind: "faint" },
+    { from: "ing.diff",       to: "ing.chunk",  kind: "lex"   },
+
+    { from: "ing.chunk",      to: "idx.fts",    kind: "lex"   },
+    { from: "ing.chunk",      to: "idx.vec",    kind: "vec"   },
+    { from: "ing.chunk",      to: "idx.acl",    kind: "ok"    },
+
+    { from: "idx.fts",        to: "sea.fts",    kind: "lex"   },
+    { from: "idx.vec",        to: "sea.vec",    kind: "vec"   },
+    { from: "idx.acl",        to: "sea.rank",   kind: "ok"    },
+
+    { from: "sea.fts",        to: "sea.rrf",    kind: "lex"   },
+    { from: "sea.vec",        to: "sea.rrf",    kind: "vec"   },
+    { from: "sea.rrf",        to: "sea.rank",   kind: "fuse"  },
+
+    { from: "sea.rank",       to: "srv.mcp",    kind: "fuse"  },
+    { from: "srv.mcp",        to: "srv.tools",  kind: "fuse"  },
+    { from: "srv.mcp",        to: "srv.audit",  kind: "ok"    },
+
+    { from: "srv.tools",      to: "agt.amp",    kind: "fuse"  },
+    { from: "srv.tools",      to: "agt.cc",     kind: "fuse"  },
+    { from: "srv.tools",      to: "agt.any",    kind: "fuse"  },
+
+    { from: "agt.any",        to: "obs.metrics", kind: "faint" },
+    { from: "srv.audit",      to: "obs.metrics", kind: "ok"    },
+
+    { from: "obs.metrics",    to: "ing.cursor",  kind: "loop"  }
+  ];
+
+  /* Build one <path> per edge up front; the router only ever rewrites `d`. */
+  var paths = EDGES.map(function (e) {
+    var p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("class", "edge k-" + e.kind);
+    svg.appendChild(p);
+    return p;
+  });
+
+  var warned = {};
+  function node(id) {
+    var el = canvas.querySelector('[data-id="' + id + '"]');
+    if (!el && !warned[id]) { warned[id] = true; console.warn("[system-map] no node for id:", id); }
+    return el;
+  }
+
+  function rel(el, origin) {
+    var r = el.getBoundingClientRect();
+    return {
+      left: r.left - origin.left, top: r.top - origin.top,
+      right: r.right - origin.left, bottom: r.bottom - origin.top,
+      w: r.width, h: r.height
+    };
+  }
+
+  /* Would a straight vertical run between a and b pass through some other box? */
+  function corridorBlocked(a, b, boxes) {
+    var x = a.left + a.w / 2;
+    var top = Math.min(a.bottom, b.bottom), bot = Math.max(a.top, b.top);
+    if (bot - top < 4) return false;
+    for (var i = 0; i < boxes.length; i++) {
+      var r = boxes[i];
+      if (r === a || r === b) continue;
+      if (r.left < x + 7 && r.right > x - 7 && r.top < bot - 2 && r.bottom > top + 2) return true;
+    }
+    return false;
+  }
+
+  /* Out the left, down a rail beside the column, back in the left — clears skipped boxes. */
+  function railPath(a, b) {
+    /* clamped so the stacked single-column layout can't push the rail off-canvas */
+    var rail = Math.max(5, Math.min(a.left, b.left) - 13);
+    var y1 = a.top + a.h / 2, y2 = b.top + b.h / 2;
+    var s = y2 > y1 ? 1 : -1, r = 9;
+    if (Math.abs(y2 - y1) < 2 * r + 2) r = Math.max(2, Math.abs(y2 - y1) / 2 - 1);
+    return "M" + a.left + " " + y1 +
+           " H" + (rail + r) +
+           " Q" + rail + " " + y1 + " " + rail + " " + (y1 + s * r) +
+           " V" + (y2 - s * r) +
+           " Q" + rail + " " + y2 + " " + (rail + r) + " " + y2 +
+           " H" + b.left;
+  }
+
+  /* Right→left when the target sits to the right, otherwise vertical. */
+  function linkPath(a, b, boxes) {
+    if (b.left >= a.right - 6) {
+      var x1 = a.right, y1 = a.top + a.h / 2, x2 = b.left, y2 = b.top + b.h / 2;
+      var dx = Math.max(20, (x2 - x1) * 0.45);
+      return "M" + x1 + " " + y1 + " C " + (x1 + dx) + " " + y1 + ", " + (x2 - dx) + " " + y2 + ", " + x2 + " " + y2;
+    }
+    if (b.right <= a.left + 6) {
+      var rx1 = a.left, ry1 = a.top + a.h / 2, rx2 = b.right, ry2 = b.top + b.h / 2;
+      var rdx = Math.max(20, (rx1 - rx2) * 0.45);
+      return "M" + rx1 + " " + ry1 + " C " + (rx1 - rdx) + " " + ry1 + ", " + (rx2 + rdx) + " " + ry2 + ", " + rx2 + " " + ry2;
+    }
+    if (boxes && corridorBlocked(a, b, boxes)) return railPath(a, b);
+    var down = b.top >= a.top;
+    var vx1 = a.left + a.w / 2, vy1 = down ? a.bottom : a.top;
+    var vx2 = b.left + b.w / 2, vy2 = down ? b.top : b.bottom;
+    var dy = Math.max(14, Math.abs(vy2 - vy1) * 0.5) * (down ? 1 : -1);
+    return "M" + vx1 + " " + vy1 + " C " + vx1 + " " + (vy1 + dy) + ", " + vx2 + " " + (vy2 - dy) + ", " + vx2 + " " + vy2;
+  }
+
+  /* Down out of the source, along a lane under everything, up beside the target column,
+     then in from the left — never up through the column it is aiming at. */
+  function loopPath(a, b, h, boxes) {
+    var lane = h - 10, r = 12;
+    var x1 = a.left + a.w / 2, y1 = a.bottom;
+    var bx = b.left - 26, by = b.top + b.h / 2;
+    if (lane <= y1 + 2 * r || x1 - bx < 3 * r || lane - by < 3 * r) return linkPath(a, b, boxes);
+    return "M" + x1 + " " + y1 +
+           " V" + (lane - r) +
+           " Q" + x1 + " " + lane + " " + (x1 - r) + " " + lane +
+           " H" + (bx + r) +
+           " Q" + bx + " " + lane + " " + bx + " " + (lane - r) +
+           " V" + (by + r) +
+           " Q" + bx + " " + by + " " + (bx + r) + " " + by +
+           " H" + b.left;
+  }
+
+  function route() {
+    var origin = canvas.getBoundingClientRect();
+    var w = canvas.scrollWidth, h = canvas.offsetHeight;
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+
+    /* Measure every box once per pass — the rail router needs to know what it must clear. */
+    var measured = {}, boxes = [];
+    Array.prototype.forEach.call(canvas.querySelectorAll(".node"), function (el) {
+      var r = rel(el, origin);
+      boxes.push(r);
+      var id = el.getAttribute("data-id");
+      if (id) measured[id] = r;
+    });
+
+    EDGES.forEach(function (e, i) {
+      var a = measured[e.from], b = measured[e.to], p = paths[i];
+      /* A missing id skips its own edge — it never takes the whole router down. */
+      if (!a || !b) { node(e.from); node(e.to); p.removeAttribute("d"); return; }
+      p.setAttribute("d", e.kind === "loop" ? loopPath(a, b, h, boxes) : linkPath(a, b, boxes));
+    });
+  }
+
+  /* Redraw every frame while a node is opening, so the wires stretch with the box. */
+  var animUntil = 0, animRunning = false;
+  function animateRoute(ms) {
+    animUntil = Math.max(animUntil, performance.now() + (ms || 400));
+    if (animRunning) return;
+    animRunning = true;
+    (function tick() {
+      route();
+      if (performance.now() < animUntil) requestAnimationFrame(tick);
+      else animRunning = false;
+    })();
+  }
+
+  function setOpen(nodeEl, open) {
+    nodeEl.classList.toggle("open", open);
+    var head = nodeEl.querySelector(".nh");
+    if (head) head.setAttribute("aria-expanded", String(open));
+  }
+
+  document.addEventListener("click", function (ev) {
+    var head = ev.target.closest && ev.target.closest(".nh");
+    if (!head) return;
+    var nodeEl = head.closest(".node");
+    if (!nodeEl) return;
+    setOpen(nodeEl, !nodeEl.classList.contains("open"));
+    animateRoute();
+  });
+
+  function allNodes() { return document.querySelectorAll(".node"); }
+  function setAll(open) {
+    allNodes().forEach(function (n) { setOpen(n, open); });
+    animateRoute(460);
+  }
+  document.getElementById("expandBtn").addEventListener("click", function () { setAll(true); });
+  document.getElementById("collapseBtn").addEventListener("click", function () { setAll(false); });
+
+  if (typeof ResizeObserver === "function") new ResizeObserver(route).observe(canvas);
+  window.addEventListener("resize", route);
+  document.querySelector(".scroll").addEventListener("scroll", route, { passive: true });
+
+  /* #node-id opens that node on load, so a piece of the map is linkable. */
+  function openFromHash() {
+    var id = decodeURIComponent((location.hash || "").slice(1));
+    if (!id) return;
+    var el = canvas.querySelector('[data-id="' + id.replace(/"/g, "") + '"]');
+    if (!el) return;
+    setOpen(el, true);
+    el.scrollIntoView({ block: "center", inline: "center" });
+    animateRoute();
+  }
+  window.addEventListener("hashchange", openFromHash);
+
+  route();
+  openFromHash();
+  window.addEventListener("load", route);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(route);
+
+  var root = document.documentElement, btn = document.getElementById("themeBtn");
+  btn.addEventListener("click", function () {
+    var cur = root.getAttribute("data-theme") ||
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+  });
+})();
+</script>
+
+</body>
+</html>

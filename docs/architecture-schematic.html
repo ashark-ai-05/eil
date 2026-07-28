@@ -47,6 +47,9 @@
   button.theme { font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted);
     background:var(--panel); border:1px solid var(--line); padding:8px 12px; border-radius:7px; cursor:pointer; transition:color .15s, border-color .15s; }
   button.theme:hover { color:var(--text); border-color:var(--muted); }
+  .xref { margin:10px 0 0; font-size:11.5px; letter-spacing:0.02em; }
+  .xref a { color:var(--faint); text-decoration:none; border-bottom:1px dashed var(--line); padding-bottom:1px; }
+  .xref a:hover { color:var(--lex); border-color:var(--lex); }
   .hint { font-size:11.5px; color:var(--faint); letter-spacing:0.02em; margin:16px 0 14px; }
   .hint b { color:var(--lex); font-weight:600; }
 
@@ -162,6 +165,7 @@
         <div class="word"><b>EIL</b> <span>· knowledge plane</span></div>
       </div>
       <p class="tag">Deterministic, <b>token-free</b> retrieval over org knowledge — local-first on Postgres, served to agents via MCP.</p>
+      <p class="xref"><a href="system-map.html">↗ system map — the whole ecosystem in one diagram</a></p>
     </div>
     <div class="toolbar">
       <div class="stat">status &nbsp;<b>local ● online</b><br/>node 22 · postgres / pglite</div>
