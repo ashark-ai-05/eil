@@ -8,7 +8,7 @@ import { userInfo } from "node:os";
 import { z } from "zod";
 import { rrf } from "./core/fusion.js";
 import { modifier } from "./core/ranking.js";
-import { classify } from "./core/router.js";
+import { type Route, classify } from "./core/router.js";
 import type { Db } from "./db.js";
 import { type Embedder, getEmbedder, toVec } from "./embed/index.js";
 
@@ -57,6 +57,32 @@ export const isTrustedViewer = (viewer: Viewer): boolean => trustedViewers.has(v
 
 /** Local stdio/CLI mode only. Shared HTTP mode must call
  * viewerFromAuthenticatedClaims() after token verification. */
+
+/**
+ * Arm weights come from the query router rather than a tuned constant: it
+ * already distinguishes a natural-language question from an identifier, path or
+ * quoted string, and it is unit-tested. A prose question leans on the prose arm;
+ * `retryHandler` or `src/retry.ts` leans on the code arm. Neither is silenced —
+ * the loser is down-weighted, not dropped.
+ */
+const CODE_LEANING_ROUTES: ReadonlySet<Route> = new Set<Route>(["symbol", "path", "exact"]);
+const OFF_LEAN_WEIGHT = 0.6;
+
+function armWeights(route: Route): Record<string, number> {
+  const leansCode = CODE_LEANING_ROUTES.has(route);
+  const prose = leansCode ? OFF_LEAN_WEIGHT : 1.0;
+  const code = leansCode ? 1.0 : OFF_LEAN_WEIGHT;
+  // strict and loose share a class weight; precision comes from strict matches
+  // appearing in both lists rather than from weighting them differently.
+  return {
+    fts_prose: prose,
+    fts_prose_loose: prose,
+    fts_code: code,
+    fts_code_loose: code,
+    vec: 1.0,
+  };
+}
+
 export function localViewer(): Viewer {
   const raw = process.env.EIL_USER_GROUPS ?? "";
   return trustedViewer({
@@ -112,41 +138,87 @@ export async function searchDocs(
     if (code.results.length > 0) return { route: decision.route, ...code };
   }
 
-  // v0: single lexical arm through Postgres FTS; a kNN arm joins here later
-  // and rrf() already fuses however many arms exist.
+  // Lexical candidates, with two properties the naive query lacked:
+  //   best AS  — one row per DOC before any cut. The pool used to be capped in
+  //              CHUNKS, so a handful of large code files could consume it and
+  //              prose never entered the running at all.
+  //   quota AS — a separate allowance per source class, so code competes with
+  //              code. ts_rank is also normalized by length (flag 1); on its own
+  //              that is not enough, because ts_rank has no IDF and no tf
+  //              saturation, but it is a real improvement WITHIN an arm.
   const res = await client.query(
-    `SELECT c.doc_id, d.title, d.url, d.quality_tier, d.updated_at,
-            ts_rank(c.tsv, websearch_to_tsquery('english', $1)) AS rank,
-            ts_headline('english', c.text,
-                        websearch_to_tsquery('english', $1), $2) AS snippet
-     FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id
-     WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND ${visibleSql(4, 5, 6)}
-     ORDER BY rank DESC, c.doc_id, c.seq
-     LIMIT $3`,
+    `WITH q AS (
+       SELECT websearch_to_tsquery('english', $1) AS strict
+     ), qq AS (
+       -- websearch_to_tsquery ANDs every content word, so recall collapses as a
+       -- question gets longer: "how does the payment retry backoff policy work"
+       -- became 'payment'&'retri'&'backoff'&'polici'&'work' and matched NOTHING
+       -- in a corpus containing a page titled "Payment Retry Policy".
+       -- The loose form ORs the same terms. Phrases survive because <-> binds
+       -- tighter than |, but NEGATION must never be relaxed: 'retri' | !'jira'
+       -- would match every document that simply lacks the word jira.
+       SELECT strict,
+              CASE WHEN strict::text LIKE '%!%' THEN strict
+                   ELSE replace(strict::text, '&', '|')::tsquery END AS loose
+         FROM q
+     ), m AS (
+       SELECT c.doc_id, c.seq, c.text, d.source, d.title, d.url, d.quality_tier, d.updated_at,
+              ts_rank(c.tsv, qq.loose, 1) AS rank,
+              (c.tsv @@ qq.strict) AS strict_hit
+         FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id CROSS JOIN qq
+        WHERE c.tsv @@ qq.loose AND ${visibleSql(4, 5, 6)}
+     ), best AS (
+       SELECT DISTINCT ON (doc_id) * FROM m ORDER BY doc_id, strict_hit DESC, rank DESC, seq
+     ), quota AS (
+       SELECT *, ROW_NUMBER() OVER (
+                   PARTITION BY (source = 'code'), strict_hit ORDER BY rank DESC, doc_id) AS rn
+         FROM best
+     )
+     SELECT doc_id, source, strict_hit, title, url, quality_tier, updated_at,
+            ts_headline('english', text, (SELECT loose FROM qq), $2) AS snippet
+       FROM quota
+      WHERE rn <= $3
+      ORDER BY rank DESC, doc_id`,
     [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, viewer.tenant],
   );
 
   const byDoc = new Map<string, SearchResult & { updated: Date | null }>();
+  // Four lexical lists: {prose, code} x {matched every term, matched any term}.
+  const lists: Record<string, string[]> = {
+    fts_prose: [],
+    fts_prose_loose: [],
+    fts_code: [],
+    fts_code_loose: [],
+  };
   for (const row of res.rows) {
-    if (!byDoc.has(row.doc_id)) {
-      byDoc.set(row.doc_id, {
-        id: row.doc_id,
-        title: row.title,
-        url: row.url,
-        tier: row.quality_tier,
-        snippet: row.snippet,
-        updated: row.updated_at,
-      });
-    }
+    if (byDoc.has(row.doc_id)) continue;
+    byDoc.set(row.doc_id, {
+      id: row.doc_id,
+      title: row.title,
+      url: row.url,
+      tier: row.quality_tier,
+      snippet: row.snippet,
+      updated: row.updated_at,
+    });
+    const cls = row.source === "code" ? "fts_code" : "fts_prose";
+    // A doc matching every term is deliberately placed in BOTH lists, so RRF
+    // counts it twice and it outranks partial matches without needing a tuned
+    // precision constant anywhere.
+    if (row.strict_hit) lists[cls]!.push(row.doc_id);
+    lists[`${cls}_loose`]!.push(row.doc_id);
   }
-  const arms: Record<string, string[]> = { fts: [...byDoc.keys()] };
+  // Separate arms is the actual fix for code crowding. RRF is rank-based, so an
+  // inflated ts_rank inside a code arm can only ever outrank OTHER CODE — it
+  // cannot evict prose from the result set, whatever the raw scores look like.
+  const arms: Record<string, string[]> = {};
+  for (const [name, ids] of Object.entries(lists)) if (ids.length > 0) arms[name] = ids;
   try {
     const vec = await vecArm(client, viewer, query, limit, byDoc, embedder);
     if (vec && vec.length > 0) arms.vec = vec;
   } catch (err: any) {
     console.error(`vec arm skipped: ${err.message}`); // best-effort: degrade to FTS-only
   }
-  const fused = rrf(arms);
+  const fused = rrf(arms, armWeights(decision.route));
   const scored = fused
     .map(([docId, score]): [number, string] => {
       const entry = byDoc.get(docId)!;
@@ -158,10 +230,11 @@ export async function searchDocs(
     const { updated: _updated, ...entry } = byDoc.get(docId)!;
     return { ...entry, score: Math.round(score * 1e6) / 1e6 };
   });
-  // Honesty about execution: path/symbol/exact routes currently fall through
-  // to FTS (specialized executors arrive with Zoekt/symbols). The executor
-  // field tells callers what actually ran, so route ≠ executor is visible.
-  return { route: decision.route, executor: "fts", results };
+  // Honesty about execution: path/symbol/exact routes still run through FTS
+  // (specialized executors arrive with Zoekt/symbols) — the route only steers
+  // arm weights today. `executor` names the arms that actually contributed, so
+  // route ≠ executor stays visible, as does a silently-missing vector arm.
+  return { route: decision.route, executor: Object.keys(arms).sort().join("+") || "none", results };
 }
 
 export async function getDoc(
