@@ -172,7 +172,18 @@ export async function ingestRepo(
         out.skipped++;
         return;
       }
-      const content = await source.readFile(path);
+      // Isolate ONLY the read: a single huge/unreadable blob must not abort
+      // the whole run (and thus never advance the cursor). A DB error from
+      // upsertDocument below is intentionally NOT caught here — it should
+      // still propagate and hold the cursor.
+      let content: string;
+      try {
+        content = await source.readFile(path);
+      } catch (err: any) {
+        out.skipped++;
+        console.log(`  skip ${path} (read failed: ${err.message})`);
+        return;
+      }
       if (!filter.acceptContent(content)) {
         out.skipped++;
         console.log(`  skip ${path} (binary/size)`);
@@ -198,6 +209,12 @@ export async function ingestRepo(
         changes = null; // unreachable sha -> full resync
       }
     }
+    // NOTE: the full-listing fallback below (changes === null) re-upserts
+    // every file currently present, but it does NOT tombstone files that
+    // were deleted during the missed commit range — there is no reconcile
+    // pass for code (unlike Confluence/Jira/Obsidian; deliberate non-goal).
+    // Those stale docs linger in the catalog until their path is re-touched
+    // by a future commit.
     if (changes) {
       for (const ch of changes) {
         if (ch.status === "D") {

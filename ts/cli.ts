@@ -183,6 +183,10 @@ ingest
     const { GitCloneSource, BitbucketApiSource } = await import("./connectors/reposource.js");
     const { RepoFilter } = await import("./ingest/repofilter.js");
     const { ingestRepo } = await import("./ingest/pipeline.js");
+    if (opts.name && refs.length > 1) {
+      console.log("--name cannot be used with multiple repos (it would collide their ids/cursors)");
+      process.exit(1);
+    }
     const filter = new RepoFilter({ includes: opts.include, excludes: opts.exclude });
     for (const ref of refs) {
       const kind = opts.source ?? detectSource(ref);

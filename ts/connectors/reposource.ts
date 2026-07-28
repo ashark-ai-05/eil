@@ -123,6 +123,11 @@ export class GitCloneSource implements RepoSource {
   async dispose(): Promise<void> {} // persistent cache
 }
 
+/** Percent-encode a slash-joined path per-segment, so a segment containing
+ *  '?', '#', or a space doesn't corrupt the URL — without encoding the '/'
+ *  separators themselves. */
+const enc = (s: string): string => s.split("/").map(encodeURIComponent).join("/");
+
 export class BitbucketApiSource implements RepoSource {
   private readonly client: DcClient;
   private readonly project: string;
@@ -142,7 +147,7 @@ export class BitbucketApiSource implements RepoSource {
     this.client = makeClient("BITBUCKET", cfg.baseUrl, cfg.token, fetcher);
   }
   private base(): string {
-    return `/rest/api/1.0/projects/${this.project}/repos/${this.repo}`;
+    return `/rest/api/1.0/projects/${enc(this.project)}/repos/${enc(this.repo)}`;
   }
   async headSha(): Promise<string> {
     const d = await getJson(this.client, `${this.base()}/commits`, {
@@ -156,7 +161,7 @@ export class BitbucketApiSource implements RepoSource {
     const at = this.head ?? (await this.headSha());
     let start = 0;
     for (;;) {
-      const d = await getJson(this.client, `${this.base()}/files/${this.subpath}`, {
+      const d = await getJson(this.client, `${this.base()}/files/${enc(this.subpath)}`, {
         at,
         start,
         limit: 1000,
@@ -176,6 +181,8 @@ export class BitbucketApiSource implements RepoSource {
       COPY: "A",
       MOVE: "M",
     };
+    // Match how listFiles scopes to subpath: only yield changes under it.
+    const sub = this.subpath.replace(/\/$/, "");
     let start = 0;
     for (;;) {
       const d = await getJson(this.client, `${this.base()}/compare/changes`, {
@@ -187,7 +194,8 @@ export class BitbucketApiSource implements RepoSource {
       for (const c of d.values ?? []) {
         const p = typeof c.path === "string" ? c.path : c.path?.toString;
         const st = map[c.type as string];
-        if (p && st) yield { path: p, status: st };
+        if (!p || !st) continue;
+        if (!sub || p === sub || p.startsWith(`${sub}/`)) yield { path: p, status: st };
       }
       if (d.isLastPage !== false) return;
       start = d.nextPageStart ?? start + (d.values?.length ?? 0);
@@ -196,14 +204,14 @@ export class BitbucketApiSource implements RepoSource {
   async readFile(path: string): Promise<string> {
     const at = this.head ?? (await this.headSha());
     const res = await this.client.fetcher(
-      new URL(`${this.client.baseUrl}${this.base()}/raw/${path}?at=${at}`),
+      new URL(`${this.client.baseUrl}${this.base()}/raw/${enc(path)}?at=${at}`),
       { headers: this.client.headers },
     );
     if (!res.ok) throw new Error(`raw ${path} -> ${res.status}`);
     return res.text();
   }
   blobUrl(path: string): string | null {
-    return `${this.client.baseUrl}${this.base()}/browse/${path}?at=${this.branch}`;
+    return `${this.client.baseUrl}${this.base()}/browse/${enc(path)}?at=${this.branch}`;
   }
   async dispose(): Promise<void> {}
 }

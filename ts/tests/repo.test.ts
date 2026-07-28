@@ -204,6 +204,38 @@ describe("BitbucketApiSource (mock)", () => {
     expect(await s.readFile("src/a.ts")).toBe("file contents");
     expect(s.blobUrl("src/a.ts")).toContain("/projects/PAY/repos/retry/browse/src/a.ts");
   });
+
+  it("changedSince filters out-of-subpath changes, matching listFiles scoping", async () => {
+    const fetcher: Fetcher = async (url) => {
+      const u = String(url);
+      if (u.includes("/commits")) return json({ values: [{ id: "abc123" }] });
+      if (u.includes("/compare/changes"))
+        return json({
+          values: [
+            { path: { toString: "apps/web/src/a.ts" }, type: "MODIFY" },
+            { path: { toString: "apps/api/src/b.ts" }, type: "MODIFY" },
+            { path: { toString: "apps/web-extra/c.ts" }, type: "ADD" }, // prefix but not a subpath boundary
+          ],
+          isLastPage: true,
+        });
+      return json({});
+    };
+    const s = new BitbucketApiSource(
+      {
+        ref: "PAY/retry",
+        branch: "main",
+        subpath: "apps/web",
+        baseUrl: "http://localhost:7990",
+        token: "fake-token",
+      },
+      fetcher,
+    );
+    const changes: Record<string, string> = {};
+    for await (const ch of s.changedSince("old")) changes[ch.path] = ch.status;
+    expect(changes).toEqual({ "apps/web/src/a.ts": "M" });
+    expect(changes["apps/api/src/b.ts"]).toBeUndefined();
+    expect(changes["apps/web-extra/c.ts"]).toBeUndefined();
+  });
 });
 
 describe("ingestRepo orchestration", () => {
