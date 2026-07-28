@@ -74,8 +74,29 @@ corpus with the real MiniLM model, over 20 real queries:
 
 The published figure for binary quantization is ~95% retention, but that is at
 1024+ dimensions. Shipping binary-only here would have been a silent 36-point
-recall regression. **The oversample factor is the control knob and it has a
-measured curve behind it.**
+recall regression.
+
+**Those numbers are for a FULL Hamming scan. Adding IVF cluster probing is a
+second, larger, independent recall loss** — measured separately on 1337 real
+chunks in 64 clusters:
+
+| nprobe (of 64) | oversample 8× | oversample 16× | chunks scanned |
+|---|---|---|---|
+| 1 | 45.5% | 45.5% | 18 |
+| 4 | 81.0% | 81.0% | 79 |
+| 8 | 90.5% | 90.5% | 157 |
+| 16 | 96.5% | 96.5% | 324 |
+| 64 (all) | 100.0% | 100.0% | 1337 |
+
+**Oversample is not the control knob — nprobe is.** 8× and 16× are identical at
+every setting, which tells us something useful: once survivors are rescored
+exactly, binary quantization costs nothing. *All* the loss is clusters not
+probed. Fix the oversample at 8× and tune nprobe.
+
+This corpus is too small to set nprobe from — 21 chunks/cluster means the true
+top-10 scatter across many clusters, where at ~4400/cluster they co-locate. So
+the mechanism is validated and the **parameter is explicitly uncalibrated**; §13.4
+specifies the calibration procedure and the recall gate that replaces guessing.
 
 **BM25 is computable in stock SQL.** `unnest(tsvector)` returns
 `(lexeme, positions, weights)`, so per-chunk term frequency is
@@ -842,21 +863,225 @@ Cliff's δ = −1.0) · SCIP/LSIF/stack-graphs · ColBERT as first stage · IVFF
 
 ---
 
-## 11. Open questions
+## 11. Decisions
 
-1. **Secrets** (§5.4) — needs a decision before ingestion breadth work.
-2. **`ingested_by` is the OS username**, not the viewer principal, and since
-   every connector stamps `acl_groups: []`, it is the only ACL dimension
-   operating inside a tenant. On a shared server every document is owned by the
-   service account. The "phase-2 ACL syncer" does not exist. This is a
-   prerequisite for any multi-user deployment and is not scoped here.
-3. **Migration 0009's lock profile** — needs a staged rewrite before any large
-   corpus is migrated.
-4. **Is "no extensions" still the right policy?** §1 shows both pgvector and
-   pg_trgm are reachable on PGlite. The recommendation is to keep the policy —
-   determinism and deployment symmetry, not availability, are the reasons — but
-   it should now be an explicit decision rather than an inherited constraint.
-5. Chunk size: EIL's ~800-token chunks are ~1.6× Onyx's 512. Defensible for an
-   agent consumer (fewer, fatter results, fewer round trips) but it is a recall
-   tradeoff — one 800-token embedding is a blurrier centroid. Revisit once §8
-   can measure it.
+The four questions that were open. Three have recommendations; one genuinely
+needs you.
+
+### 11.1 Secrets — **NEEDS YOUR DECISION**
+
+Nothing else here is blocked on it, but ingestion breadth (§5.6) is. There is no
+scanning, redaction, or entropy check anywhere; every committed `.pem`,
+`.env.example`, and credential-bearing Confluence page is served verbatim to
+agents via `get_doc`.
+
+**Recommendation: detect + quarantine + redact-on-serve.** Scan at ingest with a
+rule set (known credential shapes: AWS keys, PEM blocks, JWTs, `postgres://`
+URLs, plus a Shannon-entropy threshold on long tokens). Store the original body
+unchanged — you need it to remediate, and destroying it makes false positives
+unrecoverable — but stamp `secret_findings jsonb` on the document, exclude those
+documents from retrieval by default, redact matched spans in `get_doc` output,
+and surface the list in `eil audit`. That gives a remediation worklist rather
+than silent loss, and it fails closed.
+
+The cheaper option (accept + document) is defensible only if this index will
+never hold real production Confluence. Say which.
+
+### 11.2 `ingested_by` and the empty ACL — **fix in step 1, scoped here**
+
+`ingested_by` is `userInfo().username` (the OS user of the ingesting process),
+and every connector stamps `acl_groups: []`. On a shared server every document
+is owned by the service account and visible to nobody else. This is not a
+future concern; it makes the fail-closed ACL *vacuous in the only deployment
+where it matters*.
+
+**Decision: thread the `Viewer` into `upsertDocument` and stamp
+`user:<principal>` as an `acl_groups` token (§4.5), in step 1.** The full
+tuple-materializer (nesting, inheritance, intersections) stays a later step, but
+the *shape* — one namespaced token array, owner included, single `?|` predicate —
+lands now so nothing has to be re-migrated later.
+
+### 11.3 "No extensions" — **keep it, as a stated policy**
+
+§1 shows both pgvector and `pg_trgm` are reachable on PGlite. Keep the rule
+anyway, for two reasons that survive the correction: integer Hamming is
+bit-for-bit reproducible where float SIMD is not, and deployment symmetry means
+one code path rather than a matrix. **Restated as policy:** extensions may be
+*detected and used opportunistically*; no feature may *require* one. Every
+capability must have a stock-SQL implementation that is the tested default.
+
+### 11.4 Migration 0009's lock profile — **restage before any real corpus**
+
+0009 does a full `chunks` rewrite plus a PK swap plus an immediately-validated
+FK in one transaction under `ACCESS EXCLUSIVE`. At 20M chunks that is an outage.
+It is already merged, so this is a *forward* fix: ship `0012_restage_0009.sql`
+documenting the hazard, and a `db migrate --staged` path that performs the same
+end state via batched `UPDATE`, `CREATE UNIQUE INDEX CONCURRENTLY` +
+`ADD PRIMARY KEY USING INDEX`, and `NOT VALID` FKs validated out of band. Any
+deployment whose `chunks` table exceeds ~1M rows must use it.
+
+---
+
+## 12. Migration sequence
+
+Numbers are fixed here so parallel work cannot collide. `0009`–`0011` exist.
+
+| # | File | Contents | Rewrite? |
+|---|---|---|---|
+| 0012 | `instrumentation.sql` | `audit_log`: `duration_ms, ok, error, route, executor, trace_id, span_id`; index on `at`; `retrieval_events`; same trace columns on `llm_calls` | no — nullable adds |
+| 0013 | `acl_index.sql` | GIN `jsonb_ops` on `documents.acl_groups`; `documents.acl_synced_at` | no |
+| 0014 | `sync_state.sql` | `sync_state` (§5.3), backfilled from `sync_cursors`; keep the old table one release for rollback | no |
+| 0015 | `eval.sql` | `eval_queries`, `eval_qrels` | no |
+| 0016 | `bm25.sql` | `lexeme_stats`, `corpus_stats`, `chunks.len` | **batched backfill** |
+| 0017 | `code_tokens.sql` | `chunks.tsv_code` + GIN; `code_index.match_class`, `matched_term`; `symbol_kind_factor` seed; drop `kind IN ('export','literal')` rows | **delete + backfill** |
+| 0018 | `vector_funnel.sql` | `chunks.sig varbit`, `chunks.cluster_id`, partial index, `ivf_centroids` | **batched backfill** |
+| 0019 | `acl_tuples.sql` | `acl_tuples`, `acl_revocations`, closure/ancestor matviews | no |
+
+**`varbit`, not `bit(384)`.** A fixed width forces a schema migration the day a
+second embedder with different dimensionality arrives (§6.7 contemplates a
+768-dim code arm). `bit_count` works on `varbit`; XOR between different widths
+errors, but every query already filters `embed_model` first, so widths are
+uniform within any comparison. This costs nothing now and removes a migration later.
+
+**Backfill rule for all three rewriting migrations:** the DDL ships in the
+migration; the data move ships as a resumable CLI command
+(`eil backfill <name> --batch N`) that processes by primary-key range and
+records progress, so it can be interrupted and is safe to run against a live
+system. No migration file performs an unbounded `UPDATE`.
+
+### 12.1 IVF calibration — the procedure that replaces a guessed nprobe
+
+`nprobe` is **not** a constant in this spec. It is an output of a measurement,
+re-run when the corpus doubles:
+
+1. `nlist = round(sqrt(n_chunks))`, clamped to [64, 16384].
+2. Build centroids by spherical k-means over a 200k-chunk sample, 25 iterations,
+   seeded deterministically (k-means++ with a fixed seed — the corpus must not
+   reorder between runs).
+3. Sample 200 real queries from `audit_log`.
+4. For nprobe ∈ {1, 2, 4, 8, 16, 32, 64, 128, 256}, measure recall@10 against a
+   full exact scan.
+5. **Gate: adopt the smallest nprobe with recall@10 ≥ 0.98.** If none reaches
+   0.98 at nprobe ≤ 10% of nlist, IVF is not viable at this corpus shape — fall
+   back to full Hamming scan and record why.
+6. Persist the curve to `metrics.ivf_calibration` and fail CI if a later run
+   drops below the gate.
+
+Oversample is fixed at 8× and is not a tuning knob (measured: no effect).
+
+---
+
+## 13. Work breakdown
+
+Each step lists the files, the acceptance criterion, and how it is proven. "Done"
+means the criterion is met by a test that fails without the change.
+
+### Step 0 — instrumentation *(migration 0012, 0013)*
+
+`ts/tools.ts` (wrap `callTool` in try/finally; mint `trace_id`; audit failures,
+denials and invalid-argument rejections) · `ts/search.ts` (persist `route` and
+`executor`, already computed and discarded; distinguish ACL-denial from
+zero-result in `resultCount`) · `ts/quality.ts` (persist `integrity()` and
+`drift()` to a table rather than stdout) · `observability/grafana` (contact
+points, `noDataState: NoData`).
+
+**Acceptance:** a failing tool call produces an `audit_log` row with `ok=false`
+and a populated `error`; p95 by route is answerable in SQL; an ACL denial does
+not appear in `vw_zero_results`. **Proven by** a test asserting each.
+
+### Step 1 — ingestion correctness *(no migration)*
+
+`ts/contracts/models.ts` (hash covers title, url, hierarchy, aclGroups,
+updatedAt) · `ts/ingest/code.ts` (git commit date → `updatedAt`; ticket keys and
+imports → `links`) · `ts/ingest/pipeline.ts` (cursor-safe generator errors;
+timestamp gate before hash gate; 30-min poll overlap) · `ts/connectors/auth.ts`
+(full-jitter retry) · `ts/store.ts` (per-chunk embed reuse via the existing
+`content_hash`; thread `Viewer` → `ingested_by`) · `ts/core/chunker.ts` (store
+`text` clean; enrich at index/embed time).
+
+**Acceptance:** a rename with unchanged body propagates · a 429 on page 40 of
+200 does not lose pages 1–39 and the run resumes · editing one chunk of a
+100-chunk document re-embeds exactly one · snippets contain no breadcrumb ·
+code documents carry a real `updated_at`. **Proven by** one test each; the retry
+test uses a fake connector that fails deterministically at a fixed offset.
+
+### Step 2 — evaluation harness *(migration 0015)*
+
+`ts/eval/metrics.ts` (recall@k, nDCG@k, MRR, judged@k, RBO — 10–30 lines each) ·
+`ts/eval/harness.ts` (runs the production path, pooled judging, writes
+`eval_runs`) · `eval/stats.py` (~100 lines: paired permutation test, and a
+one-time cross-check of the TS metrics against `trec_eval` on BEIR SciFact).
+
+**Acceptance:** TS metrics match `trec_eval` to 4 decimals · ≥150 labeled queries
+with ≥50 replayed from real `audit_log` traffic · a deliberate ranking regression
+is detected at p < 0.05. **Bootstrapping note:** until step 0's logs accumulate,
+seed with authored + synthetic queries and mark `origin`, so the mix is auditable
+and synthetic-only conclusions are visibly flagged.
+
+### Step 3 — cheap retrieval wins *(no migration)*
+
+Embedder singleton keyed on `.id` · `MAX_CHARS` matched to the embedder window ·
+drop `CODE_OVERLAP_LINES` · MaxP chunk→doc aggregation · structured filters in
+the tool schema · ±1 neighbour chunk on `get_doc` · confidence metadata in
+results · widen the candidate pool to `max(50, limit*6)`.
+
+**Acceptance:** every item is measured through step 2 and kept only if nDCG@10
+does not regress; the embedder change is proven by a latency assertion
+(< 20 ms warm). Items that fail to help are **reverted, not kept "because they
+should work."**
+
+### Step 4 — storage for scale *(migrations 0016, 0017, 0018)*
+
+Schema plus the three resumable backfills, plus the IVF calibration run.
+
+**Acceptance:** all backfills resume correctly after `SIGINT` · calibration
+produces a curve meeting the §12.1 gate · migrations apply to a populated
+1M-row fixture within a documented lock budget.
+
+### Step 5 — retrieval substance *(no migration)*
+
+Vector funnel · IDF-pruned BM25 (prose) · Zoekt scorer + subtoken tokenizer
+(code) · fusion recalibration, including the `RRF_K` sweep and rebalancing the
+tier/recency modifier against RRF's 1.6%/rank.
+
+**Acceptance:** each lands as its own commit with its own eval delta and a paired
+permutation p-value. **A change with p ≥ 0.05 does not merge.**
+
+### Step 6 — ingestion breadth · Step 7 — eval-gated options
+
+As §9. Step 7 items require a demonstrated `Recall@50 − Recall@10` gap first.
+
+---
+
+## 14. Risk register
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| **IVF recall never reaches 0.98 at a useful nprobe** | Medium | High — the whole scale story | §12.1 step 5 has an explicit fallback to full Hamming scan, which still buys 230×. Measure at step 4, before step 5 depends on it. |
+| Subtoken expansion explodes `code_index` | **High** — already 122 rows/file before subtokens | Medium | Cap subtokens per row; drop `export`/`literal` whole-line rows (§6.2) which are pure weight; measure rows/file before and after and set a budget. |
+| `tsv_code` silently missing on rows written by a path that forgets it | Medium | High — silent recall loss | It cannot be a generated column (Postgres requires IMMUTABLE; the tokenizer is TS). Add an `integrity()` check: code chunks with `tsv_code IS NULL`. |
+| The eval set overfits to 150 queries | Medium | Medium | Pooled judging with `judged@10` reported every run; never call δ < 0.01 a win; hold out 20% of queries. |
+| Synthetic queries flatter the chunker that produced them | **High** — structural | Medium | Generate from N documents and label all N; never let a generated qrel be the only qrel; do not use synthetic queries to compare chunkers at all. |
+| Step 1's hash change forces a full re-ingest | **Certain** | Medium | Intended, but it must be *scheduled*: the metadata hash differs for every existing row. Pair it with the per-chunk embed reuse so the re-ingest does not also re-embed. Ship them in the same commit. |
+| Embedder upgrade invalidates every vector | Certain when taken | Medium | `embed_model` stamping already degrades to FTS-only and self-heals. Re-embed from stored chunk text, never by re-running connectors. |
+| Backfills run against a live system | Medium | High | Resumable, PK-range batched, no unbounded UPDATE in any migration file. |
+
+---
+
+## 15. Known unknowns
+
+Stated so nothing here is mistaken for settled:
+
+1. **nprobe at real scale** (§12.1). Mechanism validated, parameter not.
+2. **BM25's actual quality delta.** The 866 ms figure is a cost measurement, not
+   a quality one. IDF pruning should improve both; neither is measured.
+3. **Whether the tier/recency modifier helps at all.** It has never been
+   evaluated against ground truth. It may be worth 0.
+4. **Chunk size.** ~800 tokens vs Onyx's 512 is a real tradeoff and currently a
+   guess in both directions.
+5. **Reranker headroom.** Unknown until `Recall@50 − Recall@10` is measured.
+6. **Whether `granite-embedding-small-english-r2` beats MiniLM *on this corpus*.**
+   +9 BEIR is a benchmark claim, not a measurement here.
+
+Every one of these is closed by step 2 existing. That is the argument for its
+position in the sequence.
