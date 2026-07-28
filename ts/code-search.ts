@@ -1,6 +1,6 @@
 import type { Db } from "./db.js";
 import type { CodeIndexKind } from "./ingest/codeindex.js";
-import type { Viewer } from "./search.js";
+import { type Viewer, isTrustedViewer } from "./search.js";
 
 export interface CodeSearchQuery {
   query: string;
@@ -38,6 +38,7 @@ export async function searchCodeIndex(
   viewer: Viewer,
   q: CodeSearchQuery,
 ): Promise<{ executor: "code_index"; results: CodeCitation[]; context: CodeContextPack }> {
+  if (!isTrustedViewer(viewer)) throw new Error("untrusted viewer rejected");
   const limit = Math.min(q.limit ?? 8, 50);
   const value = q.query.toLowerCase();
   const clauses = [

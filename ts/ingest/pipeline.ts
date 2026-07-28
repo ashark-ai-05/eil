@@ -166,10 +166,7 @@ export async function ingestRepo(
   try {
     const head = await source.headSha();
     const cursor = await getCursor(client, ckey, tenant);
-    if (cursor === head) {
-      console.log(`${ckey}: up to date (${head})`);
-      return out;
-    }
+    if (cursor === head) console.log(`${ckey}: verifying deterministic index at ${head}`);
 
     const ingestOne = async (path: string) => {
       if (!filter.acceptPath(path)) {
@@ -194,15 +191,16 @@ export async function ingestRepo(
         return;
       }
       const doc = normalizeCode(key, path, content, source.blobUrl(path), tenant, head);
-      if (await upsertDocument(client, doc)) {
-        await (await import("../store.js")).replaceCodeIndex(client, doc, key, path, head);
+      const changed = await upsertDocument(client, doc);
+      await (await import("../store.js")).replaceCodeIndex(client, doc, key, path, head);
+      if (changed) {
         out.upserted++;
         console.log(`  ~ ${path}`);
       }
     };
 
     let changes: RepoChange[] | null = null;
-    if (cursor) {
+    if (cursor && cursor !== head) {
       try {
         changes = [];
         for await (const ch of source.changedSince(cursor)) changes.push(ch);

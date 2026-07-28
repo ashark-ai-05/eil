@@ -93,6 +93,7 @@ export async function searchDocs(
   limit = 8,
   embedder?: Embedder,
 ): Promise<Record<string, unknown>> {
+  if (!isTrustedViewer(viewer)) throw new Error("untrusted viewer rejected");
   const decision = classify(query);
 
   if (decision.route === "entity") {
