@@ -358,22 +358,4 @@ embed
     }
   });
 
-embed
-  .command("fetch-model")
-  .description(
-    "Pre-download the local embedding model into EIL_EMBED_CACHE — run on a machine that CAN reach the HF hub, then copy the dir to an air-gapped box and set EIL_EMBED_OFFLINE=1",
-  )
-  .action(async () => {
-    const cache = process.env.EIL_EMBED_CACHE ?? "./eil-models";
-    process.env.EIL_EMBED_CACHE = cache;
-    const { LocalEmbedder } = await import("./embed/index.js");
-    const embedder = new LocalEmbedder();
-    console.log(`downloading ${embedder.id} into ${cache} ...`);
-    await embedder.embed(["warm up the model download"]);
-    console.log(`done. Copy '${cache}' to the target box, then point EIL_EMBED_CACHE at it:`);
-    console.log("  export EIL_EMBED_CACHE=<copied-dir>");
-    console.log("  export EIL_EMBED_OFFLINE=1");
-    console.log("  pnpm eil embed backfill");
-  });
-
 program.parseAsync(process.argv);

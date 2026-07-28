@@ -4,6 +4,8 @@
  * mirrors ts/llm/index.ts (EIL_LLM_PROVIDER -> EIL_EMBED_PROVIDER).
  */
 
+import { fileURLToPath } from "node:url";
+
 export interface Embedder {
   /** stable "provider:model" id, stamped into chunks.embed_model for staleness */
   readonly id: string;
@@ -127,10 +129,15 @@ export class HttpEmbedder implements Embedder {
 export class LocalEmbedder implements Embedder {
   readonly id: string;
   private readonly model: string;
+  private readonly modelsDir: string;
   private pipe: Promise<any> | null = null;
   constructor() {
     this.model = process.env.EIL_EMBED_MODEL ?? "Xenova/all-MiniLM-L6-v2";
-    this.id = `local:${this.model}`;
+    this.id = `local:${this.model}:q8`;
+    // The model is VENDORED in the repo (models/<model>/), so embedding is fully
+    // local — no Hugging Face hub call ever. Resolve it relative to this module
+    // (ts/embed/ -> repo root) so cwd doesn't matter.
+    this.modelsDir = fileURLToPath(new URL("../../models", import.meta.url));
   }
   private async pipeline(): Promise<any> {
     if (!this.pipe) {
@@ -144,12 +151,14 @@ export class LocalEmbedder implements Embedder {
             "local embedder needs @huggingface/transformers — add it with:\n  pnpm add @huggingface/transformers",
           );
         }
-        // Air-gapped/corporate use: point at a pre-downloaded model dir and/or
-        // forbid any network fetch. Independent — EIL_EMBED_OFFLINE works even
-        // without EIL_EMBED_CACHE (e.g. model already in the default cache).
-        if (process.env.EIL_EMBED_CACHE) mod.env.cacheDir = process.env.EIL_EMBED_CACHE;
-        if (process.env.EIL_EMBED_OFFLINE) mod.env.allowRemoteModels = false;
-        return mod.pipeline("feature-extraction", this.model);
+        // Load the vendored model from disk; forbid ALL network by default so a
+        // blocked huggingface.co can never break ingestion. EIL_EMBED_CACHE
+        // overrides the model dir; set EIL_EMBED_ALLOW_REMOTE=1 to opt back into
+        // hub downloads (e.g. to pull a different EIL_EMBED_MODEL).
+        mod.env.localModelPath = process.env.EIL_EMBED_CACHE ?? this.modelsDir;
+        mod.env.allowLocalModels = true;
+        mod.env.allowRemoteModels = !!process.env.EIL_EMBED_ALLOW_REMOTE;
+        return mod.pipeline("feature-extraction", this.model, { dtype: "q8" });
       })();
     }
     return this.pipe;
