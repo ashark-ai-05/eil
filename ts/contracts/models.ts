@@ -28,6 +28,11 @@ export const CanonicalDoc = z.object({
   body: z.string(),
   /** canonical ids this doc references */
   links: z.array(z.string()).default([]),
+  codeRepo: z.string().optional(),
+  codePath: z.string().optional(),
+  codeRef: z.string().optional(),
+  codeLanguage: z.string().optional(),
+  codeExtractorVersion: z.string().optional(),
 });
 export type CanonicalDoc = z.infer<typeof CanonicalDoc>;
 

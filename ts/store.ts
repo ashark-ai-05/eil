@@ -157,6 +157,19 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
       userInfo().username,
     ],
   );
+  if (doc.codeRepo)
+    await client.query(
+      "UPDATE documents SET code_repo=$1, code_path=$2, code_ref=$3, code_language=$4, code_extractor_version=$5 WHERE tenant=$6 AND id=$7",
+      [
+        doc.codeRepo,
+        doc.codePath ?? null,
+        doc.codeRef ?? null,
+        doc.codeLanguage ?? null,
+        doc.codeExtractorVersion ?? null,
+        doc.tenant,
+        doc.id,
+      ],
+    );
   await client.query("DELETE FROM chunks WHERE tenant = $1 AND doc_id = $2", [doc.tenant, doc.id]);
   for (const c of chunk(doc)) {
     await client.query(

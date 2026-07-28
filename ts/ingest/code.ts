@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 /** Map a repo file into a CanonicalDoc (source="code"), plus ref helpers. */
+import { detectLanguage, EXTRACTOR_VERSION } from "./codeindex.js";
 import type { CanonicalDoc } from "../contracts/models.js";
 
 export function normalizeCode(
@@ -8,6 +9,7 @@ export function normalizeCode(
   content: string,
   url: string | null,
   tenant: string,
+  ref?: string,
 ): CanonicalDoc {
   const dirs = path.split("/").slice(0, -1);
   return {
@@ -21,6 +23,11 @@ export function normalizeCode(
     qualityTier: "authored",
     body: content,
     links: [],
+    codeRepo: key,
+    codePath: path,
+    ...(ref ? { codeRef: ref } : {}),
+    ...(detectLanguage(path) ? { codeLanguage: detectLanguage(path)! } : {}),
+    codeExtractorVersion: EXTRACTOR_VERSION,
   };
 }
 

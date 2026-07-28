@@ -193,7 +193,7 @@ export async function ingestRepo(
         console.log(`  skip ${path} (binary/size)`);
         return;
       }
-      const doc = normalizeCode(key, path, content, source.blobUrl(path), tenant);
+      const doc = normalizeCode(key, path, content, source.blobUrl(path), tenant, head);
       if (await upsertDocument(client, doc)) {
         await (await import("../store.js")).replaceCodeIndex(client, doc, key, path, head);
         out.upserted++;
