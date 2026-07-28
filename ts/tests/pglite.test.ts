@@ -17,7 +17,9 @@ import { type Db, connect, migrate } from "../db.js";
 import { normalize as normalizePage } from "../ingest/confluence.js";
 import { normalize as normalizeIssue } from "../ingest/jira.js";
 import { type Viewer, getDoc, searchDocs, viewerFromAuthenticatedClaims } from "../search.js";
-import { reconcile, upsertDocument } from "../store.js";
+import { searchCodeIndex } from "../code-search.js";
+import { normalizeCode } from "../ingest/code.js";
+import { reconcile, replaceCodeIndex, upsertDocument } from "../store.js";
 import { callTool } from "../tools.js";
 
 const fixture = (name: string) =>
@@ -180,6 +182,28 @@ describe("pglite zero-install backend", () => {
     expect(revisions.rows.length).toBeGreaterThanOrEqual(2);
     expect(revisions.rows.at(-1).acl_snapshot).toEqual(["ops"]);
     expect(revisions.rows.at(-1).revision).toBe(first.rows[0].revision + 1);
+  });
+
+  it("retrieves deterministic ACL-filtered code citations at an immutable ref", async () => {
+    const doc = normalizeCode(
+      "org/repo",
+      "src/retry.ts",
+      'export function retryPayment() { return "retry"; }',
+      null,
+      "default",
+      "sha-code-1",
+    );
+    await upsertDocument(client, doc);
+    await replaceCodeIndex(client, doc, "org/repo", "src/retry.ts", "sha-code-1");
+    const hit = await searchCodeIndex(client, VIEWER, {
+      query: "retrypayment",
+      kind: "symbol",
+      ref: "sha-code-1",
+    });
+    expect(hit.executor).toBe("code_index");
+    expect(hit.results).toHaveLength(1);
+    expect(hit.results[0]).toMatchObject({ path: "src/retry.ts", ref: "sha-code-1", lineStart: 1 });
+    expect(hit.context.totalChars).toBeGreaterThan(0);
   });
 
   it("integrity audit passes on a healthy catalog and flags planted damage", async () => {
