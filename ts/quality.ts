@@ -19,6 +19,7 @@ export interface IntegrityReport {
   docs_empty_body: number; // conversion produced (almost) nothing
   docs_html_residue: number; // storage-format leaked through the converter
   chunks_null_tsv: number; // FTS index hole — always a bug
+  docs_quarantined: number; // secrets found: invisible to reads, awaiting remediation
   links_dangling_dst: number; // informational: by-design "worth ingesting" markers
   stale_sources: string[]; // cursor age > 24h — connector rot tripwire
 }
@@ -42,6 +43,14 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
       " OR body LIKE '%<ac:%'",
   );
   const nullTsv = await one("SELECT count(*)::int AS n FROM chunks WHERE tsv IS NULL");
+  // Quarantined documents are invisible to every read path, so they cannot leak —
+  // but they are also unsearchable, which makes them a remediation worklist rather
+  // than a resolved state. Surfacing the count here is what stops them being
+  // silently forgotten. `ok` deliberately does NOT fail on them: a quarantine is
+  // the system working, not a defect.
+  const quarantined = await one(
+    "SELECT count(*)::int AS n FROM documents WHERE quarantined_at IS NOT NULL",
+  );
   const danglingDst = await one(
     "SELECT count(*)::int AS n FROM links l" +
       " WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.tenant = l.tenant AND d.id = l.dst_id)",
@@ -58,6 +67,7 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
     docs_empty_body: emptyBody,
     docs_html_residue: htmlResidue,
     chunks_null_tsv: nullTsv,
+    docs_quarantined: quarantined,
     links_dangling_dst: danglingDst,
     stale_sources: stale.rows.map((r) => r.source as string),
   };

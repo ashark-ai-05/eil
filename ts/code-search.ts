@@ -44,6 +44,9 @@ export async function searchCodeIndex(
     "ci.tenant = $1",
     "(d.ingested_by = $2 OR d.acl_groups ?| $3::text[])",
     "d.tombstoned_at IS NULL",
+    // a quarantined doc is not chunked, but the code index is a SEPARATE write
+    // path — exclude it here too rather than relying on that invariant
+    "d.quarantined_at IS NULL",
     "ci.value = $4",
   ];
   const args: unknown[] = [viewer.tenant, viewer.principal, viewer.groups, value];

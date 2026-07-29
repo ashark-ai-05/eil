@@ -403,4 +403,96 @@ describe("pglite zero-install backend", () => {
     );
     expect(live.rows.map((r: any) => r.code_path)).toEqual(["svcA/x.ts", "svcA/y.ts", "svcB/z.ts"]);
   });
+
+  // The load-bearing claim of the secrets design: a quarantined document is
+  // never chunked, so the secret cannot reach tsv (which is SEARCHABLE — a
+  // matching fragment would confirm the key exists), ts_headline, the vector
+  // snippet, or an embedding. Redacting only on serve would have left all four.
+  it("a document with a secret is quarantined, unchunked and invisible", async () => {
+    const doc = normalizePage({
+      ...fixture("confluence_page.json"),
+      id: "88001",
+      body: "Deploy key: AKIAIOSFODNN7EXAMPLE for the payment job.",
+    });
+    await upsertDocument(client, doc);
+
+    const row = await client.query(
+      "SELECT quarantined_at, secret_findings, body FROM documents WHERE id = $1",
+      ["confluence:page:88001"],
+    );
+    expect(row.rows[0].quarantined_at).not.toBeNull();
+    expect(row.rows[0].secret_findings[0].rule).toBe("aws-access-key-id");
+    expect(row.rows[0].body).toContain("AKIAIOSFODNN7EXAMPLE"); // retained for remediation
+
+    // nothing downstream of chunking exists, so nothing downstream can leak
+    const chunks = await client.query("SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1", [
+      "confluence:page:88001",
+    ]);
+    expect(chunks.rows[0].n).toBe(0);
+
+    // and the tsvector cannot be probed for the secret
+    const probe = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE tsv @@ plainto_tsquery('english', $1)",
+      ["AKIAIOSFODNN7EXAMPLE"],
+    );
+    expect(probe.rows[0].n).toBe(0);
+
+    expect(await getDoc(client, VIEWER, "confluence:page:88001")).toBeNull();
+    const found: any = await searchDocs(client, VIEWER, "payment job deploy key", 10);
+    expect(found.results.map((r: any) => r.id)).not.toContain("confluence:page:88001");
+  });
+
+  it("surfaces quarantined documents as a remediation worklist", async () => {
+    const { integrity } = await import("../quality.js");
+    expect((await integrity(client)).docs_quarantined).toBeGreaterThan(0);
+  });
+
+  // Regression: upsert DELETEd every chunk and re-INSERTed without the embedding
+  // column, so a one-character edit re-embedded the whole document. Pairs with
+  // the metadata-aware contentHash, which changes every existing row's hash and
+  // would otherwise discard the entire corpus's vectors on the next ingest.
+  it("keeps embeddings for chunks whose text did not change", async () => {
+    const base = normalizePage({ ...fixture("confluence_page.json"), id: "88002" });
+    await upsertDocument(client, base);
+    await client.query(
+      "UPDATE chunks SET embedding = '{0.1,0.2}'::float4[], embed_model = 'test' WHERE doc_id = $1",
+      ["confluence:page:88002"],
+    );
+    const before = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1 AND embedding IS NOT NULL",
+      ["confluence:page:88002"],
+    );
+    expect(before.rows[0].n).toBeGreaterThan(1);
+
+    // Change the URL — metadata that is NOT part of any chunk's text. The
+    // document hash changes and the row is rewritten, but every chunk hashes
+    // identically, so every vector survives.
+    //
+    // A TITLE change would legitimately invalidate all of them, because the
+    // chunker prefixes `headingPath` (which begins with the title) into every
+    // chunk's text. That coupling is exactly what §5's "store text clean"
+    // change removes; until it lands, renaming a page is a full re-embed.
+    await upsertDocument(client, { ...base, url: "https://confluence.corp/moved" });
+    const after = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1 AND embedding IS NOT NULL",
+      ["confluence:page:88002"],
+    );
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+
+  // The same change proves the metadata hash: a title-only edit must PROPAGATE.
+  it("propagates a metadata-only change through the hash gate", async () => {
+    const base = normalizePage({ ...fixture("confluence_page.json"), id: "88003" });
+    await upsertDocument(client, base);
+    expect(await upsertDocument(client, base)).toBe(false); // truly unchanged
+    expect(await upsertDocument(client, { ...base, title: "Renamed" })).toBe(true);
+    const t = await client.query("SELECT title FROM documents WHERE id = $1", [
+      "confluence:page:88003",
+    ]);
+    expect(t.rows[0].title).toBe("Renamed");
+    // and an ACL-group change, the one that actually matters
+    expect(await upsertDocument(client, { ...base, title: "Renamed", aclGroups: ["ops"] })).toBe(
+      true,
+    );
+  });
 });

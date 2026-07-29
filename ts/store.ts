@@ -8,6 +8,7 @@ import { type CanonicalDoc, chunkHash, contentHash, sha256 } from "./contracts/m
 import { chunk } from "./core/chunker.js";
 import type { Db } from "./db.js";
 import { extractCodeIndex } from "./ingest/codeindex.js";
+import { scanSecrets } from "./ingest/secrets.js";
 
 export async function getCursor(
   client: Db,
@@ -252,6 +253,32 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
       userInfo().username,
     ],
   );
+  // Quarantine short-circuits the pipeline. This placement is the whole safety
+  // argument: tsv, the embedding, ts_headline and the vector-arm snippet are all
+  // downstream of chunking, so returning here means none of them can ever hold
+  // the secret. Redacting on serve alone would still have left it searchable in
+  // the tsvector, where a matching fragment confirms its presence.
+  const findings = scanSecrets(doc.body);
+  await client.query(
+    "UPDATE documents SET secret_findings = $1, quarantined_at = $2 WHERE tenant = $3 AND id = $4",
+    [
+      findings.length > 0 ? JSON.stringify(findings) : null,
+      findings.length > 0 ? new Date() : null,
+      doc.tenant,
+      doc.id,
+    ],
+  );
+  if (findings.length > 0) {
+    await client.query("DELETE FROM chunks WHERE tenant = $1 AND doc_id = $2", [
+      doc.tenant,
+      doc.id,
+    ]);
+    console.error(
+      `  ! quarantined ${doc.id}: ${findings.map((f) => `${f.rule} ${f.hint}`).join(", ")}`,
+    );
+    return true;
+  }
+
   if (doc.codeRepo)
     await client.query(
       "UPDATE documents SET code_repo=$1, code_path=$2, code_ref=$3, code_language=$4, code_extractor_version=$5 WHERE tenant=$6 AND id=$7",
@@ -265,12 +292,46 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
         doc.id,
       ],
     );
-  await client.query("DELETE FROM chunks WHERE tenant = $1 AND doc_id = $2", [doc.tenant, doc.id]);
-  for (const c of chunk(doc)) {
+  // Re-embedding is the dominant recurring cost in the system, and it was being
+  // paid in full for every edit: DELETE every chunk, re-INSERT without the
+  // embedding column, so a one-character typo fix on a 100-chunk runbook cost
+  // 100 embeddings. chunks.content_hash was already computed on every write and
+  // never read. Keep rows whose text is unchanged — their vectors survive — and
+  // touch only what actually differs.
+  //
+  // This pairs with the metadata-aware contentHash landing in the same commit:
+  // that change alters the document hash for every existing row, so the next
+  // ingest re-writes the whole catalog. Without chunk-level reuse that re-write
+  // would also discard every vector in the corpus.
+  const fresh = chunk(doc);
+  const prior = await client.query(
+    "SELECT seq, content_hash FROM chunks WHERE tenant = $1 AND doc_id = $2",
+    [doc.tenant, doc.id],
+  );
+  const priorBySeq = new Map<number, string>(
+    prior.rows.map((r: any) => [Number(r.seq), r.content_hash as string]),
+  );
+  const freshSeqs = new Set(fresh.map((c) => c.seq));
+  for (const seq of priorBySeq.keys()) {
+    if (!freshSeqs.has(seq))
+      await client.query("DELETE FROM chunks WHERE tenant = $1 AND doc_id = $2 AND seq = $3", [
+        doc.tenant,
+        doc.id,
+        seq,
+      ]);
+  }
+  for (const c of fresh) {
+    const h = chunkHash(c);
+    if (priorBySeq.get(c.seq) === h) continue; // identical text — keep the row and its vector
     await client.query(
       "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash)" +
-        " VALUES ($1, $2, $3, $4, $5, $6)",
-      [doc.tenant, c.docId, c.seq, c.headingPath, c.text, chunkHash(c)],
+        " VALUES ($1, $2, $3, $4, $5, $6)" +
+        " ON CONFLICT (tenant, doc_id, seq) DO UPDATE SET" +
+        "   heading_path = EXCLUDED.heading_path, text = EXCLUDED.text," +
+        "   content_hash = EXCLUDED.content_hash," +
+        // the text changed, so any stored vector is now for the wrong text
+        "   embedding = NULL, embed_model = NULL",
+      [doc.tenant, c.docId, c.seq, c.headingPath, c.text, h],
     );
   }
   await client.query("DELETE FROM links WHERE tenant = $1 AND src_id = $2", [doc.tenant, doc.id]);
