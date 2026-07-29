@@ -11,6 +11,15 @@ import { fileURLToPath } from "node:url";
 export interface Embedder {
   /** stable "provider:model" id, stamped into chunks.embed_model for staleness */
   readonly id: string;
+  /**
+   * Roughly how many characters of a text actually reach the model. Text past
+   * this is silently discarded by the tokenizer — no error, no warning, just a
+   * vector that ignores it. Measured against the vendored MiniLM: two 3200-char
+   * texts differing ONLY in their tails embed to cosine 1.000000, i.e. the tails
+   * are entirely invisible. Exposed so the chunker and the integrity audit can
+   * see the limit instead of each assuming one.
+   */
+  readonly windowChars: number;
   embed(texts: string[]): Promise<Float32Array[]>;
 }
 
@@ -60,6 +69,7 @@ function hash32(s: string): number {
  *  NOT semantically meaningful — hash-seeded unit vectors. */
 export class FakeEmbedder implements Embedder {
   readonly id: string;
+  readonly windowChars = Number.MAX_SAFE_INTEGER; // hashes the whole string
   private readonly dim: number;
   constructor(dim = 64) {
     this.dim = dim;
@@ -83,6 +93,8 @@ export class FakeEmbedder implements Embedder {
 /** OpenAI-compatible embeddings over an internal gateway (data stays in-org). */
 export class HttpEmbedder implements Embedder {
   readonly id: string;
+  /** Gateway models are typically 8k tokens; conservative default, overridable. */
+  readonly windowChars = Number(process.env.EIL_EMBED_WINDOW_CHARS ?? 8_000);
   private readonly base: string;
   private readonly model: string;
   private readonly key: string | undefined;
@@ -123,14 +135,30 @@ export class HttpEmbedder implements Embedder {
  *  downloads once from the HF hub and is cached; set EIL_EMBED_CACHE to a local
  *  dir to run air-gapped. `@huggingface/transformers` is an optional dependency,
  *  loaded lazily so the core install stays lean. */
+/**
+ * Characters that reach each known local model. MiniLM-L6 stops at 256 TOKENS;
+ * at ~4 chars/token that is ~1024 characters, which the measurement above
+ * corroborates (the tail still moved the vector at 1600 chars but not at 3200).
+ * A model not listed here gets the conservative MiniLM figure rather than an
+ * optimistic guess, because guessing high reintroduces the silent-truncation bug.
+ */
+const MODEL_WINDOW_CHARS: Record<string, number> = {
+  "Xenova/all-MiniLM-L6-v2": 1_024,
+};
+const DEFAULT_WINDOW_CHARS = 1_024;
+
 export class LocalEmbedder implements Embedder {
   readonly id: string;
+  readonly windowChars: number;
   private readonly model: string;
   private readonly modelsDir: string;
   private pipe: Promise<any> | null = null;
   constructor() {
     this.model = process.env.EIL_EMBED_MODEL ?? "Xenova/all-MiniLM-L6-v2";
     this.id = `local:${this.model}:q8`;
+    this.windowChars = Number(
+      process.env.EIL_EMBED_WINDOW_CHARS ?? MODEL_WINDOW_CHARS[this.model] ?? DEFAULT_WINDOW_CHARS,
+    );
     // The model is VENDORED in the repo (models/<model>/), so embedding is fully
     // local — no Hugging Face hub call ever. Resolve it relative to this module
     // (ts/embed/ -> repo root) so cwd doesn't matter.
@@ -168,7 +196,7 @@ export class LocalEmbedder implements Embedder {
   }
 }
 
-export function getEmbedder(name?: string): Embedder {
+function build(name?: string): Embedder {
   const selected = name ?? process.env.EIL_EMBED_PROVIDER ?? "local";
   switch (selected) {
     case "local":
@@ -180,4 +208,33 @@ export function getEmbedder(name?: string): Embedder {
     default:
       throw new Error(`unknown embed provider: '${selected}' (expected local | http | fake)`);
   }
+}
+
+let cached: Embedder | null = null;
+
+/**
+ * Construction is cheap; the ONNX pipeline behind LocalEmbedder is not. It is
+ * cached on the INSTANCE and built lazily on first embed(), so handing back a
+ * fresh instance per call reloaded the model on every single search — measured
+ * 1192ms cold and ~270-300ms warm, against ~4ms for a reused instance. searchDocs
+ * calls this per query, so that was 60-75x of avoidable latency on every search.
+ *
+ * The cache key is `.id`, not the provider name, and that choice is load-bearing.
+ * `id` encodes provider AND model (`local:<model>:q8`), and it is the same value
+ * stamped into chunks.embed_model and matched by vecArm. Keying on the provider
+ * would let an EIL_EMBED_MODEL switch keep serving vectors from the old model
+ * while search believed they came from the new one — finite, meaningless cosine
+ * scores. Keying on `id` makes that structurally impossible rather than
+ * something a comment has to warn about.
+ */
+export function getEmbedder(name?: string): Embedder {
+  const fresh = build(name);
+  if (cached && cached.id === fresh.id) return cached;
+  cached = fresh;
+  return fresh;
+}
+
+/** Drop the memoized embedder. For tests that switch providers mid-process. */
+export function resetEmbedderCache(): void {
+  cached = null;
 }

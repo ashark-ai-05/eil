@@ -234,7 +234,50 @@ export async function searchDocs(
   // (specialized executors arrive with Zoekt/symbols) — the route only steers
   // arm weights today. `executor` names the arms that actually contributed, so
   // route ≠ executor stays visible, as does a silently-missing vector arm.
-  return { route: decision.route, executor: Object.keys(arms).sort().join("+") || "none", results };
+  return {
+    route: decision.route,
+    executor: Object.keys(arms).sort().join("+") || "none",
+    results,
+    ...confidence(results, arms),
+  };
+}
+
+/** Score gap below which a result set is worth re-querying rather than trusting. */
+export const WEAK_SCORE_GAP = 0.05;
+
+/**
+ * Signals an agent can act on without a second model call.
+ *
+ * Self-RAG / CRAG / Adaptive-RAG all spend LLM tokens to answer one question:
+ * "is this result set good enough, or should I search again?" Their measured
+ * gains are real, but the expensive part is the deciding, and these four numbers
+ * hand the caller the same evidence deterministically and for free:
+ *
+ *   top_score          absolute confidence in the best hit
+ *   score_gap          top1 - top5; a flat set means nothing stood out
+ *   n_above_threshold  how many results are near the top rather than tailing off
+ *   arms_contributing  how many independent arms agreed — one arm is a weaker
+ *                      signal than three, and a MISSING arm (the vector arm
+ *                      silently degrading) shows up here rather than nowhere
+ *
+ * Deliberately descriptive, not prescriptive: EIL reports, the agent decides.
+ */
+function confidence(
+  results: Array<{ score?: number }>,
+  arms: Record<string, string[]>,
+): Record<string, unknown> {
+  if (results.length === 0) {
+    return { top_score: 0, score_gap: 0, n_above_threshold: 0, arms_contributing: 0 };
+  }
+  const top = results[0]?.score ?? 0;
+  const fifth = results[Math.min(4, results.length - 1)]?.score ?? 0;
+  const cut = top * (1 - WEAK_SCORE_GAP);
+  return {
+    top_score: top,
+    score_gap: Math.round((top - fifth) * 1e6) / 1e6,
+    n_above_threshold: results.filter((r) => (r.score ?? 0) >= cut).length,
+    arms_contributing: Object.keys(arms).length,
+  };
 }
 
 export async function getDoc(

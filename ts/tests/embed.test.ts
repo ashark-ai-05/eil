@@ -124,6 +124,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 const stub: Embedder = {
   id: "stub:v1",
+  windowChars: 1_000_000,
   embed: async (t) => t.map(() => Float32Array.from([1, 0, 0])),
 };
 
@@ -171,6 +172,7 @@ describe("vec arm fusion", () => {
       // Stub: query "zzz" -> [1,0,0]; PAY-2 body -> [1,0,0] (nearest); others -> [0,1,0].
       const stubEmbed: Embedder = {
         id: "stub:v2",
+        windowChars: 1_000_000,
         embed: async (texts) =>
           texts.map((t) =>
             t.includes("Sign-in") || t === "zzz"
@@ -219,6 +221,7 @@ describe("vec arm fusion", () => {
       // score 1); every other chunk -> [0,1,0] (orthogonal, score 0).
       const stubEmbed: Embedder = {
         id: "stub:v3",
+        windowChars: 1_000_000,
         embed: async (texts) =>
           texts.map((t) =>
             t.includes("Card processor") || t === "www"
@@ -247,6 +250,7 @@ describe("vec arm fusion", () => {
       // passes and `embed()` is actually reached (and throws). A non-matching id
       // would short-circuit at the guard and never exercise the catch path.
       id: "stub:v1",
+      windowChars: 1_000_000,
       embed: async () => {
         throw new Error("no endpoint");
       },

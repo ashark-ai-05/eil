@@ -20,6 +20,7 @@ export interface IntegrityReport {
   docs_html_residue: number; // storage-format leaked through the converter
   chunks_null_tsv: number; // FTS index hole — always a bug
   docs_quarantined: number; // secrets found: invisible to reads, awaiting remediation
+  chunks_over_embed_window: number; // tail silently dropped by the embedder
   links_dangling_dst: number; // informational: by-design "worth ingesting" markers
   stale_sources: string[]; // cursor age > 24h — connector rot tripwire
 }
@@ -51,6 +52,22 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
   const quarantined = await one(
     "SELECT count(*)::int AS n FROM documents WHERE quarantined_at IS NOT NULL",
   );
+  // Chunks longer than the embedder's window are SILENTLY truncated: no error,
+  // just a vector that ignores the tail. Measured against the vendored MiniLM,
+  // two 3200-char texts differing only past ~1600 chars embed to cosine
+  // 1.000000. That is invisible from the outside, so count it here — the number
+  // is the fraction of the corpus the vector arm is not actually reading.
+  const { getEmbedder } = await import("./embed/index.js");
+  let overWindow = 0;
+  try {
+    const w = getEmbedder().windowChars;
+    if (Number.isFinite(w))
+      overWindow = await one(
+        `SELECT count(*)::int AS n FROM chunks WHERE length(heading_path) + length(text) > ${Math.floor(w)}`,
+      );
+  } catch {
+    /* embedder unavailable: not an integrity fault */
+  }
   const danglingDst = await one(
     "SELECT count(*)::int AS n FROM links l" +
       " WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.tenant = l.tenant AND d.id = l.dst_id)",
@@ -68,6 +85,7 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
     docs_html_residue: htmlResidue,
     chunks_null_tsv: nullTsv,
     docs_quarantined: quarantined,
+    chunks_over_embed_window: overWindow,
     links_dangling_dst: danglingDst,
     stale_sources: stale.rows.map((r) => r.source as string),
   };
