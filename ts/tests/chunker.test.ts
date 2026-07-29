@@ -38,16 +38,23 @@ describe("chunker golden contract", () => {
     expect(chunksAsGolden()).toEqual(chunksAsGolden());
   });
 
-  it("prefixes every chunk with its breadcrumb", () => {
+  // The contract changed deliberately: a chunk carries its breadcrumb ALONGSIDE
+  // the text rather than inside it. Both snippet paths read `text`, so the old
+  // shape charged every snippet for the breadcrumb (9-16% of the 240-char vector
+  // snippet on this shallow fixture, worse on a real hierarchy) and tied every
+  // vector to the document title, making a rename a full re-embed.
+  it("carries the breadcrumb beside the text, not inside it", () => {
     for (const c of chunksAsGolden()) {
-      expect(c.text.startsWith(c.heading_path)).toBe(true);
       expect(c.heading_path.startsWith("Payment Retry Policy")).toBe(true);
+      expect(c.text.startsWith(c.heading_path)).toBe(false);
+      expect(c.text.trim().length).toBeGreaterThan(0);
     }
   });
 
   it("bounds chunk size", () => {
+    // No longer needs the breadcrumb allowance: text is the piece alone.
     for (const c of chunksAsGolden()) {
-      expect(c.text.length).toBeLessThanOrEqual(MAX_CHARS + c.heading_path.length + 2);
+      expect(c.text.length).toBeLessThanOrEqual(MAX_CHARS);
     }
   });
 });

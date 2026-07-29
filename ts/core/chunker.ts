@@ -76,7 +76,7 @@ export function chunkCode(doc: CanonicalDoc): Chunk[] {
       docId: doc.id,
       seq: chunks.length,
       headingPath,
-      text: `${headingPath}\n\n${window}`,
+      text: window,
     });
     if (end === lines.length) break;
   }
@@ -92,7 +92,7 @@ export function chunk(doc: CanonicalDoc): Chunk[] {
         docId: doc.id,
         seq: chunks.length,
         headingPath,
-        text: `${headingPath}\n\n${piece}`,
+        text: piece,
       });
     }
   }

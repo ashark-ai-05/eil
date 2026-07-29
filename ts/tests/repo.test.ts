@@ -29,7 +29,10 @@ describe("code chunker", () => {
     const chunks = chunk(codeDoc(body));
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks[0]!.headingPath).toBe("src/a.ts › L1-60");
-    expect(chunks[0]!.text.startsWith("src/a.ts › L1-60\n\n")).toBe(true);
+    // text is the window ALONE; the breadcrumb travels in headingPath so that
+    // snippets are not charged for it and a rename does not invalidate vectors
+    expect(chunks[0]!.text.startsWith("src/a.ts")).toBe(false);
+    expect(chunks[0]!.text.startsWith("line1")).toBe(true);
     expect(chunks[0]!.text).toContain("line1");
     // overlap: window 2 starts before window 1 ends (60 - 10 = 51)
     expect(chunks[1]!.headingPath).toBe("src/a.ts › L51-110");

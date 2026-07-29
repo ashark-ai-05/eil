@@ -3,30 +3,30 @@
     "doc_id": "confluence:page:12345",
     "seq": 0,
     "heading_path": "Payment Retry Policy",
-    "text": "Payment Retry Policy\n\nThis page describes how payment retries are scheduled and executed. Related work is tracked in PAY-981."
+    "text": "This page describes how payment retries are scheduled and executed. Related work is tracked in PAY-981."
   },
   {
     "doc_id": "confluence:page:12345",
     "seq": 1,
     "heading_path": "Payment Retry Policy > Retry schedule",
-    "text": "Payment Retry Policy > Retry schedule\n\nRetries use exponential backoff starting at 30 seconds, doubling up to a maximum of 1 hour. After 12 failed attempts the payment is parked and an alert fires.\n\nThe schedule is owned by the retry-scheduler service."
+    "text": "Retries use exponential backoff starting at 30 seconds, doubling up to a maximum of 1 hour. After 12 failed attempts the payment is parked and an alert fires.\n\nThe schedule is owned by the retry-scheduler service."
   },
   {
     "doc_id": "confluence:page:12345",
     "seq": 2,
     "heading_path": "Payment Retry Policy > Idempotency",
-    "text": "Payment Retry Policy > Idempotency\n\nEvery retry carries the original idempotency key. Downstream processors MUST treat a repeated key as a no-op and return the original result."
+    "text": "Every retry carries the original idempotency key. Downstream processors MUST treat a repeated key as a no-op and return the original result."
   },
   {
     "doc_id": "confluence:page:12345",
     "seq": 3,
     "heading_path": "Payment Retry Policy > Idempotency > Key format",
-    "text": "Payment Retry Policy > Idempotency > Key format\n\nKeys are UUIDv7, generated at payment creation, never regenerated on retry."
+    "text": "Keys are UUIDv7, generated at payment creation, never regenerated on retry."
   },
   {
     "doc_id": "confluence:page:12345",
     "seq": 4,
     "heading_path": "Payment Retry Policy > Alerting",
-    "text": "Payment Retry Policy > Alerting\n\nParked payments raise a PagerDuty alert to the payments on-call. Runbook steps live in [[payments/parked-payments-runbook]]."
+    "text": "Parked payments raise a PagerDuty alert to the payments on-call. Runbook steps live in [[payments/parked-payments-runbook]]."
   }
 ]

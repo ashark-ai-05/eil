@@ -495,4 +495,65 @@ describe("pglite zero-install backend", () => {
       true,
     );
   });
+
+  // AC: "snippets contain no breadcrumb". Both snippet paths read chunks.text —
+  // ts_headline() on the lexical arm and slice(0,240) on the vector arm — so the
+  // old prefixed shape charged every snippet for the breadcrumb.
+  it("returns snippets that start with content, not with the breadcrumb", async () => {
+    const res: any = await searchDocs(client, VIEWER, "payment retries", 5);
+    expect(res.results.length).toBeGreaterThan(0);
+    for (const r of res.results) {
+      expect(r.snippet).not.toContain("Payment Retry Policy >");
+      expect(r.snippet.replace(/\*\*/g, "").trim().startsWith("Payment Retry Policy")).toBe(false);
+    }
+  });
+
+  // Removing the prefix from `text` would have silently dropped title and space
+  // terms out of the lexical index, since the prefix was the only thing putting
+  // them there. tsv is built over heading_path AND text, with the breadcrumb at
+  // weight A so a title match now outranks a body match instead of tying it.
+  it("keeps breadcrumb terms searchable, at a higher weight than body terms", async () => {
+    const hit = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE tsv @@ plainto_tsquery('english', $1)",
+      ["idempotency"], // appears only in a heading in the fixture
+    );
+    expect(hit.rows[0].n).toBeGreaterThan(0);
+    const weights = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE tsv @@ to_tsquery('english', $1)",
+      ["idempot:A"], // :A == matched at heading weight
+    );
+    expect(weights.rows[0].n).toBeGreaterThan(0);
+  });
+
+  // AC: "editing one chunk of a 100-chunk document re-embeds exactly one".
+  it("re-embeds exactly the chunk that changed, and no others", async () => {
+    const sections = Array.from(
+      { length: 12 },
+      (_, i) => `## Section ${i}\n\nBody text for section ${i} with enough words to chunk.`,
+    );
+    const base = normalizePage({
+      ...fixture("confluence_page.json"),
+      id: "88010",
+      body: sections.join("\n\n"),
+    });
+    await upsertDocument(client, base);
+    await client.query(
+      "UPDATE chunks SET embedding = '{0.1,0.2}'::float4[], embed_model = 'test' WHERE doc_id = $1",
+      ["confluence:page:88010"],
+    );
+    const total = await client.query("SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1", [
+      "confluence:page:88010",
+    ]);
+    expect(total.rows[0].n).toBeGreaterThan(5);
+
+    // change ONE section's body
+    sections[7] = "## Section 7\n\nCompletely rewritten body for section seven now.";
+    await upsertDocument(client, { ...base, body: sections.join("\n\n") });
+
+    const cleared = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1 AND embedding IS NULL",
+      ["confluence:page:88010"],
+    );
+    expect(cleared.rows[0].n).toBe(1); // exactly one, not the whole document
+  });
 });

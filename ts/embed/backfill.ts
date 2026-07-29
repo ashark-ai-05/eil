@@ -17,16 +17,28 @@ export async function backfill(
   const rows = (
     await client.query(
       opts.reembed
-        ? "SELECT tenant, doc_id, seq, text FROM chunks ORDER BY tenant, doc_id, seq"
-        : "SELECT tenant, doc_id, seq, text FROM chunks WHERE embedding IS NULL OR embed_model IS DISTINCT FROM $1 ORDER BY tenant, doc_id, seq",
+        ? "SELECT tenant, doc_id, seq, heading_path, text FROM chunks ORDER BY tenant, doc_id, seq"
+        : "SELECT tenant, doc_id, seq, heading_path, text FROM chunks WHERE embedding IS NULL OR embed_model IS DISTINCT FROM $1 ORDER BY tenant, doc_id, seq",
       opts.reembed ? [] : [embedder.id],
     )
-  ).rows as Array<{ tenant: string; doc_id: string; seq: number; text: string }>;
+  ).rows as Array<{
+    tenant: string;
+    doc_id: string;
+    seq: number;
+    heading_path: string;
+    text: string;
+  }>;
 
   let embedded = 0;
   for (let i = 0; i < rows.length; i += batch) {
     const slice = rows.slice(i, i + batch);
-    const vecs = await embedder.embed(slice.map((r) => r.text));
+    // Compose the breadcrumb back on for the EMBEDDING only. The prefix is real
+    // context for a vector — it is why a chunk is interpretable in isolation —
+    // but it does not belong in stored text, where it would be charged to every
+    // snippet and would tie every vector to the document's title.
+    const vecs = await embedder.embed(
+      slice.map((r) => (r.heading_path ? `${r.heading_path}\n\n${r.text}` : r.text)),
+    );
     for (let j = 0; j < slice.length; j++) {
       await client.query(
         "UPDATE chunks SET embedding = $1, embed_model = $2 WHERE tenant = $3 AND doc_id = $4 AND seq = $5",
