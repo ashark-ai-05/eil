@@ -12,6 +12,7 @@ import { type Route, classify } from "./core/router.js";
 import type { Db } from "./db.js";
 import { type Embedder, getEmbedder, toVec } from "./embed/index.js";
 import { OVERSAMPLE, loadCentroids, probeClusters, signature } from "./embed/ivf.js";
+import { ATTR, OP, currentTrace, withSpan } from "./telemetry.js";
 
 export const SNIPPET_OPTS = "StartSel=**, StopSel=**, MaxWords=40, MinWords=10";
 export const GET_DOC_MAX_CHARS = 8_000;
@@ -118,6 +119,28 @@ export async function searchDocs(
   viewer: Viewer,
   query: string,
   limit = 8,
+  embedder?: Embedder,
+): Promise<Record<string, unknown>> {
+  return withSpan(
+    `${OP.retrieval} eil`,
+    { [ATTR.operation]: OP.retrieval, [ATTR.dataSource]: "eil" },
+    async (span) => {
+      const out = await searchDocsInner(client, viewer, query, limit, embedder);
+      // The arms that actually ran — route != executor is the interesting case,
+      // and a silently-missing vector arm shows up here rather than nowhere.
+      if (typeof out.route === "string") span.setAttribute("eil.route", out.route);
+      if (typeof out.executor === "string") span.setAttribute("eil.executor", out.executor);
+      if (Array.isArray(out.results)) span.setAttribute("eil.results", out.results.length);
+      return out;
+    },
+  );
+}
+
+async function searchDocsInner(
+  client: Db,
+  viewer: Viewer,
+  query: string,
+  limit: number,
   embedder?: Embedder,
 ): Promise<Record<string, unknown>> {
   const decision = classify(query);

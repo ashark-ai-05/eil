@@ -22,6 +22,7 @@ import {
   recordRetrieval,
   searchDocs,
 } from "./search.js";
+import { ATTR, OP, currentTrace, withSpan } from "./telemetry.js";
 
 export interface ToolSpec<S extends z.ZodRawShape = z.ZodRawShape> {
   name: string;
@@ -214,13 +215,30 @@ export async function callTool(
   const c = client ?? (await connect());
   // One trace id per tool call, returned to the caller so an agent's multi-call
   // task is reconstructable, and written to audit_log as the join key to spans.
-  const traceId = randomUUID();
+  // A locally-minted id when tracing is off, the real span id when it is on, so
+  // audit_log always has a correlation key and it JOINS to a span when one
+  // exists. Losing the local id would mean the agent-facing trace_id changes
+  // meaning depending on configuration.
   const started = Date.now();
+  let traceId: string = randomUUID();
   let result: Record<string, unknown> = {};
   let ok = true;
   let error: string | undefined;
   try {
-    result = (await spec.handler(c, v, parsed.data)) ?? {};
+    result = await withSpan(
+      `tools/call ${name}`,
+      {
+        [ATTR.mcpMethod]: "tools/call",
+        [ATTR.operation]: OP.executeTool,
+        [ATTR.toolName]: name,
+        [ATTR.transport]: "pipe", // stdio; no other network attributes apply
+      },
+      async () => {
+        const t = await currentTrace();
+        if (t.traceId) traceId = t.traceId;
+        return (await spec.handler(c, v, parsed.data)) ?? {};
+      },
+    );
     // A handler that returns {error} did not throw, but it did not succeed
     // either — an ACL denial reaching vw_zero_results as a legitimate
     // zero-result search is what corrupted the flagship adoption metric.
