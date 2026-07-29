@@ -259,6 +259,102 @@ program
   });
 
 program
+  .command("eval:mine")
+  .description("Promote real queries from audit_log into the labelled eval set")
+  .option("--limit <n>", "max distinct queries to promote", "200")
+  .action(async (opts) => {
+    const { mineQueries } = await import("./eval/harness.js");
+    const { localViewer } = await import("./search.js");
+    const client = await connect();
+    try {
+      const v = localViewer();
+      const added = await mineQueries(client, { limit: Number(opts.limit), tenant: v.tenant });
+      const total = await client.query(
+        "SELECT origin, count(*)::int AS n FROM eval_queries WHERE tenant = $1 GROUP BY origin ORDER BY origin",
+        [v.tenant],
+      );
+      console.log(`promoted ${added} new queries`);
+      for (const r of total.rows) console.log(`  ${r.origin.padEnd(10)} ${r.n}`);
+      const unjudged = await client.query(
+        "SELECT count(*)::int AS n FROM eval_queries q WHERE q.tenant = $1" +
+          " AND NOT EXISTS (SELECT 1 FROM eval_qrels r WHERE r.query_id = q.id)",
+        [v.tenant],
+      );
+      if (unjudged.rows[0].n > 0)
+        console.log(
+          `\n${unjudged.rows[0].n} queries have no judgments yet — they run but do not score.`,
+        );
+    } finally {
+      await client.end();
+    }
+  });
+
+program
+  .command("eval:run")
+  .description("Score the labelled set through the real retrieval path")
+  .option("--persist", "store the run for later comparison")
+  .option("--min-ndcg <x>", "exit non-zero below this mean nDCG@10", "0")
+  .action(async (opts) => {
+    const { runEval } = await import("./eval/harness.js");
+    const { localViewer } = await import("./search.js");
+    const client = await connect();
+    try {
+      const r = await runEval(client, localViewer(), {
+        persist: !!opts.persist,
+        gitSha: process.env.GITHUB_SHA ?? "local",
+      });
+      if (r.judged === 0) {
+        console.log(`${r.queries} queries, none judged yet — nothing to score.`);
+        console.log("Add rows to eval_qrels, or run `eil eval:mine` then judge the pool.");
+        return;
+      }
+      const pct = (x: number) => (Number.isNaN(x) ? "  n/a" : x.toFixed(4));
+      const runTag = r.runId ? ` (run ${r.runId})` : "";
+      console.log(`scored ${r.judged} of ${r.queries} queries${runTag}`);
+      console.log(`  recall@50  ${pct(r.recall50)}   <- headroom`);
+      console.log(`  recall@10  ${pct(r.recall10)}   <- delivered`);
+      console.log(`  nDCG@10    ${pct(r.ndcg10)}`);
+      console.log(`  MRR        ${pct(r.mrr)}`);
+      console.log(
+        `  judged@10  ${pct(r.judged10)}${r.judged10 < 0.8 ? "   <- BELOW 0.8: scores are not trustworthy, top up the pool" : ""}`,
+      );
+      const synth = r.mix.synthetic;
+      if (synth > r.judged / 2)
+        console.log(
+          `\nNOTE: ${synth}/${r.queries} queries are synthetic. A query generated from a chunk\nechoes that chunk, so this set CANNOT be used to compare chunkers.`,
+        );
+      if (r.ndcg10 < Number(opts.minNdcg)) process.exit(2);
+    } finally {
+      await client.end();
+    }
+  });
+
+program
+  .command("eval:compare <baseline> <candidate>")
+  .description("Paired permutation test between two stored eval runs")
+  .option("--metric <m>", "ndcg_10 | recall_10 | recall_50 | mrr", "ndcg_10")
+  .action(async (baseline: string, candidate: string, opts) => {
+    const { compareRuns } = await import("./eval/harness.js");
+    const { pairedPermutationTest } = await import("./eval/metrics.js");
+    const client = await connect();
+    try {
+      const { a, b } = await compareRuns(client, Number(baseline), Number(candidate), opts.metric);
+      if (a.length === 0) {
+        console.log("no overlapping queries between those runs");
+        process.exit(1);
+      }
+      const { meanDelta, p } = pairedPermutationTest(a, b);
+      console.log(`${opts.metric}: ${a.length} paired queries`);
+      console.log(`  delta ${meanDelta >= 0 ? "+" : ""}${meanDelta.toFixed(4)}`);
+      console.log(
+        `  p     ${p.toFixed(4)}${p < 0.05 ? "  <- significant" : "  <- NOT significant, do not merge on this"}`,
+      );
+    } finally {
+      await client.end();
+    }
+  });
+
+program
   .command("audit")
   .description("Data-trust audit: catalog integrity invariants + optional live drift sampling")
   .option("--drift <n>", "sample N docs and compare against live source fetches", "0")
