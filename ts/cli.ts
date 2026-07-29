@@ -354,6 +354,83 @@ program
     }
   });
 
+const ivf = program
+  .command("ivf")
+  .description("Coarse vector index: bit signatures, IVF clusters, nprobe calibration");
+
+ivf
+  .command("build")
+  .description("Compute signatures, cluster the corpus, and calibrate nprobe")
+  .option("--nlist <n>", "clusters (default: sqrt(corpus))")
+  .option("--skip-calibrate", "build only; calibrate separately")
+  .action(async (opts) => {
+    const { getEmbedder } = await import("./embed/index.js");
+    const { backfillSignatures, buildCentroids, calibrate } = await import("./embed/buildivf.js");
+    const { RECALL_GATE } = await import("./embed/ivf.js");
+    const client = await connect();
+    try {
+      const emb = getEmbedder();
+      console.log(`model ${emb.id}`);
+      const sig = await backfillSignatures(client, emb.id);
+      console.log(`signatures written: ${sig.written}`);
+      const built = await buildCentroids(client, emb.id, {
+        ...(opts.nlist ? { nlist: Number(opts.nlist) } : {}),
+      });
+      console.log(`nlist ${built.nlist}, assigned ${built.assigned}`);
+      if (opts.skipCalibrate || built.nlist === 0) return;
+      const cal = await calibrate(client, emb);
+      console.log("\n  nprobe   recall@10   scanned/query");
+      for (const p of cal.points)
+        console.log(
+          `  ${String(p.nprobe).padStart(6)}   ${p.recall10.toFixed(4)}      ${String(p.scanned).padStart(7)}`,
+        );
+      if (cal.chosen === null) {
+        console.log(
+          `\nNO nprobe reached recall@10 >= ${RECALL_GATE}. Keeping the exact scan —\nthis corpus's geometry does not suit IVF at this size.`,
+        );
+        return;
+      }
+      console.log(`\nchosen nprobe ${cal.chosen} (smallest clearing ${RECALL_GATE})`);
+    } finally {
+      await client.end();
+    }
+  });
+
+ivf
+  .command("status")
+  .description("Show the coarse index state and the calibration that chose nprobe")
+  .action(async () => {
+    const { getEmbedder } = await import("./embed/index.js");
+    const { chosenNprobe } = await import("./embed/buildivf.js");
+    const client = await connect();
+    try {
+      const emb = getEmbedder();
+      const cov = await client.query(
+        "SELECT count(*)::int AS embedded," +
+          " count(*) FILTER (WHERE sig IS NOT NULL)::int AS signed," +
+          " count(*) FILTER (WHERE cluster_id IS NOT NULL)::int AS clustered" +
+          " FROM chunks WHERE embedding IS NOT NULL AND embed_model = $1",
+        [emb.id],
+      );
+      const c = cov.rows[0];
+      const cents = await client.query(
+        "SELECT count(*)::int AS n FROM ivf_centroids WHERE embed_model = $1",
+        [emb.id],
+      );
+      const nprobe = await chosenNprobe(client, emb.id);
+      console.log(`model      ${emb.id}`);
+      console.log(`embedded   ${c.embedded}`);
+      console.log(
+        `signed     ${c.signed}${c.signed < c.embedded ? "  <- run `eil ivf build`" : ""}`,
+      );
+      console.log(`clustered  ${c.clustered}`);
+      console.log(`centroids  ${cents.rows[0].n}`);
+      console.log(`nprobe     ${nprobe ?? "not calibrated — queries use the exact scan"}`);
+    } finally {
+      await client.end();
+    }
+  });
+
 program
   .command("audit")
   .description("Data-trust audit: catalog integrity invariants + optional live drift sampling")

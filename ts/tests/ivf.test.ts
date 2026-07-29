@@ -1,0 +1,158 @@
+/**
+ * The vector funnel. Its correctness claim is narrow and testable: with a
+ * calibrated index, the funnel must return what the exact scan returns — the
+ * coarse stage only chooses WHICH vectors get scored properly, never how.
+ */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { userInfo } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CanonicalDoc } from "../contracts/models.js";
+import { type Db, connect, migrate } from "../db.js";
+import { backfillSignatures, buildCentroids, calibrate, chosenNprobe } from "../embed/buildivf.js";
+import { FakeEmbedder } from "../embed/index.js";
+import { hamming, kmeans, probeClusters, signature, suggestNlist } from "../embed/ivf.js";
+import { type Viewer, searchDocs, viewerFromAuthenticatedClaims } from "../search.js";
+import { upsertDocument } from "../store.js";
+
+describe("signatures and clustering (pure)", () => {
+  it("signs on the sign bit, one char per dimension", () => {
+    //          0.5 -> 1   -0.2 -> 0   0 -> 1 (>= 0)   -1 -> 0
+    expect(signature([0.5, -0.2, 0, -1])).toBe("1010");
+    expect(signature(new Float32Array([1, 1, 1]))).toBe("111");
+    expect(signature([-1, -1])).toBe("00");
+  });
+
+  it("Hamming counts differing bits", () => {
+    expect(hamming("1010", "1010")).toBe(0);
+    expect(hamming("1010", "0101")).toBe(4);
+    expect(hamming("1010", "1000")).toBe(1);
+  });
+
+  it("nlist follows sqrt(n), clamped at both ends", () => {
+    expect(suggestNlist(10_000)).toBe(100);
+    expect(suggestNlist(4)).toBe(16); // never one-vector-per-cluster
+    expect(suggestNlist(10 ** 12)).toBe(16_384);
+  });
+
+  it("k-means is deterministic — a shifting partitioning makes recall incomparable", () => {
+    const vs = Array.from({ length: 40 }, (_, i) => {
+      const v = new Float32Array(8);
+      for (let j = 0; j < 8; j++) v[j] = Math.sin(i * 0.37 + j);
+      let n = 0;
+      for (let j = 0; j < 8; j++) n += v[j]! * v[j]!;
+      n = Math.sqrt(n);
+      for (let j = 0; j < 8; j++) v[j]! /= n;
+      return v;
+    });
+    const a = kmeans(vs, 4);
+    const b = kmeans(vs, 4);
+    expect(Array.from(a.assign)).toEqual(Array.from(b.assign));
+  });
+
+  it("probeClusters returns the nearest centroids, nearest first", () => {
+    const cents = [
+      { clusterId: 0, centroid: [1, 0] },
+      { clusterId: 1, centroid: [0, 1] },
+      { clusterId: 2, centroid: [-1, 0] },
+    ];
+    expect(probeClusters([0.9, 0.1], cents, 2)).toEqual([0, 1]);
+    expect(probeClusters([-1, 0], cents, 1)).toEqual([2]);
+  });
+});
+
+describe("the funnel against a real database", () => {
+  let client: Db;
+  let dir: string;
+  let saved: string | undefined;
+  const emb = new FakeEmbedder(32); // deterministic, no model load
+  const VIEWER: Viewer = viewerFromAuthenticatedClaims({
+    principal: userInfo().username,
+    groups: [],
+    tenant: "default",
+  });
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "eil-ivf-"));
+    saved = process.env.EIL_DATABASE_URL;
+    process.env.EIL_DATABASE_URL = `pglite://${dir}`;
+    client = await connect();
+    await migrate(client);
+    for (let i = 0; i < 60; i++) {
+      await upsertDocument(
+        client,
+        CanonicalDoc.parse({
+          id: `confluence:page:ivf-${i}`,
+          source: "confluence",
+          title: `Doc ${i}`,
+          body: `Topic ${i % 6}: retry backoff dunning refund policy variant ${i} with body text.`,
+          aclGroups: [],
+        }),
+      );
+    }
+    const { backfill } = await import("../embed/backfill.js");
+    await backfill(client, emb, {});
+  });
+  afterAll(async () => {
+    await client.end();
+    if (saved === undefined) delete process.env.EIL_DATABASE_URL;
+    else process.env.EIL_DATABASE_URL = saved;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("signs every embedded chunk and is resumable", async () => {
+    const first = await backfillSignatures(client, emb.id);
+    expect(first.written).toBeGreaterThan(0);
+    const again = await backfillSignatures(client, emb.id); // nothing left to do
+    expect(again.written).toBe(0);
+    const gap = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE embedding IS NOT NULL AND sig IS NULL",
+    );
+    expect(gap.rows[0].n).toBe(0);
+  });
+
+  it("clusters every embedded chunk and records the assignment counts", async () => {
+    const built = await buildCentroids(client, emb.id, { nlist: 6 });
+    expect(built.nlist).toBe(6);
+    expect(built.assigned).toBeGreaterThan(0);
+    const unassigned = await client.query(
+      "SELECT count(*)::int AS n FROM chunks WHERE embedding IS NOT NULL AND cluster_id IS NULL",
+    );
+    expect(unassigned.rows[0].n).toBe(0);
+    const total = await client.query(
+      "SELECT sum(n_assigned)::int AS n FROM ivf_centroids WHERE embed_model = $1",
+      [emb.id],
+    );
+    expect(total.rows[0].n).toBe(built.assigned);
+  });
+
+  it("calibrates, persists the whole curve, and picks the smallest passing nprobe", async () => {
+    const cal = await calibrate(client, emb, { probes: [1, 2, 6] });
+    expect(cal.points).toHaveLength(3);
+    // recall is monotone in nprobe: probing more clusters cannot lose a candidate
+    expect(cal.points[2]!.recall10).toBeGreaterThanOrEqual(cal.points[0]!.recall10);
+    expect(cal.points[2]!.recall10).toBeCloseTo(1, 5); // probing ALL clusters == exact
+    const rows = await client.query(
+      "SELECT nprobe, chosen FROM metrics.ivf_calibration ORDER BY nprobe",
+    );
+    expect(rows.rows).toHaveLength(3); // the whole curve, not just the winner
+    if (cal.chosen !== null) expect(await chosenNprobe(client, emb.id)).toBe(cal.chosen);
+  });
+
+  it("returns the SAME results as the exact scan once calibrated", async () => {
+    // The funnel narrows which vectors get scored; it must not change the answer.
+    const withIndex: any = await searchDocs(client, VIEWER, "retry backoff dunning", 10, emb);
+    await client.query("UPDATE metrics.ivf_calibration SET chosen = false");
+    const exact: any = await searchDocs(client, VIEWER, "retry backoff dunning", 10, emb);
+    expect(withIndex.results.map((r: any) => r.id)).toEqual(exact.results.map((r: any) => r.id));
+  });
+
+  it("degrades to the exact scan when the index is absent, rather than failing", async () => {
+    await client.query("DELETE FROM ivf_centroids");
+    await client.query("UPDATE metrics.ivf_calibration SET chosen = false");
+    const r: any = await searchDocs(client, VIEWER, "refund policy", 10, emb);
+    expect(Array.isArray(r.results)).toBe(true);
+    expect(r.results.length).toBeGreaterThan(0);
+  });
+});
