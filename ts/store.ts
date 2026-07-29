@@ -6,6 +6,7 @@
 import { userInfo } from "node:os";
 import { type CanonicalDoc, chunkHash, contentHash, sha256 } from "./contracts/models.js";
 import { chunk } from "./core/chunker.js";
+import { codeTokens } from "./core/tokenize.js";
 import type { Db } from "./db.js";
 import { extractCodeIndex } from "./ingest/codeindex.js";
 import { scanSecrets } from "./ingest/secrets.js";
@@ -324,14 +325,24 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
     const h = chunkHash(c);
     if (priorBySeq.get(c.seq) === h) continue; // identical text — keep the row and its vector
     await client.query(
-      "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash)" +
-        " VALUES ($1, $2, $3, $4, $5, $6)" +
+      "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash, code_tokens)" +
+        " VALUES ($1, $2, $3, $4, $5, $6, $7)" +
         " ON CONFLICT (tenant, doc_id, seq) DO UPDATE SET" +
         "   heading_path = EXCLUDED.heading_path, text = EXCLUDED.text," +
-        "   content_hash = EXCLUDED.content_hash," +
+        "   content_hash = EXCLUDED.content_hash, code_tokens = EXCLUDED.code_tokens," +
         // the text changed, so any stored vector is now for the wrong text
-        "   embedding = NULL, embed_model = NULL",
-      [doc.tenant, c.docId, c.seq, c.headingPath, c.text, h],
+        "   embedding = NULL, embed_model = NULL, sig = NULL, cluster_id = NULL",
+      [
+        doc.tenant,
+        c.docId,
+        c.seq,
+        c.headingPath,
+        c.text,
+        h,
+        // Only code carries an expansion; prose is served by the english tsv.
+        // tsv_code is GENERATED from this column, so the two cannot drift.
+        doc.source === "code" ? codeTokens(doc.codePath ?? doc.title, c.text) : null,
+      ],
     );
   }
   await client.query("DELETE FROM links WHERE tenant = $1 AND src_id = $2", [doc.tenant, doc.id]);

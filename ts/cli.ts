@@ -432,6 +432,20 @@ ivf
   });
 
 program
+  .command("stats:refresh")
+  .description("Recompute BM25 corpus statistics (document frequency, N, avgdl)")
+  .action(async () => {
+    const { refreshStats } = await import("./core/stats.js");
+    const client = await connect();
+    try {
+      const s = await refreshStats(client);
+      console.log(`lexemes ${s.lexemes}  chunks ${s.nChunks}  avg length ${s.avgLen.toFixed(1)}`);
+    } finally {
+      await client.end();
+    }
+  });
+
+program
   .command("audit")
   .description("Data-trust audit: catalog integrity invariants + optional live drift sampling")
   .option("--drift <n>", "sample N docs and compare against live source fetches", "0")
