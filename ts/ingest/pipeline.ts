@@ -196,6 +196,17 @@ export async function ingestRepo(
       return out;
     }
 
+    // One git-log pass for the whole repo, resolved before the file loop, so a
+    // date lookup below is a Map hit rather than a subprocess per file.
+    // Best-effort: a source that cannot answer cheaply (the Bitbucket API one)
+    // returns null and its documents keep a null updated_at, as before.
+    let fileDates: Map<string, string> | null = null;
+    try {
+      fileDates = (await source.lastModified?.()) ?? null;
+    } catch (err: any) {
+      console.log(`  (file dates unavailable: ${err.message})`);
+    }
+
     const ingestOne = async (path: string) => {
       if (!filter.acceptPath(path)) {
         out.skipped++;
@@ -218,7 +229,15 @@ export async function ingestRepo(
         console.log(`  skip ${path} (binary/size)`);
         return;
       }
-      const doc = normalizeCode(key, path, content, source.blobUrl(path), tenant, head);
+      const doc = normalizeCode(
+        key,
+        path,
+        content,
+        source.blobUrl(path),
+        tenant,
+        head,
+        fileDates?.get(path) ?? null,
+      );
       if (await upsertDocument(client, doc)) {
         await (await import("../store.js")).replaceCodeIndex(client, doc, key, path, head);
         out.upserted++;

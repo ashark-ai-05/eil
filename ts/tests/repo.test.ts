@@ -135,6 +135,28 @@ describe("GitCloneSource (real git)", () => {
   });
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
+  // AC for step 1: "code documents carry a real updated_at". A null one is not
+  // neutral — ranking.modifier() returns prior * RECENCY_FLOOR for unknown age,
+  // so every code doc carried a permanent 40% penalty against prose, cancelling
+  // the router's code-arm weighting on the very queries that arm serves.
+  it("resolves the last-commit date of every file in ONE git pass", async () => {
+    const src = new GitCloneSource({ ref: origin, branch: "main", cacheDir: join(root, "dates") });
+    try {
+      const dates = await src.lastModified();
+      expect(dates).not.toBeNull();
+      // a.ts was touched in both commits, c.ts only in the second: both resolve,
+      // and a.ts carries its MOST RECENT change, not its first
+      expect(dates!.get("src/a.ts")).toBeTruthy();
+      expect(dates!.get("src/c.ts")).toBeTruthy();
+      expect(Date.parse(dates!.get("src/a.ts")!)).not.toBeNaN();
+      expect(Date.parse(dates!.get("src/a.ts")!)).toBeGreaterThanOrEqual(
+        Date.parse(dates!.get("src/c.ts")!) - 2000,
+      );
+    } finally {
+      await src.dispose();
+    }
+  });
+
   it("clones, lists, reads, and diffs A/M/D", async () => {
     const src = new GitCloneSource({ ref: origin, branch: "main", cacheDir: cache });
     const head = await src.headSha();
@@ -326,5 +348,48 @@ describe("ingestRepo orchestration", () => {
     } finally {
       await c.end();
     }
+  });
+});
+
+describe("code documents carry age and edges", () => {
+  it("stamps updatedAt so the recency floor no longer penalises all code", async () => {
+    const { normalizeCode } = await import("../ingest/code.js");
+    const withDate = normalizeCode(
+      "org/r",
+      "src/a.ts",
+      "x",
+      null,
+      "default",
+      "sha",
+      "2026-07-01T00:00:00Z",
+    );
+    expect(withDate.updatedAt).toBe("2026-07-01T00:00:00Z");
+    // and a source that cannot answer cheaply still yields a null, as before
+    expect(
+      normalizeCode("org/r", "src/a.ts", "x", null, "default", "sha", null).updatedAt,
+    ).toBeUndefined();
+  });
+
+  it("extracts ticket keys and relative imports, and no standards tokens", async () => {
+    const { normalizeCode } = await import("../ingest/code.js");
+    const body = [
+      "// Fixes PAY-981. Encode as UTF-8 and hash with SHA-256.",
+      'import { retry } from "./retry";',
+      'import { cfg } from "../config/app.ts";',
+      'import express from "express";', // bare specifier: a package, not a doc here
+    ].join("\n");
+    const doc = normalizeCode("org/r", "src/pay/charge.ts", body, null, "default", "sha");
+    expect(doc.links).toContain("jira:issue:PAY-981");
+    expect(doc.links).not.toContain("jira:issue:UTF-8");
+    expect(doc.links).not.toContain("jira:issue:SHA-256");
+    expect(doc.links).toContain("code:org/r:src/pay/retry");
+    expect(doc.links).toContain("code:org/r:src/config/app"); // .. resolved, ext stripped
+    expect(doc.links.some((l) => l.includes("express"))).toBe(false);
+  });
+
+  it("never links a file to itself", async () => {
+    const { normalizeCode } = await import("../ingest/code.js");
+    const doc = normalizeCode("org/r", "src/a.ts", 'import x from "./a";', null, "default", "sha");
+    expect(doc.links).not.toContain("code:org/r:src/a");
   });
 });

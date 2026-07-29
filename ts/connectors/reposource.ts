@@ -17,6 +17,13 @@ export interface RepoSource {
   listFiles(): AsyncGenerator<string>;
   changedSince(sha: string): AsyncGenerator<RepoChange>;
   readFile(path: string): Promise<string>;
+  /**
+   * path -> ISO date of the commit that last touched it. Optional because the
+   * Bitbucket API source would need one call per file to answer it, which is
+   * not worth it; a source that cannot answer cheaply returns null and its
+   * documents keep a null updated_at.
+   */
+  lastModified?(): Promise<Map<string, string> | null>;
   blobUrl(path: string): string | null;
   dispose(): Promise<void>;
 }
@@ -115,6 +122,42 @@ export class GitCloneSource implements RepoSource {
   async readFile(path: string): Promise<string> {
     await this.ensure();
     return this.git(["show", `HEAD:${path}`]);
+  }
+  /**
+   * ONE `git log` pass for the whole repo, not one per file. A per-file
+   * `git log -1 -- <path>` would be a subprocess each, which is the same
+   * mistake readFile already makes and which makes a 100k-file monorepo take
+   * hours. Walking history once is linear and streamed.
+   *
+   * `--name-only` prints the files of each commit newest-first, so the FIRST
+   * time a path appears is its most recent change — hence the has() guard
+   * rather than an overwrite. Renames are followed as separate paths, which is
+   * correct here: the new path's date is when it appeared under that name.
+   */
+  async lastModified(): Promise<Map<string, string> | null> {
+    await this.ensure();
+    const out = await this.git([
+      "log",
+      // A tab sentinel, not NUL: execFile rejects args containing null bytes.
+      // Git quotes any path containing a tab (as "a\tb"), so a leading tab
+      // unambiguously marks a date line and never a filename.
+      "--pretty=format:\t%cI",
+      "--name-only",
+      "--no-renames",
+      "--date-order",
+      ...(this.subpath ? ["--", this.subpath] : []),
+    ]);
+    const dates = new Map<string, string>();
+    let current: string | null = null;
+    for (const line of out.split("\n")) {
+      if (line.startsWith("\t")) {
+        current = line.slice(1);
+        continue;
+      }
+      if (!line || current === null) continue;
+      if (!dates.has(line)) dates.set(line, current);
+    }
+    return dates;
   }
   blobUrl(path: string): string | null {
     const m = this.ref.replace(/\.git$/, "").match(/^https?:\/\/[^/]+\/(.+)$/);

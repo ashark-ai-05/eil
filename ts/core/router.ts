@@ -4,6 +4,8 @@
  * hybrid docs search.
  */
 
+import { TICKET_SHAPE, isTicketKey } from "./ticket.js";
+
 export type Route = "entity" | "path" | "symbol" | "exact" | "docs";
 
 export interface Decision {
@@ -12,7 +14,6 @@ export interface Decision {
   match?: string;
 }
 
-const TICKET_RE = /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/;
 const QUOTED_RE = /"([^"]{3,})"/;
 const PATH_RE = /\b(\S+\/\S+\.\w{1,8}|\S+\.(?:java|py|go|ts|tsx|js|rb|kt|scala|sql))(?::\d+)?\b/;
 const ERRORISH_RE = /\b\w*(?:Exception|Error)\b/;
@@ -27,8 +28,11 @@ function identifierShaped(q: string): boolean {
 
 export function classify(query: string): Decision {
   const q = query.trim();
-  const ticket = TICKET_RE.exec(q);
-  if (ticket) return { route: "entity", match: ticket[1]! };
+  // isTicketKey, not the raw shape: "UTF-8 encoding" and "SHA-256 collisions"
+  // matched the shape and were routed to the entity executor, which then did a
+  // Jira lookup for a ticket that cannot exist instead of searching.
+  const ticket = TICKET_SHAPE.exec(q);
+  if (ticket && isTicketKey(ticket[1]!)) return { route: "entity", match: ticket[1]! };
   const path = PATH_RE.exec(q);
   if (path) return { route: "path", match: path[1]! };
   const quoted = QUOTED_RE.exec(q);

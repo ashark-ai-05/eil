@@ -1,12 +1,13 @@
 /** Shared normalizer helpers: link extraction from markdown bodies. */
 
-const TICKET_RE = /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/g;
+import { ticketKeys } from "../core/ticket.js";
+
 const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 
 /** Ticket keys and [[wikilinks]] found in a body, as canonical ids (deduped, self excluded). */
 export function extractLinks(body: string, selfId: string): string[] {
   const links: string[] = [];
-  for (const m of body.matchAll(TICKET_RE)) links.push(`jira:issue:${m[1]}`);
+  for (const key of ticketKeys(body)) links.push(`jira:issue:${key}`);
   for (const m of body.matchAll(WIKILINK_RE)) links.push(`obsidian:note:${m[1]!.trim()}`);
   const seen = new Set<string>();
   const out: string[] = [];
