@@ -9,7 +9,31 @@ import { type DcClient, type Fetcher, getJson, makeClient } from "./auth.js";
 import { cqlTs } from "./confluence.js";
 
 export const PAGE_SIZE = 50;
-const FIELDS = "summary,description,status,issuetype,project,reporter,created,updated,comment";
+// issuelinks is the point of this list. EIL was regex-scraping ticket keys out
+// of prose while Jira's OWN structured dependency graph — blocks, is-blocked-by,
+// duplicates, relates-to — sat one field away and was never requested. assignee,
+// labels, resolution and priority are the facets an SDLC agent filters on, and
+// parent ties a subtask to its epic.
+const FIELDS = [
+  "summary",
+  "description",
+  "status",
+  "issuetype",
+  "project",
+  "reporter",
+  "created",
+  "updated",
+  "comment",
+  "assignee",
+  "labels",
+  "priority",
+  "resolution",
+  "resolutiondate",
+  "components",
+  "fixVersions",
+  "parent",
+  "issuelinks",
+].join(",");
 
 export class JiraClient {
   readonly client: DcClient;
@@ -87,6 +111,22 @@ export class JiraClient {
         description: f.description ?? "",
         comments,
         acl_groups: [],
+        assignee: f.assignee?.displayName ?? null,
+        labels: f.labels ?? [],
+        priority: f.priority?.name ?? null,
+        resolution: f.resolution?.name ?? null,
+        components: (f.components ?? []).map((c: any) => c.name).filter(Boolean),
+        fix_versions: (f.fixVersions ?? []).map((v: any) => v.name).filter(Boolean),
+        parent: f.parent?.key ?? null,
+        // Jira reports a link from whichever side it was created, so the
+        // relevant key is inward OR outward. Taking only one direction would
+        // silently halve the dependency graph.
+        issue_links: (f.issuelinks ?? [])
+          .map((l: any) => ({
+            type: l.type?.outward ?? l.type?.inward ?? "relates to",
+            key: l.outwardIssue?.key ?? l.inwardIssue?.key ?? "",
+          }))
+          .filter((l: any) => l.key),
       },
     };
   }

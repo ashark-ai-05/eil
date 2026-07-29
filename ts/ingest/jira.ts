@@ -20,6 +20,15 @@ export interface JiraIssue {
     description?: string | null;
     comments?: Array<{ author?: string; body: string }>;
     acl_groups?: string[];
+    assignee?: string | null;
+    labels?: string[];
+    priority?: string | null;
+    resolution?: string | null;
+    components?: string[];
+    fix_versions?: string[];
+    parent?: string | null;
+    /** Jira's own dependency graph: {type: "blocks", key: "PAY-42"} */
+    issue_links?: Array<{ type: string; key: string }>;
   };
 }
 
@@ -28,7 +37,20 @@ export function normalize(issue: JiraIssue, tenant = "default"): CanonicalDoc {
   const docId = `jira:issue:${key}`;
   const f = issue.fields;
 
-  const parts = [`**Status:** ${f.status ?? "Unknown"} · **Type:** ${f.issuetype ?? "Unknown"}`];
+  // Facets go in the body as well as the fields, because the lexical arm can
+  // only match what is in the text — a query for "unresolved payments bug
+  // assigned to alice" has nowhere else to hit.
+  const facets = [
+    `**Status:** ${f.status ?? "Unknown"}`,
+    `**Type:** ${f.issuetype ?? "Unknown"}`,
+    ...(f.priority ? [`**Priority:** ${f.priority}`] : []),
+    ...(f.assignee ? [`**Assignee:** ${f.assignee}`] : []),
+    ...(f.resolution ? [`**Resolution:** ${f.resolution}`] : []),
+    ...(f.components?.length ? [`**Components:** ${f.components.join(", ")}`] : []),
+    ...(f.fix_versions?.length ? [`**Fix versions:** ${f.fix_versions.join(", ")}`] : []),
+    ...(f.labels?.length ? [`**Labels:** ${f.labels.join(", ")}`] : []),
+  ];
+  const parts = [facets.join(" · ")];
   if (f.description) parts.push(`## Description\n\n${f.description}`);
   for (const c of f.comments ?? []) {
     parts.push(`## Comment — ${c.author ?? "unknown"}\n\n${c.body}`);
@@ -48,6 +70,13 @@ export function normalize(issue: JiraIssue, tenant = "default"): CanonicalDoc {
     aclGroups: f.acl_groups ?? [],
     qualityTier: "authored",
     body,
-    links: extractLinks(body, docId),
+    // Structured edges FIRST, then whatever the prose scraper finds. Jira's own
+    // issuelinks are typed and exact; a regex over the description is a guess.
+    // extractLinks dedupes, so a relationship stated both ways appears once.
+    links: [
+      ...(f.parent ? [`jira:issue:${f.parent}`] : []),
+      ...(f.issue_links ?? []).map((l) => `jira:issue:${l.key}`),
+      ...extractLinks(body, docId),
+    ].filter((l) => l !== docId),
   });
 }

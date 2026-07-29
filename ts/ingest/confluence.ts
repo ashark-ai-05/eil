@@ -15,6 +15,7 @@ export interface ConfluencePage {
   updated?: string | null;
   ancestors?: string[];
   acl_groups?: string[];
+  labels?: string[];
   body: string;
 }
 
@@ -32,7 +33,7 @@ export function normalize(page: ConfluencePage, tenant = "default"): CanonicalDo
     hierarchy: page.ancestors ?? [],
     aclGroups: page.acl_groups ?? [],
     qualityTier: "authored",
-    body: page.body,
+    body: page.labels?.length ? `**Labels:** ${page.labels.join(", ")}\n\n${page.body}` : page.body,
     links: extractLinks(page.body, docId),
   });
 }

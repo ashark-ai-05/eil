@@ -31,7 +31,7 @@ export class ConfluenceClient {
     for (;;) {
       const data = await getJson(this.client, "/rest/api/content/search", {
         cql,
-        expand: "body.storage,ancestors,version,space",
+        expand: "body.storage,ancestors,version,space,metadata.labels",
         limit: PAGE_SIZE,
         start,
       });
@@ -44,7 +44,7 @@ export class ConfluenceClient {
   /** Fetch one page live — the get_doc fresh=true pull-through (flow K5). */
   async getPage(id: string): Promise<ConfluencePage> {
     const data = await getJson(this.client, `/rest/api/content/${encodeURIComponent(id)}`, {
-      expand: "body.storage,ancestors,version,space",
+      expand: "body.storage,ancestors,version,space,metadata.labels",
     });
     return this.toPageDict(data);
   }
@@ -56,7 +56,7 @@ export class ConfluenceClient {
     for (;;) {
       const data = await getJson(this.client, "/rest/api/content/search", {
         cql,
-        expand: "body.storage,ancestors,version,space",
+        expand: "body.storage,ancestors,version,space,metadata.labels",
         limit: PAGE_SIZE,
         start,
       });
@@ -100,6 +100,13 @@ export class ConfluenceClient {
       created: null,
       ancestors: [...(space ? [space] : []), ...ancestors],
       acl_groups: [], // stamped by the phase-2 ACL syncer; empty = fail-closed
+      // Labels are the single most useful Confluence facet — docs/ingestion.md
+      // already advertises `--query 'label = incident'` — and they were dropped
+      // entirely. Prepended to the body so the lexical arm can match them; there
+      // is nowhere else for a term to hit.
+      labels: (apiPage.metadata?.labels?.results ?? [])
+        .map((l: any) => l.name ?? l.label)
+        .filter(Boolean),
       body: htmlToMarkdown(apiPage.body?.storage?.value ?? ""),
     };
   }
