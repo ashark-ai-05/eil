@@ -31,6 +31,17 @@ export async function ingestDocs(
   const outcome: IngestOutcome = { seen: 0, changed: 0, failed: 0, target: null };
   let latest: string | null = null;
   let retryFrom: string | null = null;
+  // A failure thrown by the GENERATOR — i.e. any HTTP error inside a
+  // connector's pagination loop — escapes `for await`. Previously it escaped
+  // past setCursor too, so a 429 on page 40 of 200 discarded the cursor advance
+  // earned by pages 1-39. Combined with the absence of any retry, a source that
+  // rate-limits at the same offset produced an unbreakable livelock: every run
+  // re-fetched the same prefix and advanced nothing, forever.
+  //
+  // Persisting progress is therefore in `finally`, and the generator's error is
+  // captured rather than allowed to unwind past it. It is still re-thrown — the
+  // operator must see the failure — but only after the cursor is safe.
+  let fatal: unknown;
   try {
     for await (const doc of docs) {
       outcome.seen += 1;
@@ -48,10 +59,24 @@ export async function ingestDocs(
       }
       if (value && (latest === null || value > latest)) latest = value;
     }
-    outcome.target = retryFrom ?? latest;
-    if (outcome.target) await setCursor(client, source, outcome.target, tenant);
+  } catch (err: any) {
+    fatal = err;
+    console.log(`  ! listing aborted (${err.constructor?.name ?? "Error"}): ${err.message}`);
   } finally {
-    await client.end();
+    try {
+      outcome.target = retryFrom ?? latest;
+      if (outcome.target) await setCursor(client, source, outcome.target, tenant);
+    } finally {
+      await client.end();
+    }
+  }
+  if (fatal) {
+    // The cursor is committed at the last document that actually landed, so the
+    // next run resumes from there instead of restarting the scan.
+    let msg = `${outcome.seen} seen, ${outcome.changed} changed`;
+    if (outcome.target) msg += `, cursor -> ${outcome.target} (progress kept)`;
+    console.log(msg);
+    throw fatal;
   }
   let summary = `${outcome.seen} seen, ${outcome.changed} changed`;
   if (outcome.failed > 0)

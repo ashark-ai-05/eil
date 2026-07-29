@@ -7,6 +7,7 @@
  */
 
 import { getSecret } from "./keychain.js";
+import { withRetry } from "./retry.js";
 
 export type Fetcher = typeof fetch;
 
@@ -42,6 +43,11 @@ export function required(name: string): string {
   return value;
 }
 
+const RETRY_OPTS = {
+  onRetry: (attempt: number, delayMs: number, err: Error) =>
+    console.error(`  retry ${attempt} in ${delayMs}ms: ${err.message}`),
+};
+
 /** A stalled upstream must never hang a tool call indefinitely. */
 export const FETCH_TIMEOUT_MS = 30_000;
 
@@ -52,21 +58,30 @@ export async function getJson(
 ): Promise<any> {
   const url = new URL(client.baseUrl + path);
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, String(v));
-  const res = await client.fetcher(url, {
-    headers: client.headers,
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
-  return res.json();
+  // Retry here rather than at each connector: this is the one funnel every DC
+  // read goes through, so a 429 anywhere becomes survivable in one place.
+  // Non-retryable statuses (401, 404) still fail immediately — retrying them
+  // only delays the operator seeing a credential problem.
+  return withRetry(async () => {
+    const res = await client.fetcher(url, {
+      headers: client.headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
+    return res.json();
+  }, RETRY_OPTS);
 }
 
 export async function postJson(client: DcClient, path: string, body: unknown): Promise<any> {
-  const res = await client.fetcher(client.baseUrl + path, {
-    method: "POST",
-    headers: { ...client.headers, "content-type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`POST ${path} -> ${res.status}`);
+  const res = await withRetry(async () => {
+    const r = await client.fetcher(client.baseUrl + path, {
+      method: "POST",
+      headers: { ...client.headers, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!r.ok) throw new Error(`POST ${path} -> ${r.status}`);
+    return r;
+  }, RETRY_OPTS);
   return res.json();
 }
