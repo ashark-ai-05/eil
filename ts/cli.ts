@@ -330,6 +330,56 @@ program
   });
 
 program
+  .command("eval:judge")
+  .description("Build the judging pool; export a worksheet, import it back, or judge with a model")
+  .option("--export <path>", "write unjudged pairs as an editable worksheet")
+  .option("--import <path>", "read graded worksheet back into eval_qrels")
+  .option("--llm", "grade the pool with the configured LLM provider")
+  .option("--depth <n>", "pool depth per query", "20")
+  .action(async (opts) => {
+    const { applyJudgments, buildPool, exportPool, judgeWithLlm, parseJudgments } = await import(
+      "./eval/judge.js"
+    );
+    const { localViewer } = await import("./search.js");
+    const client = await connect();
+    try {
+      const v = localViewer();
+      if (opts.import) {
+        const parsed = parseJudgments(readFileSync(opts.import, "utf-8"));
+        const added = await applyJudgments(client, parsed, v.principal);
+        console.log(`${parsed.length} grades read, ${added} new (existing left untouched)`);
+        return;
+      }
+      const pool = await buildPool(client, v, Number(opts.depth));
+      if (pool.length === 0) {
+        console.log("nothing to judge — every retrieved document already has a grade.");
+        console.log("Run `eil eval:mine` for more queries, or raise --depth.");
+        return;
+      }
+      if (opts.llm) {
+        const { getProvider } = await import("./llm/index.js");
+        const provider = getProvider();
+        console.log(`judging ${pool.length} pairs with ${provider.name}...`);
+        const { judgments, failed } = await judgeWithLlm(pool, provider, (d, t) => {
+          if (d % 10 === 0 || d === t) process.stdout.write(`\r  ${d}/${t}`);
+        });
+        process.stdout.write("\n");
+        const added = await applyJudgments(client, judgments, `llm:${provider.name}`);
+        console.log(
+          `${added} grades written${failed > 0 ? `, ${failed} skipped (see above)` : ""}`,
+        );
+        return;
+      }
+      const out = opts.export ?? "judgments.md";
+      writeFileSync(out, exportPool(pool));
+      console.log(`${pool.length} unjudged pairs -> ${out}`);
+      console.log(`Fill in each \`grade: ?\`, then: eil eval:judge --import ${out}`);
+    } finally {
+      await client.end();
+    }
+  });
+
+program
   .command("eval:compare <baseline> <candidate>")
   .description("Paired permutation test between two stored eval runs")
   .option("--metric <m>", "ndcg_10 | recall_10 | recall_50 | mrr", "ndcg_10")
