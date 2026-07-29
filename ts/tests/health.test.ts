@@ -160,3 +160,37 @@ describe("retention", () => {
     expect(left.rows.map((r: any) => r.id)).toEqual(["confluence:page:q-live"]);
   });
 });
+
+describe("the optional dashboard does not expose the database", () => {
+  const compose = readFileSync(
+    new URL("../../observability/docker-compose.yml", import.meta.url),
+    "utf-8",
+  )
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("#")) // prose explaining the fix is not config
+    .join("\n");
+
+  it("binds loopback, not every interface", () => {
+    // "3000:3000" publishes on 0.0.0.0. A comment saying "local only" does not
+    // bind a socket.
+    expect(compose).toContain('"127.0.0.1:3000:3000"');
+    expect(compose).not.toMatch(/^\s*-\s*"3000:3000"/m);
+  });
+
+  it("never grants anonymous admin", () => {
+    // Grafana Admin + a Postgres datasource is arbitrary SQL against the EIL
+    // database — audit_log, every document body, and the QUARANTINED rows whose
+    // secrets the ACL-filtered read path deliberately withholds.
+    expect(compose).not.toContain("GF_AUTH_ANONYMOUS_ORG_ROLE: Admin");
+    expect(compose).toContain("GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer");
+  });
+
+  it("disables the arbitrary-SQL surface the dashboards do not need", () => {
+    expect(compose).toContain('GF_EXPLORE_ENABLED: "false"');
+  });
+
+  it("leaves a real login available rather than removing authentication", () => {
+    expect(compose).not.toContain('GF_AUTH_BASIC_ENABLED: "false"');
+    expect(compose).toContain("GF_SECURITY_ADMIN_PASSWORD");
+  });
+});

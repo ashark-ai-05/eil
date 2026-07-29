@@ -7,7 +7,14 @@
 # mounts below are the mapping.
 #
 #   docker compose -f observability/docker-compose.yml up
-#   open http://localhost:3000   (anonymous, admin — local only)
+#   open http://127.0.0.1:3000   (anonymous read-only; bound to loopback)
+#
+# SECURITY: this is a LOCAL dashboard. It binds 127.0.0.1, grants anonymous
+# Viewer rather than Admin, and disables Explore, because Grafana Admin plus a
+# Postgres datasource is arbitrary SQL against the EIL database. Before running
+# it anywhere shared: give the datasource a READ-ONLY Postgres role (it
+# currently reuses the application user), set GF_SECURITY_ADMIN_PASSWORD, and
+# turn anonymous access off.
 #
 # Against PGlite there is no server to point a datasource at, so this is for the
 # Postgres backend: `eil db embedded` or a system/org instance.
@@ -17,12 +24,25 @@ services:
     image: grafana/grafana:11.3.0
     container_name: eil-grafana
     ports:
-      - "3000:3000"
+      # LOOPBACK ONLY. "3000:3000" publishes on 0.0.0.0 — every interface — and
+      # combined with the anonymous access below that put the whole exposure on
+      # the LAN. A comment saying "local only" does not bind a socket.
+      - "127.0.0.1:3000:3000"
     environment:
-      # Local convenience only. A shared deployment must not run anonymous.
+      # Anonymous VIEWER, not Admin. Admin can edit datasources and, with a
+      # Postgres datasource, run arbitrary SQL through Explore — against the
+      # application's own DB user. That reaches audit_log (every query every
+      # user ran), the entire documents.body corpus, and the QUARANTINED rows
+      # with their retained secrets, which are precisely what the ACL-filtered
+      # read path excludes. Shipping secret quarantine and then handing the
+      # secrets out over unauthenticated HTTP is not a trade-off, it is a bug.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_AUTH_BASIC_ENABLED: "false"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Explore is the arbitrary-SQL surface; the dashboards do not need it.
+      GF_EXPLORE_ENABLED: "false"
+      # Leave a real login available rather than removing the only way to
+      # authenticate. Change the password before exposing this anywhere.
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-eil-local-only}
       # These are exactly what provisioning/datasources/eil.yaml reads — no
       # more. EIL_PG_HOST is a combined host:port there, not a bare host, and
       # the datasource declares no password field, so inventing one here would
