@@ -23,16 +23,33 @@ export async function getCursor(
   return res.rows[0]?.cursor ?? null;
 }
 
+/**
+ * Advance a connector cursor.
+ *
+ * `succeeded` is not bookkeeping — it is what makes the staleness alert work.
+ * `updated_at` means "we wrote this row" and is touched every run, including the
+ * failure-hold path where the cursor VALUE is deliberately pinned.
+ * `last_success_at` means "a document actually landed", and only that can answer
+ * "has this connector silently died". Setting both unconditionally is what let a
+ * connector failing every single document report itself perfectly fresh.
+ */
 export async function setCursor(
   client: Db,
   source: string,
   cursor: string,
   tenant = "default",
+  outcome: { succeeded: boolean; error?: string } = { succeeded: true },
 ): Promise<void> {
   await client.query(
-    "INSERT INTO sync_cursors (tenant, source, cursor) VALUES ($1, $2, $3)" +
-      " ON CONFLICT (tenant, source) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()",
-    [tenant, source, cursor],
+    "INSERT INTO sync_cursors (tenant, source, cursor, last_success_at, consecutive_failures, last_error)" +
+      " VALUES ($1, $2, $3, CASE WHEN $4 THEN now() END, CASE WHEN $4 THEN 0 ELSE 1 END, $5)" +
+      " ON CONFLICT (tenant, source) DO UPDATE SET" +
+      "   cursor = EXCLUDED.cursor," +
+      "   updated_at = now()," +
+      "   last_success_at = CASE WHEN $4 THEN now() ELSE sync_cursors.last_success_at END," +
+      "   consecutive_failures = CASE WHEN $4 THEN 0 ELSE sync_cursors.consecutive_failures + 1 END," +
+      "   last_error = $5",
+    [tenant, source, cursor, outcome.succeeded, outcome.error ?? null],
   );
 }
 

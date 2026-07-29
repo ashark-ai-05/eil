@@ -1,7 +1,19 @@
 # O-1 alert rules — the designed tripwires. Cursor staleness is the #1
 # connector-rot tripwire; zero-result spikes are the adoption killer; recall
 # drops also gate CI (eil eval --min-recall), this alert covers drift between
-# releases. Routing to Jira tickets is O-3.
+# releases.
+#
+# Three defects fixed here, all of which made this file decorative:
+#
+#   1. There were no contactPoints and no notification policy, so every rule
+#      fired into a void. Grafana unified alerting needs BOTH to deliver
+#      anything; rules alone are inert.
+#   2. Every rule had `noDataState: OK`, which inverts the worst case — a
+#      connector that has NEVER synced, or a metrics schema missing after a
+#      failed migration, returns no rows and was reported healthy. Total absence
+#      of ingestion was the greenest state on the board.
+#   3. The cursor-staleness query defaulted a missing value to 0 hours, i.e.
+#      "perfectly fresh", for the same reason.
 apiVersion: 1
 groups:
   - orgId: 1
@@ -13,7 +25,7 @@ groups:
         title: Connector cursor stale > 24h
         condition: C
         for: 1h
-        noDataState: OK
+        noDataState: NoData
         execErrState: Alerting
         annotations:
           summary: "A connector's sync cursor hasn't advanced in over 24 hours — it has silently died."
@@ -23,7 +35,7 @@ groups:
             datasourceUid: eil-pg
             model:
               format: table
-              rawSql: "SELECT coalesce(max(age_hours), 0) AS value FROM metrics.vw_connector_health"
+              rawSql: "SELECT coalesce(max(age_hours), 999999) AS value FROM metrics.vw_connector_health"
           - refId: C
             datasourceUid: "__expr__"
             model:
@@ -35,7 +47,7 @@ groups:
         title: Zero-result rate spike (today)
         condition: C
         for: 30m
-        noDataState: OK
+        noDataState: NoData
         execErrState: Alerting
         annotations:
           summary: "More than 30% of today's searches return nothing — corpus gap or router regression."
@@ -57,7 +69,7 @@ groups:
         title: Eval recall below baseline
         condition: C
         for: 0s
-        noDataState: OK
+        noDataState: NoData
         execErrState: Alerting
         annotations:
           summary: "Latest recorded eval run fell below 0.9 mean recall — retrieval regressed."
@@ -75,3 +87,30 @@ groups:
               expression: A
               conditions:
                 - evaluator: { type: lt, params: [0.9] }
+
+# Without these two blocks nothing above is ever delivered. The webhook is a
+# placeholder — point it at Slack, PagerDuty, or an email contact point — but it
+# must EXIST, because an undeliverable alert is indistinguishable from no alert.
+contactPoints:
+  - orgId: 1
+    name: eil-default
+    receivers:
+      - uid: eil-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: ${EIL_ALERT_WEBHOOK_URL:-http://localhost:9099/eil-alerts}
+          httpMethod: POST
+
+policies:
+  - orgId: 1
+    receiver: eil-default
+    # Group by rule so a connector problem and a recall regression arrive
+    # separately rather than being collapsed into one notification.
+    group_by: [alertname, grafana_folder]
+    group_wait: 30s
+    group_interval: 5m
+    # Long, because these are slow-moving conditions. A stale cursor re-notifying
+    # every five minutes trains people to mute the channel, which is the same
+    # outcome as having no alerts.
+    repeat_interval: 12h

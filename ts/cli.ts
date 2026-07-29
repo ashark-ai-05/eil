@@ -496,6 +496,69 @@ program
   });
 
 program
+  .command("prune")
+  .description("Apply retention: trim fact tables and purge expired quarantine")
+  .option("--older-than <days>", "retain this many days of facts", "90")
+  .option("--dry-run", "report what would be removed, change nothing")
+  .action(async (opts) => {
+    const days = Number(opts.olderThan);
+    if (!Number.isFinite(days) || days < 1) {
+      console.log("--older-than must be a positive number of days");
+      process.exit(1);
+    }
+    const client = await connect();
+    try {
+      // audit_log, retrieval_events and document_revisions all grow one row per
+      // event forever. Step 0 added two of them; shipping unbounded growth is
+      // not a design, and the metrics views scan these tables on every dashboard
+      // load.
+      const targets: Array<[string, string]> = [
+        ["audit_log", `DELETE FROM audit_log WHERE at < now() - interval '${days} days'`],
+        [
+          "retrieval_events",
+          `DELETE FROM retrieval_events WHERE at < now() - interval '${days} days'`,
+        ],
+        [
+          "document_revisions",
+          // Keep the CURRENT revision of every document regardless of age —
+          // pruning history must never orphan a document's present state.
+          `DELETE FROM document_revisions r WHERE r.captured_at < now() - interval '${days} days' AND EXISTS (SELECT 1 FROM documents d WHERE d.tenant = r.tenant AND d.id = r.doc_id AND d.revision > r.revision)`,
+        ],
+        [
+          "metrics.health_runs",
+          `DELETE FROM metrics.health_runs WHERE at < now() - interval '${days} days'`,
+        ],
+      ];
+      for (const [name, sql] of targets) {
+        const count = await client.query(
+          sql.replace(/^DELETE FROM (\S+)( \S+)?/, "SELECT count(*)::int AS n FROM $1$2"),
+        );
+        const n = Number(count.rows[0]?.n ?? 0);
+        if (!opts.dryRun && n > 0) await client.query(sql);
+        console.log(`  ${name.padEnd(22)} ${opts.dryRun ? "would remove" : "removed"} ${n}`);
+      }
+      // quarantine_until has been written and cleared since migration 0010 and
+      // never READ, so a source-deleted document's body was retained forever —
+      // a compliance regression against the hard delete it replaced.
+      const expired = await client.query(
+        "SELECT count(*)::int AS n FROM documents WHERE tombstoned_at IS NOT NULL" +
+          " AND quarantine_until IS NOT NULL AND quarantine_until < now()",
+      );
+      const n = Number(expired.rows[0]?.n ?? 0);
+      if (!opts.dryRun && n > 0)
+        await client.query(
+          "DELETE FROM documents WHERE tombstoned_at IS NOT NULL" +
+            " AND quarantine_until IS NOT NULL AND quarantine_until < now()",
+        );
+      console.log(
+        `  ${"quarantine expired".padEnd(22)} ${opts.dryRun ? "would purge" : "purged"} ${n}`,
+      );
+    } finally {
+      await client.end();
+    }
+  });
+
+program
   .command("audit")
   .description("Data-trust audit: catalog integrity invariants + optional live drift sampling")
   .option("--drift <n>", "sample N docs and compare against live source fetches", "0")

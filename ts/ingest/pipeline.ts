@@ -65,7 +65,15 @@ export async function ingestDocs(
   } finally {
     try {
       outcome.target = retryFrom ?? latest;
-      if (outcome.target) await setCursor(client, source, outcome.target, tenant);
+      if (outcome.target)
+        await setCursor(client, source, outcome.target, tenant, {
+          // A run that aborted mid-listing, or that failed to upsert anything it
+          // saw, has not SUCCEEDED — even though it may legitimately advance the
+          // cursor past the documents that did land. Only a clean pass resets
+          // the freshness clock.
+          succeeded: !fatal && outcome.failed === 0,
+          ...(fatal ? { error: String((fatal as Error)?.message ?? fatal).slice(0, 500) } : {}),
+        });
     } finally {
       await client.end();
     }
