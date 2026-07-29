@@ -9,7 +9,7 @@ import { chunk } from "./core/chunker.js";
 import { codeTokens } from "./core/tokenize.js";
 import type { Db } from "./db.js";
 import { extractCodeIndex } from "./ingest/codeindex.js";
-import { scanSecrets } from "./ingest/secrets.js";
+import { type SecretFinding, scanSecrets, unacceptedFindings } from "./ingest/secrets.js";
 
 export async function getCursor(
   client: Db,
@@ -215,7 +215,7 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
   const aclSnapshot = JSON.stringify(doc.aclGroups);
   const aclVersion = sha256(aclSnapshot);
   const existing = await client.query(
-    "SELECT content_hash, acl_version, ingested_by, tombstoned_at FROM documents WHERE tenant = $1 AND id = $2 FOR UPDATE",
+    "SELECT content_hash, acl_version, ingested_by, tombstoned_at, secret_accepted FROM documents WHERE tenant = $1 AND id = $2 FOR UPDATE",
     [doc.tenant, doc.id],
   );
   const row = existing.rows[0];
@@ -276,7 +276,12 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
   // downstream of chunking, so returning here means none of them can ever hold
   // the secret. Redacting on serve alone would still have left it searchable in
   // the tsvector, where a matching fragment confirms its presence.
-  const findings = scanSecrets(doc.body);
+  // Only findings nobody has reviewed hold the document back. Without this a
+  // false positive could never be released: clearing the flag re-ran the
+  // scanner, which found the same key-shaped string — a test fixture, an example
+  // in documentation — and quarantined it again, forever.
+  const accepted = (row?.secret_accepted as SecretFinding[] | null) ?? [];
+  const findings = unacceptedFindings(scanSecrets(doc.body), accepted);
   await client.query(
     "UPDATE documents SET secret_findings = $1, quarantined_at = $2 WHERE tenant = $3 AND id = $4",
     [

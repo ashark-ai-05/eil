@@ -153,6 +153,30 @@ export function scanSecrets(body: string): SecretFinding[] {
   return merged;
 }
 
+/**
+ * Identity of a finding for review purposes: the rule that matched and a hint at
+ * the value, NOT its offset. Offsets shift when unrelated text is edited above
+ * them, and an acceptance that evaporates on every edit is not an acceptance.
+ */
+export const findingKey = (f: Pick<SecretFinding, "rule" | "hint">): string =>
+  `${f.rule}:${f.hint}`;
+
+/**
+ * Findings that have not been reviewed and accepted.
+ *
+ * Acceptance is per FINDING, not per document: if a reviewed file later gains a
+ * different credential, that finding's hint differs, it is unaccepted, and the
+ * document is quarantined again. Accepting one cannot silently accept the next.
+ */
+export function unacceptedFindings(
+  findings: readonly SecretFinding[],
+  accepted: ReadonlyArray<Pick<SecretFinding, "rule" | "hint">> = [],
+): SecretFinding[] {
+  if (accepted.length === 0) return [...findings];
+  const ok = new Set(accepted.map(findingKey));
+  return findings.filter((f) => !ok.has(findingKey(f)));
+}
+
 /** Replace each finding with a marker naming the rule, for get_doc. */
 export function redact(body: string, findings: SecretFinding[]): string {
   if (findings.length === 0) return body;

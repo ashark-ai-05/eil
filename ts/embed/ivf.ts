@@ -142,7 +142,26 @@ export async function loadCentroids(client: Db, embedModel: string): Promise<Cen
  */
 export const RECALL_GATE = 0.98;
 
-/** Oversample is fixed: measured to have no effect at any nprobe once survivors
- *  are rescored exactly. Kept as a named constant so that finding stays visible
- *  rather than looking like an untuned magic number. */
+/**
+ * Default oversample, and a CORRECTION worth recording.
+ *
+ * An earlier measurement on one corpus showed 8x and 16x giving identical
+ * recall, and that was turned into a fixed constant. It was an artifact: on that
+ * corpus the probed candidate set was smaller than k * oversample, so the
+ * oversample never bound. On a second corpus, a full Hamming scan measured
+ * 4x -> 0.9333, 8x -> 0.9900, 16x -> 0.9967, 32x -> 1.0000.
+ *
+ * So oversample IS a knob, it is corpus-dependent, and it is now calibrated
+ * alongside nprobe rather than assumed. This value is only the starting point of
+ * that sweep.
+ */
 export const OVERSAMPLE = 8;
+
+/** Ladder swept at full probe to separate quantization loss from cluster loss. */
+export const OVERSAMPLE_LADDER = [4, 8, 16, 32, 64] as const;
+
+/**
+ * Below this, a recall figure is noise. The demo calibrated on 3 mined queries
+ * and produced a number that looked authoritative and was not.
+ */
+export const MIN_CALIBRATION_QUERIES = 30;

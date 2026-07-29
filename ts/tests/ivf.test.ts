@@ -12,7 +12,14 @@ import { CanonicalDoc } from "../contracts/models.js";
 import { type Db, connect, migrate } from "../db.js";
 import { backfillSignatures, buildCentroids, calibrate, chosenNprobe } from "../embed/buildivf.js";
 import { FakeEmbedder } from "../embed/index.js";
-import { hamming, kmeans, probeClusters, signature, suggestNlist } from "../embed/ivf.js";
+import {
+  RECALL_GATE,
+  hamming,
+  kmeans,
+  probeClusters,
+  signature,
+  suggestNlist,
+} from "../embed/ivf.js";
 import { type Viewer, searchDocs, viewerFromAuthenticatedClaims } from "../search.js";
 import { upsertDocument } from "../store.js";
 
@@ -132,7 +139,11 @@ describe("the funnel against a real database", () => {
     expect(cal.points).toHaveLength(3);
     // recall is monotone in nprobe: probing more clusters cannot lose a candidate
     expect(cal.points[2]!.recall10).toBeGreaterThanOrEqual(cal.points[0]!.recall10);
-    expect(cal.points[2]!.recall10).toBeCloseTo(1, 5); // probing ALL clusters == exact
+    // Probing ALL clusters removes cluster loss, but NOT quantization loss: the
+    // oversample sweep picks the smallest value clearing the gate, so full probe
+    // lands at or just above the gate rather than exactly 1.0. Asserting 1.0 was
+    // only true while oversample was a fixed constant large enough to hide it.
+    expect(cal.points[2]!.recall10).toBeGreaterThanOrEqual(RECALL_GATE - 0.02);
     const rows = await client.query(
       "SELECT nprobe, chosen FROM metrics.ivf_calibration ORDER BY nprobe",
     );

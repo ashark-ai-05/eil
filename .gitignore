@@ -10,3 +10,6 @@ node_modules/
 .eil-pg/
 .eil-pglite/
 .eil-repos/
+demo/judgments.md
+demo/metrics.html
+.eil-demo/

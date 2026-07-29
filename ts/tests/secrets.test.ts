@@ -4,7 +4,7 @@
  * the secret) is asserted in pglite.test.ts against a real database.
  */
 import { describe, expect, it } from "vitest";
-import { entropy, redact, scanSecrets } from "../ingest/secrets.js";
+import { entropy, redact, scanSecrets, unacceptedFindings } from "../ingest/secrets.js";
 
 describe("secret detection", () => {
   it("finds registered credential shapes", () => {
@@ -90,5 +90,40 @@ describe("secret detection", () => {
     expect(scanSecrets("x = ghp_16CharsMinimumxxxxxxxxxxxxxxxxxxxxxx")[0]!.rule).toBe(
       "github-token",
     );
+  });
+});
+
+describe("review — the third step of detect, quarantine, review", () => {
+  it("releases a finding that has been accepted", () => {
+    const body = 'const EXAMPLE = "AKIAIOSFODNN7EXAMPLE"; // documentation';
+    const found = scanSecrets(body);
+    expect(found).toHaveLength(1);
+    expect(unacceptedFindings(found, found)).toEqual([]);
+  });
+
+  it("still catches a DIFFERENT credential in an already-reviewed file", () => {
+    // Acceptance is keyed on rule + hint, not on the document, so reviewing one
+    // finding cannot silently approve the next one that appears.
+    const reviewed = scanSecrets('key = "AKIAIOSFODNN7EXAMPLE"');
+    const later = scanSecrets(
+      'key = "AKIAIOSFODNN7EXAMPLE"\ntoken = "ghp_16CharsMinimumxxxxxxxxxxxxxxxxxxxxxx"',
+    );
+    const open = unacceptedFindings(later, reviewed);
+    expect(open).toHaveLength(1);
+    expect(open[0]!.rule).toBe("github-token");
+  });
+
+  it("keys acceptance on the value, not the offset", () => {
+    // Offsets shift whenever unrelated text is edited above them; an acceptance
+    // that evaporates on every edit is not an acceptance.
+    const a = scanSecrets('key = "AKIAIOSFODNN7EXAMPLE"');
+    const b = scanSecrets('// a new comment line\n\nkey = "AKIAIOSFODNN7EXAMPLE"');
+    expect(b[0]!.start).not.toBe(a[0]!.start);
+    expect(unacceptedFindings(b, a)).toEqual([]);
+  });
+
+  it("accepting nothing accepts nothing", () => {
+    const found = scanSecrets('key = "AKIAIOSFODNN7EXAMPLE"');
+    expect(unacceptedFindings(found, [])).toEqual(found);
   });
 });

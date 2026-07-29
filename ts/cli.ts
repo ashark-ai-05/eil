@@ -1,6 +1,7 @@
 /** The eil CLI — the only task runner. Cross-platform by construction. */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type pg from "pg";
@@ -429,14 +430,21 @@ ivf
       console.log(`nlist ${built.nlist}, assigned ${built.assigned}`);
       if (opts.skipCalibrate || built.nlist === 0) return;
       const cal = await calibrate(client, emb);
-      console.log("\n  nprobe   recall@10   scanned/query");
+      console.log(`\ncalibrated on ${cal.queries} queries`);
+      // Measured at a FULL probe, so there is no cluster loss here — whatever is
+      // missing is purely what binary quantization discarded.
+      console.log("\n  oversample   recall@10   (full probe: quantization loss only)");
+      for (const o of cal.oversamplePoints)
+        console.log(`  ${String(`${o.oversample}x`).padStart(10)}   ${o.recall10.toFixed(4)}`);
+      console.log(`\n  -> oversample ${cal.oversample}\n`);
+      console.log("  nprobe   recall@10   scanned/query");
       for (const p of cal.points)
         console.log(
           `  ${String(p.nprobe).padStart(6)}   ${p.recall10.toFixed(4)}      ${String(p.scanned).padStart(7)}`,
         );
       if (cal.chosen === null) {
         console.log(
-          `\nNO nprobe reached recall@10 >= ${RECALL_GATE}. Keeping the exact scan —\nthis corpus's geometry does not suit IVF at this size.`,
+          `\nNo PARTIAL probe reached recall@10 >= ${RECALL_GATE}, so IVF is not adopted and\nqueries keep the exact scan. That is the gate working: at this corpus size the\nclusters are too small for the true neighbours to co-locate. Re-run as the\ncorpus grows.`,
         );
         return;
       }
@@ -553,6 +561,138 @@ program
       console.log(
         `  ${"quarantine expired".padEnd(22)} ${opts.dryRun ? "would purge" : "purged"} ${n}`,
       );
+    } finally {
+      await client.end();
+    }
+  });
+
+program
+  .command("demo:preflight")
+  .description("Check everything the demo needs BEFORE you are standing in front of people")
+  .option("--repo <path>", "also check a local git repository")
+  .action(async (opts) => {
+    const { preflight, worstState } = await import("./demo.js");
+    const checks = await preflight(opts.repo ? { repo: String(opts.repo) } : {});
+    const mark = { ok: "ok  ", warn: "WARN", fail: "FAIL", skip: "--  " } as const;
+    for (const c of checks) {
+      console.log(`${mark[c.state]} ${c.name.padEnd(13)} ${c.detail}`);
+      if (c.fix) console.log(`         ${" ".repeat(13)} -> ${c.fix}`);
+    }
+    const worst = worstState(checks);
+    console.log(
+      worst === "fail"
+        ? "\nNOT READY — fix the FAIL lines above."
+        : worst === "warn"
+          ? "\nUsable, but read the WARN lines."
+          : "\nReady.",
+    );
+    if (worst === "fail") process.exit(2);
+  });
+
+const quarantine = program
+  .command("quarantine")
+  .description("Review documents held back because they appear to contain credentials");
+
+quarantine
+  .command("list")
+  .description("The remediation worklist — rule and location only, never the secret")
+  .action(async () => {
+    const client = await connect();
+    try {
+      const res = await client.query(
+        "SELECT id, title, url, secret_findings, quarantined_at FROM documents" +
+          " WHERE quarantined_at IS NOT NULL ORDER BY quarantined_at DESC, id",
+      );
+      if (res.rows.length === 0) {
+        console.log("nothing quarantined.");
+        return;
+      }
+      for (const r of res.rows) {
+        console.log(`\n${r.id}`);
+        console.log(`  ${r.title ?? "(untitled)"}${r.url ? `  ${r.url}` : ""}`);
+        for (const f of r.secret_findings ?? []) {
+          // hint is first+last 4 chars: enough to find it at the source, not to use it
+          console.log(`  ${String(f.rule).padEnd(28)} ${f.hint}  @${f.start}`);
+        }
+      }
+      console.log(
+        `\n${res.rows.length} quarantined. Remediate at the SOURCE, then re-ingest — or, if a\nfinding is a false positive (a test fixture, documentation), clear it:\n  eil quarantine clear <id>`,
+      );
+    } finally {
+      await client.end();
+    }
+  });
+
+quarantine
+  .command("clear <id>")
+  .description("Accept the findings as false positives and return the document to the index")
+  .action(async (id: string) => {
+    const client = await connect();
+    try {
+      // Record the CURRENT findings as accepted before re-ingesting. Clearing the
+      // flag alone does not work: the re-ingest re-runs the scanner, which finds
+      // the same key-shaped string and quarantines it again. Acceptance is keyed
+      // on rule + hint, so a DIFFERENT credential appearing later is still caught.
+      const res = await client.query(
+        // MERGE, never replace. `secret_accepted = secret_findings` looked right
+        // and silently wiped earlier acceptances: after a clear, secret_findings
+        // is NULL, so a second clear on a re-quarantined document set accepted
+        // back to NULL and the file could never be released. Accumulating means
+        // repeated review converges instead of oscillating; duplicates are
+        // harmless because the comparison is a set.
+        "UPDATE documents SET quarantined_at = NULL," +
+          " secret_accepted = coalesce(secret_accepted, '[]'::jsonb)" +
+          "                   || coalesce(secret_findings, '[]'::jsonb)," +
+          " secret_findings = NULL, secret_reviewed_at = now(), secret_reviewed_by = $2," +
+          // Clear the content hash so the re-ingest below falls THROUGH the hash
+          // gate. Accepting a finding does not change the body, so the gate would
+          // otherwise short-circuit and the document would come back unflagged
+          // and still unchunked — invisible to search, which is the state we are
+          // trying to leave.
+          "     content_hash = ''" +
+          " WHERE id = $1 AND quarantined_at IS NOT NULL RETURNING tenant, id, source",
+        [id, userInfo().username],
+      );
+      if (res.rows.length === 0) {
+        console.log(`${id} is not quarantined.`);
+        return;
+      }
+      // Clearing the flag is not enough: the document was never chunked, so it
+      // would be visible to getDoc and absent from every search. Re-chunking is
+      // what actually returns it to the index, and it needs the body we kept.
+      const doc = await client.query(
+        "SELECT id, tenant, source, title, url, author, created_at, updated_at, hierarchy," +
+          " acl_groups, quality_tier, body FROM documents WHERE id = $1",
+        [id],
+      );
+      const d = doc.rows[0];
+      const { upsertDocument } = await import("./store.js");
+      const { CanonicalDoc } = await import("./contracts/models.js");
+      await upsertDocument(
+        client,
+        CanonicalDoc.parse({
+          id: d.id,
+          tenant: d.tenant,
+          source: d.source,
+          title: d.title,
+          url: d.url,
+          author: d.author,
+          createdAt: d.created_at ? new Date(d.created_at).toISOString() : null,
+          updatedAt: d.updated_at ? new Date(d.updated_at).toISOString() : null,
+          hierarchy: d.hierarchy ?? [],
+          aclGroups: d.acl_groups ?? [],
+          qualityTier: d.quality_tier,
+          body: d.body,
+        }),
+      );
+      const again = await client.query("SELECT quarantined_at FROM documents WHERE id = $1", [id]);
+      if (again.rows[0]?.quarantined_at) {
+        console.log(
+          `${id} is STILL quarantined — the scanner found a credential that was not among\nthe accepted findings. Accepting one finding does not accept the next.`,
+        );
+        return;
+      }
+      console.log(`${id} accepted as a false positive, re-chunked and searchable again.`);
     } finally {
       await client.end();
     }
