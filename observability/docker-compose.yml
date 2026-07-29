@@ -1,0 +1,44 @@
+# Optional dashboard for EIL. **EIL itself needs no Docker** — this file exists
+# only so the provisioning under grafana/ can actually be mounted somewhere.
+#
+# provider.yaml points at /var/lib/grafana/dashboards, which is Grafana's path
+# INSIDE the container; the JSON lives in grafana/dashboards/ in this repo. That
+# mapping was documented nowhere, so the dashboards silently never loaded. The
+# mounts below are the mapping.
+#
+#   docker compose -f observability/docker-compose.yml up
+#   open http://localhost:3000   (anonymous, admin — local only)
+#
+# Against PGlite there is no server to point a datasource at, so this is for the
+# Postgres backend: `eil db embedded` or a system/org instance.
+
+services:
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: eil-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Local convenience only. A shared deployment must not run anonymous.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: "false"
+      # These are exactly what provisioning/datasources/eil.yaml reads — no
+      # more. EIL_PG_HOST is a combined host:port there, not a bare host, and
+      # the datasource declares no password field, so inventing one here would
+      # be config that silently does nothing.
+      EIL_PG_HOST: ${EIL_PG_HOST:-host.docker.internal:5433}
+      EIL_PG_USER: ${EIL_PG_USER:-eil}
+      # Where alerts are delivered. Without a reachable receiver the rules are
+      # inert — which is the defect the alerting fix addressed.
+      EIL_ALERT_WEBHOOK_URL: ${EIL_ALERT_WEBHOOK_URL:-http://localhost:9099/eil-alerts}
+    volumes:
+      # Provisioning: datasource, dashboard provider, and the alert rules with
+      # their contact point and notification policy.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # The path provider.yaml names. This is the mount that was missing.
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    extra_hosts:
+      # Lets the container reach a Postgres running on the host, which is where
+      # `eil db embedded` puts it.
+      - "host.docker.internal:host-gateway"

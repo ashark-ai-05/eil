@@ -35,13 +35,23 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
   // gate this report exists to trip reports ok:true through a real fault.
   const withoutChunks = await one(
     "SELECT count(*)::int AS n FROM documents d" +
-      " WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.tenant = d.tenant AND c.doc_id = d.id)",
+      // Quarantined documents are DELIBERATELY unchunked — that is the whole
+      // safety property, since tsv/embedding/snippets are all downstream of
+      // chunking. Counting them as an integrity fault made secret quarantine
+      // working correctly fail `eil audit --strict`, i.e. the CI gate.
+      // Tombstoned rows keep their chunks, so they are not excluded here.
+      " WHERE d.quarantined_at IS NULL" +
+      " AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.tenant = d.tenant AND c.doc_id = d.id)",
   );
   const unowned = await one("SELECT count(*)::int AS n FROM documents WHERE ingested_by = ''");
   const emptyBody = await one("SELECT count(*)::int AS n FROM documents WHERE length(body) < 40");
+  // Prose only: this looks for HTML that survived the markdown conversion, and
+  // source code legitimately CONTAINS html strings. Counting a template literal
+  // in a .ts file as conversion residue is a false positive that trains people
+  // to ignore the number.
   const htmlResidue = await one(
-    "SELECT count(*)::int AS n FROM documents WHERE body LIKE '%</div>%' OR body LIKE '%</p>%'" +
-      " OR body LIKE '%<ac:%'",
+    "SELECT count(*)::int AS n FROM documents WHERE source <> 'code'" +
+      " AND (body LIKE '%</div>%' OR body LIKE '%</p>%' OR body LIKE '%<ac:%')",
   );
   const nullTsv = await one("SELECT count(*)::int AS n FROM chunks WHERE tsv IS NULL");
   // Quarantined documents are invisible to every read path, so they cannot leak —

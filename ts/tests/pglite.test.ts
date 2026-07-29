@@ -556,4 +556,42 @@ describe("pglite zero-install backend", () => {
     );
     expect(cleared.rows[0].n).toBe(1); // exactly one, not the whole document
   });
+
+  // Regression from a real dry run: quarantined documents are DELIBERATELY
+  // unchunked — that is the safety property — but integrity() counted them as
+  // chunkless, so secret quarantine working correctly made `eil audit --strict`
+  // exit non-zero. A working security feature must not fail the CI gate.
+  it("does not report a quarantined document as an integrity fault", async () => {
+    const { integrity } = await import("../quality.js");
+    const doc = normalizePage({
+      ...fixture("confluence_page.json"),
+      id: "88020",
+      body: "Deploy key AKIAIOSFODNN7EXAMPLE rotates monthly.",
+    });
+    await upsertDocument(client, doc);
+    const report = await integrity(client);
+    expect(report.docs_quarantined).toBeGreaterThan(0);
+    expect(report.docs_without_chunks).toBe(0);
+    expect(report.ok).toBe(true);
+  });
+
+  // Source code legitimately contains HTML strings; counting them as failed
+  // markdown conversion is a false positive that trains people to ignore the
+  // number.
+  it("does not flag html inside source code as conversion residue", async () => {
+    const { integrity } = await import("../quality.js");
+    const { normalizeCode } = await import("../ingest/code.js");
+    await upsertDocument(
+      client,
+      normalizeCode(
+        "org/r",
+        "src/render.ts",
+        'const t = "<p>hello</p></div>";',
+        null,
+        "default",
+        "sha",
+      ),
+    );
+    expect((await integrity(client)).docs_html_residue).toBe(0);
+  });
 });
