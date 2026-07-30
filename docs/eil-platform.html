@@ -63,8 +63,11 @@
   .t-sm { font-size:9.5px; fill:var(--muted); }
   .t-xs { font-size:8.5px; fill:var(--faint); }
   .w { fill:none; stroke:var(--faint); stroke-width:1.6; stroke-linecap:round; }
-  .w.lex { stroke:var(--lex); } .w.fuse { stroke:var(--fuse); }
+  .w.lex { stroke:var(--lex); } .w.fuse { stroke:var(--fuse); } .w.warn { stroke:var(--warn); }
   .tip { fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  /* Twelve crossing wires. Kept faint and thin on purpose — the impression of
+     clutter is the argument, so it must not read as a tidy schematic. */
+  .mesh path { fill:none; stroke:var(--warn); stroke-width:1.1; opacity:.42; }
 
   /* ── motion — the same three keyframes system-map.html uses ─────────── */
   @keyframes dash { to { stroke-dashoffset:-1000; } }
@@ -87,36 +90,11 @@
      needs no reading. Counts are the narrowest of the four gaps this
      corpus's own demo questions produce. */
   .cost { min-width:900px; }
+  .hub { min-width:820px; }
+  .spoke path { fill:none; stroke:var(--lex); stroke-width:1.5; opacity:.6; }
   .foot { font-size:10.5px; color:var(--faint); letter-spacing:0; margin:14px 0 0; }
   .foot code { color:var(--lex); }
 
-  /* ── services on one substrate ──────────────────────────────────────────
-     Each tile shows WHICH indexed data it reads, as lit badges. Built vs
-     proposed is carried by the border — solid or dashed — so the state is
-     visible without a word of text on every card. */
-  .srckey { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin:0 2px 12px;
-    font-size:10.5px; color:var(--muted); letter-spacing:0; }
-  .srckey span { color:var(--faint); }
-  .srckey .dim { margin-left:6px; }
-  .s { display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border-radius:5px;
-    font-size:9.5px; font-weight:700; letter-spacing:0; flex:none;
-    background:var(--panel-2); border:1px solid var(--line); color:var(--faint); opacity:.4; }
-  .s.on { opacity:1; }
-  .s.wiki.on { color:var(--lex); border-color:color-mix(in oklab, var(--lex) 50%, var(--line));
-    background:color-mix(in oklab, var(--lex) 14%, transparent); }
-  .s.jira.on { color:var(--vec); border-color:color-mix(in oklab, var(--vec) 50%, var(--line));
-    background:color-mix(in oklab, var(--vec) 14%, transparent); }
-  .s.code.on { color:var(--ok); border-color:color-mix(in oklab, var(--ok) 50%, var(--line));
-    background:color-mix(in oklab, var(--ok) 14%, transparent); }
-  .s.logs.on { color:var(--muted); border-color:var(--muted); background:var(--panel-2); }
-
-  .svcs { display:grid; grid-template-columns:repeat(auto-fit, minmax(238px, 1fr)); gap:9px; }
-  .svc { background:var(--panel); border:1px dashed var(--line); border-radius:9px; padding:12px;
-    display:flex; flex-direction:column; gap:10px; transition:border-color .15s, transform .15s; }
-  .svc.is-built { border-style:solid; border-color:color-mix(in oklab, var(--ok) 38%, var(--line)); }
-  .svc:hover { border-color:var(--muted); transform:translateY(-2px); }
-  .svc h3 { margin:0; font-size:12px; font-weight:600; color:var(--text); }
-  .svc .srcs { display:flex; gap:5px; margin-top:auto; }
   .base { margin-top:9px; border:1px solid color-mix(in oklab, var(--lex) 34%, var(--line)); border-radius:9px;
     background:linear-gradient(180deg, color-mix(in oklab, var(--lex) 9%, var(--panel)), var(--panel));
     padding:13px 14px 14px; position:relative; }
@@ -157,9 +135,76 @@
     <button class="btn" id="theme" type="button">◐ theme</button>
   </header>
 
-  <!-- ── one question, end to end ───────────────────────────────────────── -->
+  <!-- ── 1 · the problem ────────────────────────────────────────────────── -->
   <section class="band">
-    <h2>One question, end to end<span class="sub">no model in the retrieval path</span></h2>
+    <h2>The problem<span class="sub">everyone searches on their own</span></h2>
+    <div class="scroll">
+      <svg class="flow" viewBox="0 0 1060 210" fill="none" role="img"
+           aria-label="Four people each query three source systems separately. Nothing is shared, every question re-reads the source, and whole pages go into the model each time, so cost grows with people multiplied by questions.">
+        <!-- every person, to every system, every time: the tangle is the point -->
+        <g class="mesh">
+          <path class="signal" d="M132 56 C 260 56, 300 66, 424 66"/>
+          <path class="signal" d="M132 56 C 260 56, 300 118, 424 118"/>
+          <path class="signal" d="M132 56 C 260 56, 300 170, 424 170"/>
+          <path class="signal" d="M132 98 C 260 98, 300 66, 424 66"/>
+          <path class="signal" d="M132 98 C 260 98, 300 118, 424 118"/>
+          <path class="signal" d="M132 98 C 260 98, 300 170, 424 170"/>
+          <path class="signal" d="M132 140 C 260 140, 300 66, 424 66"/>
+          <path class="signal" d="M132 140 C 260 140, 300 118, 424 118"/>
+          <path class="signal" d="M132 140 C 260 140, 300 170, 424 170"/>
+          <path class="signal" d="M132 182 C 260 182, 300 66, 424 66"/>
+          <path class="signal" d="M132 182 C 260 182, 300 118, 424 118"/>
+          <path class="signal" d="M132 182 C 260 182, 300 170, 424 170"/>
+        </g>
+
+        <text class="t-xs" x="20" y="30">everyone, separately</text>
+        <g>
+          <rect class="chip" x="20" y="42" width="112" height="28" rx="6"/><text class="t-sm" x="30" y="60">Engineer</text>
+          <rect class="chip" x="20" y="84" width="112" height="28" rx="6"/><text class="t-sm" x="30" y="102">BA</text>
+          <rect class="chip" x="20" y="126" width="112" height="28" rx="6"/><text class="t-sm" x="30" y="144">Support</text>
+          <rect class="chip" x="20" y="168" width="112" height="28" rx="6"/><text class="t-sm" x="30" y="186">Risk Ops</text>
+        </g>
+
+        <text class="t-xs" x="424" y="30">one pipe per system</text>
+        <g>
+          <rect class="st" x="424" y="52" width="150" height="28" rx="6"/><text class="t-sm" x="436" y="70">Confluence MCP</text>
+          <rect class="st" x="424" y="104" width="150" height="28" rx="6"/><text class="t-sm" x="436" y="122">Jira MCP</text>
+          <rect class="st" x="424" y="156" width="150" height="28" rx="6"/><text class="t-sm" x="436" y="174">Bitbucket MCP</text>
+        </g>
+
+        <!-- and what comes back each time: whole pages, over and over -->
+        <path class="w warn signal" d="M580 118 h34"/>
+        <path class="tip" d="M610 113l6 5-6 5" stroke="var(--warn)"/>
+        <g stroke="var(--warn)" fill="var(--panel-2)" opacity=".85">
+          <rect x="632" y="46" width="34" height="44" rx="3"/>
+          <rect x="674" y="46" width="34" height="44" rx="3"/>
+          <rect x="716" y="46" width="34" height="44" rx="3"/>
+          <rect x="632" y="102" width="34" height="44" rx="3"/>
+          <rect x="674" y="102" width="34" height="44" rx="3"/>
+          <rect x="716" y="102" width="34" height="44" rx="3"/>
+        </g>
+        <g stroke="var(--warn)" stroke-width="1.4" stroke-linecap="round" opacity=".45">
+          <path d="M638 56h22M638 64h22M638 72h16M680 56h22M680 64h22M680 72h16M722 56h22M722 64h22M722 72h16"/>
+          <path d="M638 112h22M638 120h22M638 128h16M680 112h22M680 120h22M680 128h16M722 112h22M722 120h22M722 128h16"/>
+        </g>
+        <text class="t-xs" x="632" y="164" fill="var(--warn)">whole pages, every single time</text>
+
+        <path d="M800 24 v196" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 4"/>
+        <circle class="pulse" cx="828" cy="56" r="4" fill="var(--warn)"/>
+        <text class="t-hd" x="842" y="60" fill="var(--warn)">Nothing is shared</text>
+        <text class="t-sm" x="828" y="86">Every question re-reads the source.</text>
+        <text class="t-sm" x="828" y="104">Whole pages go into the model.</text>
+        <text class="t-sm" x="828" y="122">The same answer is paid for again</text>
+        <text class="t-sm" x="828" y="140">by the next person who asks.</text>
+        <text x="828" y="176" font-size="14" font-weight="700" fill="var(--warn)" font-family="var(--mono)">people × questions</text>
+        <text class="t-xs" x="828" y="192">is the cost curve, and it only goes up</text>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ── 2 · the solution ───────────────────────────────────────────────── -->
+  <section class="band">
+    <h2>The solution<span class="sub">index once · no model in the retrieval path</span></h2>
     <div class="scroll">
       <svg class="flow" viewBox="0 0 1060 268" fill="none" role="img"
            aria-label="Sources feed one index; retrieval fuses five arms with no model; two MCP calls serve an agent; usage returns to steer indexing; governance gates every read.">
@@ -266,7 +311,7 @@
 
   <!-- ── cost: drawn as documents, because documents are what enter a model ── -->
   <section class="band">
-    <h2>What reaches the model<span class="sub">one question · 8 matches</span></h2>
+    <h2>The effect<span class="sub">one question · 8 matches</span></h2>
     <div class="scroll">
       <svg class="flow cost" viewBox="0 0 1060 196" fill="none" role="img"
            aria-label="A pass-through sends all eight matched documents in full, about 21,700 characters. Two-phase sends eight one-line previews plus the single document the agent opened, about 7,400 characters.">
@@ -323,48 +368,43 @@
 
   <!-- ── what runs on it ────────────────────────────────────────────────── -->
   <section class="band">
-    <h2>What runs on it<span class="sub">thin things, one thick base</span></h2>
-    <p class="srckey">
-      <span>reads:</span>
-      <b class="s wiki on">W</b> wiki
-      <b class="s jira on">J</b> tickets
-      <b class="s code on">C</b> code
-      <b class="s logs on">L</b> logs
-      <span class="dim">· solid = built · dashed = proposed</span>
-    </p>
-    <div class="svcs">
-      <article class="svc is-built">
-        <h3>Ask across everything</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
-      </article>
-      <article class="svc is-built">
-        <h3>Requirements gate</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
-      </article>
-      <article class="svc">
-        <h3>One search box for the org</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
-      </article>
-      <article class="svc">
-        <h3>Onboarding answers</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code">C</b><b class="s logs">L</b></div>
-      </article>
-      <article class="svc">
-        <h3>Incident context</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code">C</b><b class="s logs on">L</b></div>
-      </article>
-      <article class="svc">
-        <h3>Review context</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
-      </article>
-      <article class="svc">
-        <h3>Control evidence</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira">J</b><b class="s code on">C</b><b class="s logs on">L</b></div>
-      </article>
-      <article class="svc">
-        <h3>Documentation health</h3>
-        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code">C</b><b class="s logs">L</b></div>
-      </article>
+    <h2>Uses<span class="sub">one index, many front doors</span></h2>
+    <div class="scroll">
+      <svg class="flow hub" viewBox="0 0 1060 430" fill="none" role="img"
+           aria-label="One index at the centre; eight applications around it, each a spoke. None of them brings its own connectors, index, permissions or audit.">
+        <!-- spokes first, so the boxes paint over their ends -->
+        <g class="spoke">
+          <path class="signal" d="M530 215 L905 215"/>
+          <path class="signal" d="M530 215 L799 109"/>
+          <path class="signal" d="M530 215 L530 62"/>
+          <path class="signal" d="M530 215 L261 109"/>
+          <path class="signal" d="M530 215 L155 215"/>
+          <path class="signal" d="M530 215 L261 321"/>
+          <path class="signal" d="M530 215 L530 368"/>
+          <path class="signal" d="M530 215 L799 321"/>
+        </g>
+
+        <!-- the hub -->
+        <rect x="415" y="175" width="230" height="80" rx="14"
+              fill="color-mix(in oklab, var(--lex) 12%, var(--panel))"
+              stroke="color-mix(in oklab, var(--lex) 52%, var(--line))" stroke-width="1.5"/>
+        <text x="530" y="209" text-anchor="middle" font-size="19" font-weight="700"
+              fill="var(--lex)" font-family="var(--mono)">EIL</text>
+        <text class="t-xs" x="530" y="226" text-anchor="middle">one index · one gate · one audit</text>
+        <text class="t-xs" x="530" y="240" text-anchor="middle">indexed once, read by all of them</text>
+
+        <!-- the spokes -->
+        <g>
+          <rect class="st" x="826" y="197" width="158" height="36" rx="8"/><text class="t-sm" x="840" y="219">Ask anything</text>
+          <rect class="st" x="720" y="91"  width="158" height="36" rx="8"/><text class="t-sm" x="734" y="113">Onboarding</text>
+          <rect class="st" x="451" y="44"  width="158" height="36" rx="8"/><text class="t-sm" x="465" y="66">Org search</text>
+          <rect class="st" x="182" y="91"  width="158" height="36" rx="8"/><text class="t-sm" x="196" y="113">Incident context</text>
+          <rect class="st" x="76"  y="197" width="158" height="36" rx="8"/><text class="t-sm" x="90"  y="219">Review context</text>
+          <rect class="st" x="182" y="303" width="158" height="36" rx="8"/><text class="t-sm" x="196" y="325">Requirements gate</text>
+          <rect class="st" x="451" y="350" width="158" height="36" rx="8"/><text class="t-sm" x="465" y="372">Control evidence</text>
+          <rect class="st" x="720" y="303" width="158" height="36" rx="8"/><text class="t-sm" x="734" y="325">Docs health</text>
+        </g>
+      </svg>
     </div>
 
     <div class="base">

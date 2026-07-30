@@ -84,28 +84,62 @@ export class CatalogNotReady extends Error {
  * be there. The raw error from that ("column c.tenant does not exist") reads
  * like a bug in the command rather than a pointer at the wrong catalog.
  */
+/**
+ * Demo data directories sitting in the working directory, most recent first.
+ *
+ * The overwhelmingly common reason to see this error is having just run the
+ * demo: it sets EIL_DATABASE_URL for its own child processes, so the next
+ * hand-typed command has no idea where that catalog went. If one is lying
+ * right here, name it — "set this variable" is a much worse answer than "you
+ * probably meant this one, here is the line".
+ */
+function demoCatalogsHere(): string[] {
+  const candidates = [".eil-demo", ".eil-pglite"];
+  return candidates.filter((d) => {
+    try {
+      return readdirSync(d).length > 0;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export async function assertCatalogReady(client: Db): Promise<void> {
   const pending = await pendingMigrations(client);
   if (pending.length === 0) return;
   const total = migrationFiles().length;
-  const empty = pending.length === total;
-  throw new CatalogNotReady(
-    [
-      empty
-        ? `No catalog here — none of the ${total} migrations have been applied.`
-        : `This catalog is ${pending.length} migration(s) behind (first missing: ${pending[0]}).`,
+  const explicit = !!process.env.EIL_DATABASE_URL;
+  const nearby = explicit ? [] : demoCatalogsHere();
+
+  const lines = [
+    pending.length === total
+      ? `No catalog here — none of the ${total} migrations have been applied.`
+      : `This catalog is ${pending.length} migration(s) behind (first missing: ${pending[0]}).`,
+    "",
+    `  database   ${safeDsn()}`,
+    explicit
+      ? "             (from EIL_DATABASE_URL)"
+      : "             (the default — EIL_DATABASE_URL is not set in this shell)",
+    "",
+  ];
+
+  if (nearby.length > 0) {
+    lines.push(
+      `  There is a catalog in this directory. You probably want:`,
       "",
-      `  database   ${safeDsn()}`,
-      process.env.EIL_DATABASE_URL
-        ? "             (from EIL_DATABASE_URL)"
-        : "             (the default — EIL_DATABASE_URL is not set in this shell)",
+      `      export EIL_DATABASE_URL=pglite://${nearby[0]}`,
       "",
-      process.env.EIL_DATABASE_URL
-        ? "  Bring it up to date:   eil db migrate"
-        : "  If you meant the demo:  export EIL_DATABASE_URL=pglite://.eil-demo",
-      process.env.EIL_DATABASE_URL ? "" : "  Otherwise migrate it:   eil db migrate",
-    ].join("\n"),
-  );
+      "  Then run the command again.",
+    );
+  } else if (explicit) {
+    lines.push("  Bring it up to date:   eil db migrate");
+  } else {
+    lines.push(
+      "  If you meant the demo:  node demo/eil.mjs   (then export the line it prints)",
+      "  Otherwise migrate it:   eil db migrate",
+    );
+  }
+  throw new CatalogNotReady(lines.join("\n"));
 }
 
 /**

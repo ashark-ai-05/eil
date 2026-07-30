@@ -347,6 +347,8 @@ console.log(`    ${c.bold("The three to remember")}`);
 console.log(`      ${c.amber("1.")} One question, three sources — no single pipe answered it.`);
 console.log(`      ${c.amber("2.")} The contractor got six results and could not tell one was withheld.`);
 console.log(`      ${c.amber("3.")} ${c.bold("The model-spend table is empty.")} That is the architecture, not a gap.\n`);
+console.log(`    ${c.bold("Keep exploring — this catalog is not in your shell yet:")}`);
+console.log(`      ${c.green(`export EIL_DATABASE_URL=pglite://${DATA}`)}\n`);
 console.log(`    ${c.dim("report")}   demo/eil-metrics.html`);
 console.log(`    ${c.dim("to agent")} claude mcp add eil -- pnpm -s --dir "$PWD" eil serve`);
 console.log(`    ${c.dim("reset")}    rm -rf ${DATA} .eil-repos demo/eil-metrics.html\n`);
