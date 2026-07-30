@@ -1,10 +1,15 @@
 /**
  * The corpus is authored once and projected twice — paste-ready markdown for a
  * human to create in Confluence/Jira, and fixture JSON for EIL to ingest. If the
- * two ever drift the demo's live and offline modes diverge, so both are generated
- * from the single source in ts/corpus/psr.ts and neither is edited by hand.
+ * two ever drifted the demo's live and offline modes would diverge, so they
+ * cannot: both are generated from the single source in ts/corpus/psr.ts, neither
+ * is edited by hand, and `pnpm corpus:check` fails in CI the moment the
+ * committed tree stops matching what the source projects to.
+ *
+ *   pnpm corpus:build    write the projections
+ *   pnpm corpus:check    fail if the committed tree is stale (for CI / pre-merge)
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { type Dirent, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CONFLUENCE_SOURCE, JIRA_SOURCE } from "../ts/corpus/psr.js";
 
@@ -19,6 +24,9 @@ export const BANNER = [
 
 const withBanner = (body: string) => `${BANNER}\n\n${body.trim()}\n`;
 
+/** Every directory the projection owns entirely — anything else in them is stale. */
+const OWNED = ["demo/corpus", "demo/fixtures"];
+
 export function buildCorpus(): { pages: ConfluenceFixture[]; issues: JiraFixture[] } {
   const pages = CONFLUENCE_SOURCE.map((p) => ({ ...p, body: withBanner(p.body) }));
   const issues = JIRA_SOURCE.map((i) => ({
@@ -28,11 +36,6 @@ export function buildCorpus(): { pages: ConfluenceFixture[]; issues: JiraFixture
   return { pages, issues };
 }
 
-function write(path: string, content: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, "utf-8");
-}
-
 /**
  * The paste order matters: the Jira issues the pages reference should exist
  * before anyone reads the pages, and PTR-401's links can only be set once its
@@ -40,13 +43,27 @@ function write(path: string, content: string): void {
  */
 function readme(pages: ConfluenceFixture[], issues: JiraFixture[]): string {
   const restricted = pages.filter((p) => p.acl_groups.length > 0);
-  const linkedFirst = ["PTR-388", "PTR-392", "PTR-415", "PTR-420"];
   const byKey = new Map(issues.map((i) => [i.key, i]));
+  const linked = issues.find((i) => i.key === "PTR-401")!;
+  const linkTargets = (linked.fields.issue_links ?? []).map((l) => l.key);
+  // Everything except PTR-401 goes in first, so the keys the pages cite resolve.
+  const linkedFirst = issues.map((i) => i.key).filter((k) => k !== linked.key);
+  // Derived, not asserted: the count of nested pages and the count of distinct
+  // parents are different numbers, and a reader creating pages by hand under
+  // time pressure is the one who pays for getting either of them wrong.
+  const nested = pages.filter((p) => p.ancestors.length > 1);
+  const parents = [...new Set(nested.flatMap((p) => p.ancestors.slice(1)))];
   const staleUpdated = pages.find((p) => p.id === "ptrd-2")!.updated.slice(0, 10);
   const row = (key: string) => {
     const i = byKey.get(key)!;
     return `1. **${key}** — ${i.fields.summary} (${i.fields.issuetype}, set status to ${i.fields.status})`;
   };
+  const list = (xs: string[]) =>
+    xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;
+  // Prose, so counts are spelled — this file is read by a person following it.
+  const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+  const num = (n: number) => words[n] ?? String(n);
+  const cap = (s: string) => `${s.slice(0, 1).toUpperCase()}${s.slice(1)}`;
   return [
     "# Paste order — synthetic PTR-DEMO corpus",
     "",
@@ -59,12 +76,12 @@ function readme(pages: ConfluenceFixture[], issues: JiraFixture[]): string {
     "",
     "## 1. Space",
     "",
-    "Create the Confluence space **PTR-DEMO**. Two pages sit under child parents",
-    "(`Compliance`, `Runbooks`) — create those as empty parent pages first.",
+    `Create the Confluence space **PTR-DEMO**. ${cap(num(nested.length))} of the pages sit under ${num(parents.length)}`,
+    `child parents (${list(parents.map((p) => `\`${p}\``))}) — create those as empty parent pages first.`,
     "",
     "## 2. Jira project and the issues the pages reference",
     "",
-    "Create Jira project **PTR**, then these four issues before the pages, so the",
+    `Create Jira project **PTR**, then these ${num(linkedFirst.length)} issues before the pages, so the`,
     "keys the pages cite already resolve:",
     "",
     ...linkedFirst.map(row),
@@ -78,14 +95,12 @@ function readme(pages: ConfluenceFixture[], issues: JiraFixture[]): string {
         }`,
     ),
     "",
-    ...restricted.map((p) =>
-      [
-        `Restrict **${p.id}** (${p.title}) to \`${p.acl_groups.join(", ")}\` — a view`,
-        "restriction, not just edit. The demo shows an unentitled caller getting no",
-        "trace of the page, which only works if the restriction is real.",
-      ].join(" "),
-    ),
-    "",
+    ...restricted.flatMap((p) => [
+      `Restrict **${p.id}** (${p.title}) to \`${p.acl_groups.join(", ")}\` — a view`,
+      "restriction, not just edit. The demo shows an unentitled caller getting no",
+      "trace of the page, which only works if the restriction is real.",
+      "",
+    ]),
     "`ptrd-2` (Gateway Notes) is meant to look stale: set its author to `a.whitfield`",
     `and backdate its last-updated to ${staleUpdated} if the wiki lets you. It does`,
     "not matter if it will not — nothing in the demo depends on the wiki's own",
@@ -98,35 +113,102 @@ function readme(pages: ConfluenceFixture[], issues: JiraFixture[]): string {
     "",
     "## 4. The remaining issue and its links",
     "",
-    ...["PTR-401"].map(row),
+    row(linked.key),
     "",
-    "Then set PTR-401's links: relates to PTR-392, PTR-415 and PTR-420. PTR-420 is",
-    "the open escalation the demo lands on, so leave it Open with no resolution.",
+    `Then set ${linked.key}'s links: relates to ${list(linkTargets)}. The fixtures`,
+    `encode the same links, so ${linked.key} has the same edges in both demo modes.`,
+    "PTR-420 is the open escalation the demo lands on, so leave it Open with no",
+    "resolution.",
     "",
   ].join("\n");
 }
 
-export function emit(root = process.cwd()): void {
+/** The whole projection as repo-relative path → exact bytes. */
+export function project(): Map<string, string> {
   const { pages, issues } = buildCorpus();
+  const out = new Map<string, string>();
   for (const p of pages) {
-    write(join(root, "demo/fixtures", `${p.id}.json`), `${JSON.stringify(p, null, 2)}\n`);
-    write(
-      join(root, "demo/corpus/confluence", `${p.id}.md`),
-      `# ${p.title}\n\n_Space PTR-DEMO · parent: ${p.ancestors.join(" / ")}` +
-        `${p.acl_groups.length ? ` · restrict to: ${p.acl_groups.join(", ")}` : ""}_\n\n${p.body}`,
-    );
+    out.set(`demo/fixtures/${p.id}.json`, `${JSON.stringify(p, null, 2)}\n`);
+    const meta = [
+      `_Space PTR-DEMO · parent: ${p.ancestors.join(" / ")}`,
+      p.acl_groups.length ? ` · restrict to: ${p.acl_groups.join(", ")}` : "",
+      "_",
+    ].join("");
+    out.set(`demo/corpus/confluence/${p.id}.md`, `# ${p.title}\n\n${meta}\n\n${p.body}`);
   }
   for (const i of issues) {
-    write(join(root, "demo/fixtures", `${i.key}.json`), `${JSON.stringify(i, null, 2)}\n`);
+    out.set(`demo/fixtures/${i.key}.json`, `${JSON.stringify(i, null, 2)}\n`);
     const f = i.fields;
     const meta = `_Project PTR · ${f.issuetype} · ${f.status} · reporter ${f.reporter}_`;
     const comments = f.comments.map((c) => `**Comment — ${c.author}**\n\n${c.body}`).join("\n\n");
-    write(
-      join(root, "demo/corpus/jira", `${i.key}.md`),
+    out.set(
+      `demo/corpus/jira/${i.key}.md`,
       `${[`# ${i.key} — ${f.summary}`, meta, f.description.trim(), comments].join("\n\n")}\n`,
     );
   }
-  write(join(root, "demo/corpus/README.md"), `${readme(pages, issues).trimEnd()}\n`);
+  out.set("demo/corpus/README.md", `${readme(pages, issues).trimEnd()}\n`);
+  return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) emit();
+export function emit(root = process.cwd()): void {
+  for (const [rel, content] of project()) {
+    const path = join(root, rel);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content, "utf-8");
+  }
+}
+
+/** Files that exist on disk under the owned directories, repo-relative. */
+function committed(root: string, rel: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(join(root, rel), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.flatMap((e) =>
+    e.isDirectory() ? committed(root, `${rel}/${e.name}`) : [`${rel}/${e.name}`],
+  );
+}
+
+/**
+ * Named, per-file complaints. "The corpus is stale" sends the reader looking
+ * through 26 files; "demo/corpus/confluence/ptrd-3.md is STALE" does not.
+ */
+function stale(root: string): string[] {
+  const want = project();
+  const problems: string[] = [];
+  for (const [rel, content] of want) {
+    let actual: string | undefined;
+    try {
+      actual = readFileSync(join(root, rel), "utf-8");
+    } catch {
+      problems.push(`${rel} is MISSING`);
+      continue;
+    }
+    if (actual !== content) problems.push(`${rel} is STALE — hand-edited, or its source changed`);
+  }
+  for (const dir of OWNED) {
+    for (const rel of committed(root, dir)) {
+      if (!want.has(rel)) problems.push(`${rel} is NOT GENERATED by ts/corpus/psr.ts — delete it`);
+    }
+  }
+  return problems;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const files = project();
+  if (process.argv.includes("--check")) {
+    const problems = stale(process.cwd());
+    if (problems.length > 0) {
+      console.error("build-corpus: the committed projection does not match ts/corpus/psr.ts:");
+      for (const p of problems) console.error(`  ${p}`);
+      console.error("\nRun `pnpm corpus:build` and commit the result. Do not edit demo/ by hand.");
+      process.exit(1);
+    }
+    console.log(`build-corpus: up to date (${files.size} files)`);
+  } else {
+    emit();
+    console.log(`build-corpus: wrote ${files.size} files under demo/`);
+  }
+}

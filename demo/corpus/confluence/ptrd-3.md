@@ -23,7 +23,7 @@ why people think they are looking at a duplicate.
 Netting is applied end of day only, never intraday. Intraday, utilisation only
 goes up: every order adds its contribution and nothing comes off until the
 overnight batch has run. Desks assume a closing trade hands them headroom back
-the same afternoon. It does not, and that is comfortably the most common question
-Risk Ops gets asked.
+the same afternoon. It does not. Risk Ops fields this question more often than
+any other.
 
 Utilisation is checked against the limit before the order is released, not after.

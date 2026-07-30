@@ -72,11 +72,14 @@ export function normalize(issue: JiraIssue, tenant = "default"): CanonicalDoc {
     body,
     // Structured edges FIRST, then whatever the prose scraper finds. Jira's own
     // issuelinks are typed and exact; a regex over the description is a guess.
-    // extractLinks dedupes, so a relationship stated both ways appears once.
+    // Deduped across both, so an issue that is both linked and named in the
+    // description — the common case — contributes one edge and not two.
     links: [
-      ...(f.parent ? [`jira:issue:${f.parent}`] : []),
-      ...(f.issue_links ?? []).map((l) => `jira:issue:${l.key}`),
-      ...extractLinks(body, docId),
+      ...new Set([
+        ...(f.parent ? [`jira:issue:${f.parent}`] : []),
+        ...(f.issue_links ?? []).map((l) => `jira:issue:${l.key}`),
+        ...extractLinks(body, docId),
+      ]),
     ].filter((l) => l !== docId),
   });
 }

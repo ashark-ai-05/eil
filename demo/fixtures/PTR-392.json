@@ -10,6 +10,12 @@
     "created": "2025-03-20T10:05:00+00:00",
     "updated": "2025-06-11T13:20:00+00:00",
     "description": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nA limit change in credit-admin can currently be made and take effect on the\nauthority of one Risk Ops user. Audit have asked for maker-checker: the user who\nraises an amendment must not be the user who approves it, and credit-admin should\nenforce that itself rather than leaving it to procedure and a runbook.\n",
+    "issue_links": [
+      {
+        "type": "relates to",
+        "key": "PTR-401"
+      }
+    ],
     "comments": [
       {
         "author": "n.okafor",

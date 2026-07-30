@@ -9,6 +9,14 @@
  * do not tidy these. Two facts are deliberately absent from every page body —
  * what happens to orders already working at a venue when a limit is reduced, and
  * any cross-currency rate source. Adding either breaks the demo.
+ *
+ * WRAPPING CONSTRAINT. Bodies are hard-wrapped at ~78 columns, but the hedge
+ * phrases downstream detection looks for must not straddle a newline: `i think`,
+ * `roughly`, `haven't measured`, `check with`, `not sure`, `probably`,
+ * `should be`, `approximately`, `was aiming for`, `credit exposure`. Whitespace
+ * is normalised before matching, so a split would still be found — but a corpus
+ * whose signal depends on where a hand-wrap happened to fall is fragile. When
+ * you reword a paragraph, re-flow it so each of those phrases stays on one line.
  */
 
 /** Confluence connector wire shape — snake_case, because that is what ingest parses. */
@@ -38,6 +46,12 @@ export interface JiraFixture {
     updated: string;
     description: string;
     comments: { author: string; body: string }[];
+    /**
+     * Jira's own typed dependency graph. Present here because ingest prefers it
+     * over the prose scraper, so an issue whose links the paste instructions
+     * describe must encode them too or the two demo modes get different graphs.
+     */
+    issue_links?: { type: string; key: string }[];
   };
 }
 
@@ -85,8 +99,8 @@ not read it tend to arrive with a proposal to make the check softer.
 Limit administration itself — who may change a number, and what approvals apply
 to it — is documented elsewhere and out of scope here.
 
-The attached diagram is from the original design review and is still roughly
-right, except the box labelled risk-gateway, which is now ptc-gateway.
+The attached diagram is from the original design review and is still
+roughly right, except the box labelled risk-gateway, which is now ptc-gateway.
 `,
   },
   {
@@ -117,11 +131,11 @@ more than thirty times the entire budget.
 
 Refresh is a push, not a poll: psr-limits publishes on change and the gateway
 applies it to the snapshot. Was aiming for 250ms end to end from the change
-landing in credit-admin to the gateway acting on it, and I think we got roughly
-there, but I haven't measured recently.
+landing in credit-admin to the gateway acting on it, and I think we got
+roughly there, but I haven't measured recently.
 
-There's a staleness cutoff, I think 5s, after which we reject. Check with the
-psr-limits team.
+There's a staleness cutoff, I think 5s, after which we reject.
+Check with the psr-limits team.
 
 The kill switch is a separate path and does not go anywhere near the snapshot —
 it stops the session, it does not wave orders past a control.
@@ -156,8 +170,8 @@ why people think they are looking at a duplicate.
 Netting is applied end of day only, never intraday. Intraday, utilisation only
 goes up: every order adds its contribution and nothing comes off until the
 overnight batch has run. Desks assume a closing trade hands them headroom back
-the same afternoon. It does not, and that is comfortably the most common question
-Risk Ops gets asked.
+the same afternoon. It does not. Risk Ops fields this question more often than
+any other.
 
 Utilisation is checked against the limit before the order is released, not after.
 `,
@@ -179,11 +193,13 @@ consequences come up in design discussions often enough to write down, and
 neither is negotiable.
 
 First: a control that cannot be evaluated has not passed. If a pre-trade check
-cannot be completed — reference data missing, the service unavailable, the credit
-exposure view too old to be relied on — the order MUST be rejected. Fail closed
-is the only defensible behaviour. Letting the order through and reconciling
-afterwards is not a position we can put in front of a regulator, and it is not a
-position this desk will support.
+cannot be completed — reference data missing, the service unavailable, the
+credit exposure view too old to be relied on — the order must be rejected.
+Fail closed is the only defensible behaviour, and letting the order through to
+reconcile afterwards is not something we can put in front of a regulator. (The
+older control inventory in the market access self-assessment pack sets the same
+thing out at more length, though several of the service names in it have
+changed since.)
 
 Second: there is no bypass. Not for a desk head, not for the on-call engineer,
 not for a client go-live date. There is no manual override and there must never
@@ -191,11 +207,20 @@ be one built. The kill switch is a different mechanism and should not be
 confused with a bypass: it withdraws our flow, it does not admit flow that has
 failed a control.
 
-The specific obligations sit in the market access rules the venue memberships
-are subject to, and Compliance holds the mapping from those rules to the
-controls in ptc-gateway. This page deliberately does not quote article numbers,
-because they move and this page will not be updated when they do. Ask Compliance
-for the current citation before you put one in a design document.
+Compliance holds the mapping from the market access rules our venue memberships
+are subject to onto the individual controls in ptc-gateway. Their list, as sent
+over after the last review:
+
+- order size / max order value — ptc-gateway, sync path
+- price collar — ptc-gateway
+- restricted instrument list — ptc-gateway, list owned by Compliance
+- presettlement credit check — ptc-gateway, out of psr-cache
+- kill switch — session level, withdrawal of flow, not an order control
+- duplicate / erroneous order detection — believed to be covered upstream in
+  the client OMS, nobody has confirmed this, leaving it here as a question
+
+Ask Compliance for the current citation before you put one in a design
+document.
 `,
   },
   {
@@ -237,8 +262,7 @@ was a convention written on this page, and it was not always followed.
 
 If you are alone on shift you cannot complete an amendment. Call the other region
 and borrow a second pair of eyes. There is no route that involves turning the
-control off for an hour, and asking for one is not a good use of anybody's
-afternoon.
+control off for an hour, and no one in Risk Ops can grant one.
 `,
   },
   {
@@ -295,13 +319,13 @@ declined. If you need a limit for a test, invent one.
 CPTY-ALPHA is a large dealer, faced out of the London entity, and carries the
 biggest presettlement line we run on this venue at 250m USD equivalent, with a
 sub-limit of 60m beyond five years tenor. Utilisation rarely gets past half of
-that outside index roll weeks, so it is not the name that wakes anybody up.
+that outside index roll weeks.
 
 CPTY-BRAVO is a regional bank and is faced out of both London and Singapore. The
 London line is 80m and Singapore is 25m. Those are separate lines and neither one
-lends headroom to the other, which CPTY-BRAVO's own treasury team has never quite
-accepted. CPTY-BRAVO runs much closer to its line than CPTY-ALPHA does and is
-the name Risk Ops actually watches on a busy day.
+lends headroom to the other; CPTY-BRAVO's treasury team has asked us to net them
+twice and been told no twice. CPTY-BRAVO runs much closer to its line than
+CPTY-ALPHA does and is the name Risk Ops watches on a busy day.
 
 Both are reviewed annually by credit. The review dates live in the credit system
 and not on this page, because this page would not be updated.
@@ -369,6 +393,15 @@ day.
 
 Should cover both increases and decreases.
 `,
+      // The paste instructions tell the human to set these three in Jira, so the
+      // fixtures carry them as well — otherwise PTR-401 has three outbound edges
+      // live and none offline. Jira shows a relates-to on both issues, which is
+      // why PTR-392, PTR-415 and PTR-420 each carry the reciprocal link.
+      issue_links: [
+        { type: "relates to", key: "PTR-392" },
+        { type: "relates to", key: "PTR-415" },
+        { type: "relates to", key: "PTR-420" },
+      ],
       comments: [
         {
           author: "d.mercer",
@@ -426,6 +459,7 @@ authority of one Risk Ops user. Audit have asked for maker-checker: the user who
 raises an amendment must not be the user who approves it, and credit-admin should
 enforce that itself rather than leaving it to procedure and a runbook.
 `,
+      issue_links: [{ type: "relates to", key: "PTR-401" }],
       comments: [
         {
           author: "n.okafor",
@@ -457,6 +491,7 @@ Threshold agreed at 1s — if a gateway's view is more than a second old we want
 know about it well before it turns into a rejection. Design context is on the PSR
 Cache Refresh Design page.
 `,
+      issue_links: [{ type: "relates to", key: "PTR-401" }],
       comments: [
         {
           author: "s.iyer",
@@ -483,6 +518,7 @@ behaviour is whatever the code happens to do rather than anything anyone chose.
 This wants a decision from risk and compliance together — it is not engineering's
 to make. Blocking question for PTR-401.
 `,
+      issue_links: [{ type: "relates to", key: "PTR-401" }],
       comments: [
         {
           author: "s.iyer",

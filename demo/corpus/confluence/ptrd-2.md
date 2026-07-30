@@ -22,11 +22,11 @@ more than thirty times the entire budget.
 
 Refresh is a push, not a poll: psr-limits publishes on change and the gateway
 applies it to the snapshot. Was aiming for 250ms end to end from the change
-landing in credit-admin to the gateway acting on it, and I think we got roughly
-there, but I haven't measured recently.
+landing in credit-admin to the gateway acting on it, and I think we got
+roughly there, but I haven't measured recently.
 
-There's a staleness cutoff, I think 5s, after which we reject. Check with the
-psr-limits team.
+There's a staleness cutoff, I think 5s, after which we reject.
+Check with the psr-limits team.
 
 The kill switch is a separate path and does not go anywhere near the snapshot —
 it stops the session, it does not wave orders past a control.

@@ -15,13 +15,13 @@ declined. If you need a limit for a test, invent one.
 CPTY-ALPHA is a large dealer, faced out of the London entity, and carries the
 biggest presettlement line we run on this venue at 250m USD equivalent, with a
 sub-limit of 60m beyond five years tenor. Utilisation rarely gets past half of
-that outside index roll weeks, so it is not the name that wakes anybody up.
+that outside index roll weeks.
 
 CPTY-BRAVO is a regional bank and is faced out of both London and Singapore. The
 London line is 80m and Singapore is 25m. Those are separate lines and neither one
-lends headroom to the other, which CPTY-BRAVO's own treasury team has never quite
-accepted. CPTY-BRAVO runs much closer to its line than CPTY-ALPHA does and is
-the name Risk Ops actually watches on a busy day.
+lends headroom to the other; CPTY-BRAVO's treasury team has asked us to net them
+twice and been told no twice. CPTY-BRAVO runs much closer to its line than
+CPTY-ALPHA does and is the name Risk Ops watches on a busy day.
 
 Both are reviewed annually by credit. The review dates live in the credit system
 and not on this page, because this page would not be updated.

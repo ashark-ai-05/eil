@@ -36,5 +36,5 @@ not read it tend to arrive with a proposal to make the check softer.
 Limit administration itself — who may change a number, and what approvals apply
 to it — is documented elsewhere and out of scope here.
 
-The attached diagram is from the original design review and is still roughly
-right, except the box labelled risk-gateway, which is now ptc-gateway.
+The attached diagram is from the original design review and is still
+roughly right, except the box labelled risk-gateway, which is now ptc-gateway.

@@ -35,5 +35,4 @@ was a convention written on this page, and it was not always followed.
 
 If you are alone on shift you cannot complete an amendment. Call the other region
 and borrow a second pair of eyes. There is no route that involves turning the
-control off for an hour, and asking for one is not a good use of anybody's
-afternoon.
+control off for an hour, and no one in Risk Ops can grant one.

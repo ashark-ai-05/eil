@@ -9,8 +9,8 @@ so the banner renders as a quote.
 
 ## 1. Space
 
-Create the Confluence space **PTR-DEMO**. Two pages sit under child parents
-(`Compliance`, `Runbooks`) — create those as empty parent pages first.
+Create the Confluence space **PTR-DEMO**. Three of the pages sit under two
+child parents (`Compliance` and `Runbooks`) — create those as empty parent pages first.
 
 ## 2. Jira project and the issues the pages reference
 
@@ -33,7 +33,9 @@ keys the pages cite already resolve:
 1. **ptrd-7** — Counterparty Static Data
 1. **ptrd-8** — PSR Cache Refresh Design
 
-Restrict **ptrd-7** (Counterparty Static Data) to `grp-risk-ops` — a view restriction, not just edit. The demo shows an unentitled caller getting no trace of the page, which only works if the restriction is real.
+Restrict **ptrd-7** (Counterparty Static Data) to `grp-risk-ops` — a view
+restriction, not just edit. The demo shows an unentitled caller getting no
+trace of the page, which only works if the restriction is real.
 
 `ptrd-2` (Gateway Notes) is meant to look stale: set its author to `a.whitfield`
 and backdate its last-updated to 2025-05-06 if the wiki lets you. It does
@@ -49,5 +51,7 @@ not paste it anywhere that scans for real credentials and raises a ticket.
 
 1. **PTR-401** — Intraday PSR limit amendment (Story, set status to To Do)
 
-Then set PTR-401's links: relates to PTR-392, PTR-415 and PTR-420. PTR-420 is
-the open escalation the demo lands on, so leave it Open with no resolution.
+Then set PTR-401's links: relates to PTR-392, PTR-415 and PTR-420. The fixtures
+encode the same links, so PTR-401 has the same edges in both demo modes.
+PTR-420 is the open escalation the demo lands on, so leave it Open with no
+resolution.
