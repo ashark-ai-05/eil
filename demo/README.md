@@ -2,10 +2,10 @@
 
 > **There are two demos in here, and they argue different things.**
 >
-> | | Runner | Narration | The argument |
-> |---|---|---|---|
-> | **Gated elaboration** | `node demo/run.mjs` | [talking-points.md](talking-points.md) | AI proposes, code decides, a named person signs — and no stage can pass itself |
-> | **The knowledge plane** | `node demo/eil.mjs` | [eil-talking-points.md](eil-talking-points.md) | You already have a pipe to each system; this is the index across them |
+> | | Runner | Reference | Narration | The argument |
+> |---|---|---|---|---|
+> | **Gated elaboration** | `node demo/run.mjs` | this file | [talking-points.md](talking-points.md) | AI proposes, code decides, a named person signs — and no stage can pass itself |
+> | **The knowledge plane** | `node demo/eil.mjs` | [eil-README.md](eil-README.md) | [eil-talking-points.md](eil-talking-points.md) | You already have a pipe to each system; this is the index across them |
 >
 > This file documents the first. Pick the second for a room that already runs
 > MCP servers against Confluence, Jira and Bitbucket, and whose first question
