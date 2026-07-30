@@ -8,6 +8,8 @@
   "ancestors": [
     "PTR-DEMO"
   ],
-  "acl_groups": [],
+  "acl_groups": [
+    "grp-engineering"
+  ],
   "body": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nWorking notes on how the PSR number is actually arrived at. Somebody should turn\nthis into a proper page one day.\n\nFor a single order the exposure contribution is gross notional multiplied by a\ntenor add-on factor. The factors are banded by tenor — the front end carries\nalmost nothing, the long end carries a lot — and psr-limits loads the band table\nat start of day. I could not establish who owns the bands. The table has not\nchanged in the time I have been looking at it.\n\nLimits are held per counterparty and legal entity. The same counterparty faced\nout of two of our entities has two limits, and they do not net against one\nanother, which is why the same name appears more than once in credit-admin and\nwhy people think they are looking at a duplicate.\n\nNetting is applied end of day only, never intraday. Intraday, utilisation only\ngoes up: every order adds its contribution and nothing comes off until the\novernight batch has run. Desks assume a closing trade hands them headroom back\nthe same afternoon. It does not. Risk Ops fields this question more often than\nany other.\n\nUtilisation is checked against the limit before the order is released, not after.\n"
 }

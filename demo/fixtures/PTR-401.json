@@ -30,5 +30,8 @@
         "body": "The October collateral cycle is the case I actually care about — is that in scope here, or are we only talking about the ordinary daily posting? Please don't scope it out without speaking to me first."
       }
     ]
-  }
+  },
+  "acl_groups": [
+    "grp-engineering"
+  ]
 }

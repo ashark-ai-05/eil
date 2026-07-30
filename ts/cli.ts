@@ -193,6 +193,10 @@ ingest
   .option("--include <glob...>", "only paths matching (repeatable)")
   .option("--exclude <glob...>", "skip paths matching (repeatable)")
   .option("--name <key>", "override the repo key (else derived from the ref)")
+  .option(
+    "--acl-group <g...>",
+    "groups granted read on this repo; omit for owner-only (fail-closed)",
+  )
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (refs: string[], opts) => {
     const { detectSource, repoKey } = await import("./ingest/code.js");
@@ -216,7 +220,7 @@ ingest
             )
           : new GitCloneSource(cfg);
       console.log(`ingest ${kind} ${key} (${ref})`);
-      await ingestRepo(source, key, opts.subpath, filter, opts.tenant);
+      await ingestRepo(source, key, opts.subpath, filter, opts.tenant, opts.aclGroup ?? []);
     }
   });
 

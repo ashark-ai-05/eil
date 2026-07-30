@@ -41,6 +41,18 @@ export function normalizeCode(
   tenant: string,
   ref?: string,
   updatedAt?: string | null,
+  /**
+   * Groups granted read access to every file in this repo.
+   *
+   * Empty stays the default and stays fail-closed: an unstamped document is
+   * readable only by whoever ingested it. That default is safe but it is also
+   * useless on a shared server, where the ingester is a service account and so
+   * the repo becomes visible to nobody at all. Naming the groups at ingest is
+   * the operator saying who could already read this repo — the same thing the
+   * Confluence and Jira fixtures carry, and the same thing an ACL syncer will
+   * eventually stamp automatically.
+   */
+  aclGroups: readonly string[] = [],
 ): CanonicalDoc {
   const dirs = path.split("/").slice(0, -1);
   const selfId = `code:${key}:${path}`;
@@ -52,7 +64,7 @@ export function normalizeCode(
     title: path,
     url: url ?? undefined,
     hierarchy: [key, ...dirs],
-    aclGroups: [],
+    aclGroups: [...aclGroups],
     qualityTier: "authored",
     body: content,
     // A null updated_at is NOT neutral: ranking.modifier() returns

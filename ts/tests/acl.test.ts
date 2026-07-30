@@ -215,4 +215,44 @@ describe.skipIf(!available)("ACL red-team", () => {
     expect(full.truncated).toBe(false);
     expect(full.edges.filter((e) => e.direction === "in")).toHaveLength(3);
   });
+
+  it("stamps a repo's groups from ingest rather than always owner-only", async () => {
+    // normalizeCode hardcoded aclGroups: [], which is safe by default and
+    // useless on a shared server — the ingester is a service account, so the
+    // repo ends up visible to nobody. The operator has to be able to say who
+    // could already read it.
+    const { normalizeCode } = await import("../ingest/code.js");
+    const args = ["svc", "src/a.ts", "export const a = 1;", null, "default"] as const;
+
+    expect(normalizeCode(...args).aclGroups).toEqual([]);
+    expect(normalizeCode(...args, undefined, null, ["grp-engineering"]).aclGroups).toEqual([
+      "grp-engineering",
+    ]);
+  });
+
+  it("hides a restricted document without hiding that a search happened", async () => {
+    // The governance beat, as it is shown on stage. The point is not that the
+    // outsider is refused — it is that they are not refused: they get a full,
+    // useful result set, and the one document they may not see is simply not
+    // in it. There is nothing in the response to notice.
+    const eng = ["grp-eng"];
+    await upsertDocument(client, doc("confluence:page:open1", "Limit runbook", "limit amend", eng));
+    await upsertDocument(client, doc("confluence:page:open2", "Limit model", "limit expo", eng));
+    await upsertDocument(
+      client,
+      doc("confluence:page:closed", "Counterparty limits", "limit 250m CPTY-ALPHA", ["grp-risk"]),
+    );
+
+    const outsider = { principal: "a.contractor", groups: eng, tenant: "default" };
+    const insider = { principal: "a.contractor", groups: [...eng, "grp-risk"], tenant: "default" };
+
+    const seen: any = await searchDocs(client, outsider, "limit", 10);
+    const ids = seen.results.map((r: any) => r.id);
+    expect(ids.length).toBeGreaterThan(0); // not an empty, obviously-blocked response
+    expect(ids).not.toContain("confluence:page:closed");
+    expect(JSON.stringify(seen)).not.toContain("CPTY-ALPHA"); // no snippet leak either
+
+    const withGroup: any = await searchDocs(client, insider, "limit", 10);
+    expect(withGroup.results.map((r: any) => r.id)).toContain("confluence:page:closed");
+  });
 });

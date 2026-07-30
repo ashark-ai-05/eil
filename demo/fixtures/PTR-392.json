@@ -26,5 +26,8 @@
         "body": "Runbook updated. Worth saying out loud that this means one person alone on shift cannot move a limit at all."
       }
     ]
-  }
+  },
+  "acl_groups": [
+    "grp-engineering"
+  ]
 }

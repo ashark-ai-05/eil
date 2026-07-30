@@ -191,6 +191,8 @@ export async function ingestRepo(
   subpath: string | undefined,
   filter: RepoFilter,
   tenant: string,
+  /** Groups granted read on every file. Empty = owner-only, and fail-closed. */
+  aclGroups: readonly string[] = [],
 ): Promise<{ upserted: number; deleted: number; skipped: number }> {
   const { upsertDocument } = await import("../store.js");
   const ckey = `code:${key}${subpath ? `:${subpath}` : ""}`;
@@ -245,6 +247,7 @@ export async function ingestRepo(
         tenant,
         head,
         fileDates?.get(path) ?? null,
+        aclGroups,
       );
       if (await upsertDocument(client, doc)) {
         await (await import("../store.js")).replaceCodeIndex(client, doc, key, path, head);

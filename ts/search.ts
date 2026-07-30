@@ -85,10 +85,26 @@ function armWeights(route: Route): Record<string, number> {
   };
 }
 
+/**
+ * The identity a local CLI or stdio MCP process reads with.
+ *
+ * `EIL_PRINCIPAL` overrides the OS username, alongside the `EIL_USER_GROUPS`
+ * override that was already here. It exists so you can ask what a DIFFERENT
+ * person would get back from the same query — which is the only way to show a
+ * fail-closed ACL doing its job, since the person running the command is
+ * usually the one who ingested the corpus and therefore owns all of it.
+ *
+ * This confers nothing that setting EIL_USER_GROUPS did not already confer. In
+ * local mode the caller owns the process and the DSN, so identity here is an
+ * assertion, not a claim to be checked. The trust boundary is elsewhere and
+ * unmoved: a shared HTTP deployment must build its viewer with
+ * viewerFromAuthenticatedClaims() after verifying a token, and must never
+ * reach this function.
+ */
 export function localViewer(): Viewer {
   const raw = process.env.EIL_USER_GROUPS ?? "";
   return trustedViewer({
-    principal: userInfo().username,
+    principal: process.env.EIL_PRINCIPAL || userInfo().username,
     tenant: process.env.EIL_TENANT ?? "default",
     groups: raw
       .split(",")
