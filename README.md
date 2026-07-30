@@ -65,6 +65,23 @@ could already read. Syncs are incremental from a stored cursor and hash-gated,
 so re-running is free. Scoping flags, deletions, code ingestion, and OS-keychain
 token storage: **[docs/ingestion.md](docs/ingestion.md)**.
 
+## Gating what an agent produces
+
+```sh
+pnpm eil reqs check demo/PTR-401.reqs.json          # the gate: 45 checks, exit 1 on refusal
+pnpm eil reqs check demo/PTR-401.reqs.json --json   # the same result as machine-readable JSON
+pnpm eil reqs check demo/PTR-401.reqs.json --mode lint   # GATE family downgraded, for mid-loop use
+pnpm eil reqs render demo/PTR-401.reqs.json         # project it as self-contained HTML
+pnpm eil reqs render demo/PTR-401.reqs.json --markdown
+```
+
+A `reqs.json` is a requirements artefact with every derived field generated
+rather than authored, so editing one is detectable: `check` recomputes them all,
+re-reads every cited quote out of the catalog, and refuses by name. `render`
+stamps a refused artefact **REFUSED** rather than projecting it as a clean
+document. `node demo/tamper.mjs` demonstrates six single-field edits and the six
+checks that catch them.
+
 ## What you get
 
 - **Fail-closed ACL on every read.** Visibility is stamped on the document, not

@@ -17,7 +17,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 const args = process.argv.slice(2);
 const flag = (name, fallback = null) => {
@@ -39,6 +40,7 @@ eil demo — real data, zero install
   --data <dir>       PGlite directory (default: .eil-demo)
   --keep             do not wipe --data first
   --skip-secrets     do not ingest the planted secret page
+  --skip-corpus      do not ingest the PTR-DEMO fixture corpus (skips the gate beats)
 
 Credentials, if you want the live sources:
   export EIL_CONFLUENCE_URL=https://confluence.your.org
@@ -57,18 +59,49 @@ const PROJECT = flag("project");
 const env = { ...process.env, EIL_DATABASE_URL: `pglite://${DATA}` };
 let stepNo = 0;
 
-function run(title, why, argv, { optional = false } = {}) {
+/**
+ * One banner, then one or more commands under it. The audience sees the command
+ * it is about to run before it runs, every time — a step whose output arrives
+ * with no visible cause is a step nobody believes.
+ */
+function step(title, why, cmds, { optional = false } = {}) {
   stepNo += 1;
   console.log(`\n\x1b[1m── ${stepNo}. ${title}\x1b[0m`);
   console.log(`   ${why}`);
-  console.log(`   \x1b[2m$ eil ${argv.join(" ")}\x1b[0m\n`);
-  const r = spawnSync("pnpm", ["-s", "eil", ...argv], { stdio: "inherit", env });
-  if (r.status !== 0 && !optional) {
-    console.error(`\nStep failed. Fix it and re-run, or pass --keep to resume from here.`);
-    process.exit(r.status ?? 1);
+  let ok = true;
+  for (const { show, bin, argv } of cmds) {
+    console.log(`   \x1b[2m$ ${show}\x1b[0m\n`);
+    const r = spawnSync(bin[0], [...bin.slice(1), ...argv], { stdio: "inherit", env });
+    if (r.status === 0) continue;
+    ok = false;
+    if (!optional) {
+      console.error(`\nStep failed. Fix it and re-run, or pass --keep to resume from here.`);
+      process.exit(r.status ?? 1);
+    }
   }
-  return r.status === 0;
+  return ok;
 }
+
+const run = (title, why, argv, opts) =>
+  step(title, why, [{ show: `eil ${argv.join(" ")}`, bin: ["pnpm", "-s", "eil"], argv }], opts);
+
+/** Several commands under one banner — thirteen fixtures do not want thirteen headings. */
+const runEach = (title, why, argvs, opts) =>
+  step(
+    title,
+    why,
+    argvs.map((argv) => ({ show: `eil ${argv.join(" ")}`, bin: ["pnpm", "-s", "eil"], argv })),
+    opts,
+  );
+
+/** The tamper drill is a node script, not an `eil` verb, and is shown as one. */
+const runNode = (title, why, script, argv = [], opts) =>
+  step(
+    title,
+    why,
+    [{ show: `node ${script} ${argv.join(" ")}`.trim(), bin: ["node", script], argv }],
+    opts,
+  );
 
 // A stale clone cache makes `git clone` fail with a raw git error and no
 // recovery — hit while rehearsing, so it is handled rather than documented.
@@ -84,7 +117,7 @@ run(
   { optional: true },
 );
 
-run("Create the catalog", "18 migrations into an embedded Postgres. Nothing was installed.", [
+run("Create the catalog", "19 migrations into an embedded Postgres. Nothing was installed.", [
   "db",
   "migrate",
 ]);
@@ -127,6 +160,30 @@ if (REPO) {
   console.log("\n   (skipping code: pass --repo /path/to/repo to include it)");
 }
 
+// The PTR-DEMO corpus the requirements artefact cites. This is NOT optional
+// decoration: CLARIFY-005 re-reads every cited quote out of the catalog, so
+// without these documents the gate refuses the CLEAN artefact — which on a
+// projector looks exactly like the gate misfiring. Ingest before the gate beats.
+const FIXTURES = "demo/fixtures";
+if (!has("skip-corpus") && existsSync(FIXTURES)) {
+  const files = readdirSync(FIXTURES)
+    .filter((f) => f.endsWith(".json"))
+    .sort();
+  runEach(
+    "Ingest the demo corpus",
+    "Eight Confluence pages and five Jira tickets, deliberately contradictory. The requirements artefact cites them by id, and the gate re-reads every citation.",
+    files.map((f) => [
+      "ingest",
+      f.startsWith("ptrd-") ? "confluence" : "jira",
+      "--fixture",
+      join(FIXTURES, f),
+    ]),
+  );
+  run("Refresh corpus statistics", "BM25 needs document frequency, N and avgdl to mean anything.", [
+    "stats:refresh",
+  ]);
+}
+
 if (!has("skip-secrets")) {
   run(
     "Plant a page containing credentials",
@@ -135,16 +192,32 @@ if (!has("skip-secrets")) {
   );
 }
 
-run("Embed", "Local ONNX model, vendored in the repo. No network, no per-query cost.", [
-  "embed",
-  "backfill",
-]);
+// Both embedding steps are OPTIONAL, and the demo continues without them.
+// `@huggingface/transformers` is an optional dependency: it has not materialised
+// on this machine, and behind a corporate proxy it may never. The four lexical
+// arms — prose FTS, loose FTS, BM25 scoring and the exact code index — are
+// complete without it; what is lost is the vector arm, and saying so out loud is
+// a better demo than a stack trace. Never substitute EIL_EMBED_PROVIDER=fake:
+// that produces random vectors, and calling the result semantic search is a lie.
+const EMBED_FALLBACK = "   embeddings unavailable — running lexical arms only";
 
-run(
-  "Build the coarse vector index",
-  "Watch it MEASURE its own recall curve and pick nprobe — the parameter is not a guess.",
-  ["ivf", "build"],
+const embedded = run(
+  "Embed",
+  "Local ONNX model, vendored in the repo. No network, no per-query cost.",
+  ["embed", "backfill"],
+  { optional: true },
 );
+
+if (!embedded) console.log(`\n${EMBED_FALLBACK}`);
+else if (
+  !run(
+    "Build the coarse vector index",
+    "Watch it MEASURE its own recall curve and pick nprobe — the parameter is not a guess.",
+    ["ivf", "build"],
+    { optional: true },
+  )
+)
+  console.log(`\n${EMBED_FALLBACK}`);
 
 run(
   "Search",
@@ -167,6 +240,26 @@ if (!has("skip-secrets")) {
     ["search", "deploying the payment service"],
     { optional: true },
   );
+}
+
+// The gate. Skipped rather than failed when the artefact is absent, because a
+// fresh clone has not run the elaboration yet and a missing file is not a
+// refusal — the two must never look alike.
+const REQS = "demo/PTR-401.reqs.json";
+if (existsSync(REQS)) {
+  run(
+    "Run the gate over a requirements artefact",
+    "45 checks. Every generated field recomputed, every cited quote re-read out of the corpus.",
+    ["reqs", "check", REQS],
+  );
+
+  runNode(
+    "Tamper with it",
+    "Six single-field edits to a signed artefact. Six refusals, each naming the check that caught it.",
+    "demo/tamper.mjs",
+  );
+} else {
+  console.log(`\n   (skipping the gate: ${REQS} has not been generated yet)`);
 }
 
 run("Audit", "Integrity invariants, plus the quarantine worklist. ok:true is the assertion.", [

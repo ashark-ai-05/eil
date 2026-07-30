@@ -47,7 +47,171 @@ already read.
 
 ---
 
-## The walk
+# The narration — seven beats
+
+`node demo/run.mjs` walks all of these in order. Drive them by hand if you want
+to control the pace; the commands below are exactly what the runner runs.
+
+Rehearse the whole thing from clean first — it takes a couple of minutes:
+
+```sh
+rm -rf .eil-demo .eil-repos
+export EIL_DATABASE_URL=pglite://.eil-demo
+node demo/run.mjs
+```
+
+### Beat 1 — there is no server
+
+```sh
+pnpm eil db migrate
+```
+
+**Say:** nineteen migrations into a Postgres that is running inside this Node
+process. Nothing was installed, no Docker, no admin rights, and this same schema
+runs unchanged against a real cluster.
+
+### Beat 2 — your data, on your credentials
+
+```sh
+pnpm eil ingest confluence --space ENG
+pnpm eil ingest jira --project PAY
+pnpm eil ingest repo /path/to/repo --branch main --name repo --include '**/*.*'
+```
+
+Plus the fixture corpus the requirements artefact cites, which the runner ingests
+for you:
+
+```sh
+for f in demo/fixtures/*.json; do
+  case "$f" in *ptrd-*) pnpm eil ingest confluence --fixture "$f";; *) pnpm eil ingest jira --fixture "$f";; esac
+done
+pnpm eil stats:refresh
+```
+
+**Say:** the connector uses *your* personal token, so it can only index what you
+could already read. Sync is incremental from a stored cursor and hash-gated —
+re-running costs nothing. Commit dates become recency; issue links, labels and
+imports become graph edges.
+
+### Beat 3 — retrieval, with no LLM in the loop
+
+```sh
+pnpm eil search "how do we handle a limit reduction"
+```
+
+**Say:** four arms — strict full-text, loose full-text, the exact code index, and
+(when the model is available) a vector arm — fused by reciprocal rank. Point at
+`arms_contributing` and `top_score` in the JSON. Same query, same corpus, same
+order, every time. Nothing here spends a token.
+
+If the embedding model is present, this is the one to slow down on:
+
+```sh
+pnpm eil ivf build
+```
+
+It prints two sweeps and then a decision. The first is measured with **every**
+cluster probed, so the only loss is what quantization discarded; the second then
+varies clusters at that oversample. The two error sources are separated, not
+confounded. On a small corpus it often ends with *"No PARTIAL probe reached
+recall@10 >= 0.98, so IVF is not adopted"* — **that is the demo working.** The
+gate refused an optimisation that would have cost recall, and said so.
+
+### Beat 4 — the credential that cannot be retrieved
+
+```sh
+pnpm eil quarantine list
+pnpm eil search "deploying the payment service"
+```
+
+**Say:** `demo/secret-page.json` contains an AWS key and a database password. It
+was never chunked, so the credential is absent from the tsvector, the embeddings,
+`ts_headline` and every snippet — the search returns nothing. Then show the other
+half, which is the interesting one: on a real codebase the scanner also flags
+test fixtures and docs that legitimately contain key-shaped strings.
+
+```sh
+pnpm eil quarantine clear <id>     # accept a false positive; it is re-chunked
+```
+
+Acceptance is keyed on the **value**, not the file, so if that file later gains a
+*different* credential it is quarantined again. Accepting one finding cannot
+silently accept the next.
+
+### Beat 5 — the gate
+
+```sh
+pnpm eil reqs check demo/PTR-401.reqs.json
+```
+
+**Say:** this is a requirements artefact an agent produced. Forty-five checks.
+Every derived field — the magnitude bands, the leaf flags, the traceability index
+— is recomputed from the body and compared, and every cited quote is re-read out
+of the catalog through the same audited tool path an agent would use. It says
+`45 checks run   0 errors   PASSED`.
+
+### Beat 6 — tamper with it
+
+**This is the beat.** Everything before it is setup.
+
+```sh
+node demo/tamper.mjs
+```
+
+Six copies of that artefact, one single-field edit each, the real CLI run over
+each one. Six refusals, and each names the check that caught it:
+
+| # | The edit | Refused by |
+|---|----------|-----------|
+| 1 | a stored score changed from 2 to 21 | `SCORE-001` |
+| 2 | `" Effective timing TBD."` appended to the top-level requirement | `DEFER-001` |
+| 3 | a recorded question deleted, its "we asked" record left behind | `CLARIFY-001` |
+| 4 | one word changed inside a quoted citation | `CLARIFY-005` |
+| 5 | the first approver changed from human to agent | `GATE-006` |
+| 6 | the traceability index emptied | `META-002`, `TRACE-001` |
+
+Run one on its own if someone asks:
+
+```sh
+node demo/tamper.mjs --tamper 4
+```
+
+**Say:** number 4 is the one that leaves the artefact. The gate re-fetches the
+cited page and greps for the quote character for character. A fabricated citation
+is not merely implausible here — it is mechanically detectable. And number 5 is
+the line the whole phase exists to draw: an agent may draft, score, ground and
+analyse a requirement set. It may never approve one.
+
+The script asserts **45 checks ran** on every single invocation. `CLARIFY-005`
+does not fail when the catalog is unreachable — it *disappears*, and the count
+drops to 44. Without that assertion, beat 6 would look identical while proving
+nothing.
+
+### Beat 7 — all of it is a row
+
+```sh
+pnpm eil audit
+pnpm eil reqs render demo/PTR-401.reqs.json --out demo/PTR-401.html
+pnpm eil report --out demo/metrics.html
+pnpm eil eval:mine
+```
+
+**Say:** `"ok": true` is the assertion, not the summary. Every tool call the demo
+made landed as an audited row with a trace id; `eval:mine` promotes those real
+queries into a labelled set, which is the answer to *"how do you know retrieval
+got better?"* — and to why hand-maintained golden-query files stay empty. Open
+the rendered artefact and show that a refused one is stamped **REFUSED** rather
+than projected as a clean document.
+
+Then point an agent at the whole thing:
+
+```sh
+claude mcp add eil -- pnpm -s --dir "$PWD" eil serve
+```
+
+---
+
+## The walk, against the system map
 
 | # | Step | The map node it demonstrates |
 |---|---|---|
@@ -55,88 +219,126 @@ already read.
 | 2 | `ingest confluence --space` | *Only the spaces you name* |
 | 3 | `ingest jira --project` | *Projects scoped by* — issue links and labels become edges |
 | 4 | `ingest repo` | *Clone, walk* — commit dates become recency |
-| 5 | `embed backfill` | *Meaning, embedded* — local ONNX, no per-query cost |
-| 6 | `ivf build` | The system **measuring its own recall** and choosing a parameter |
-| 7 | `search` | *Two arms* fused by rank, plus tier and freshness |
-| 8 | `search retryHandler` | *Exact terms, identifiers* — the code index, not the prose arm |
-| 9 | quarantine | *Visibility lives on the document* |
-| 10 | `audit` | *Every tool call lands as a row* |
-| 11 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
-| 12 | `serve` over MCP | *Connected over MCP* — an agent pulls ranked, ACL-filtered context |
-
-### 6 — the one to slow down on
-
-`eil ivf build` prints two sweeps and then a decision:
-
-```
-  oversample   recall@10   (full probe: quantization loss only)
-          4x   0.9367
-          8x   0.9800
-  -> oversample 8
-
-  nprobe   recall@10   scanned/query
-       1   0.4833           26
-       8   0.9633          199
-      23   0.9800          552
-```
-
-The first sweep is measured with **every** cluster probed, so there is no cluster
-loss — whatever is missing is purely what binary quantization discarded. The
-second then varies clusters at that oversample. **The two error sources are
-separated, not confounded.**
-
-On a small corpus it will often end with:
-
-> No PARTIAL probe reached recall@10 >= 0.98, so IVF is not adopted and queries
-> keep the exact scan.
-
-**That is the demo working, not failing.** The gate refused an optimisation that
-would have cost recall, and said so. Re-run as the corpus grows.
-
-### 9 — quarantine, and the review step
-
-The planted `demo/secret-page.json` contains an AWS key and a database password.
-After ingest it is **not chunked at all**, so the credential never reaches the
-tsvector, the embeddings, `ts_headline`, or a snippet — searching for its text
-returns nothing.
-
-On a real codebase the scanner will also flag **test fixtures and documentation**
-that legitimately contain key-shaped strings. That is the interesting half:
-
-```sh
-eil quarantine list                    # rule and a 4-char hint, never the secret
-eil quarantine clear <id>              # accept a false positive; it is re-chunked
-```
-
-Acceptance is keyed on the *value*, not the file — so if that file later gains a
-**different** credential, it is quarantined again. Accepting one finding cannot
-silently accept the next.
-
-### 11 — why the eval loop exists
-
-Every search in the demo was audited. `eval:mine` promotes them into a labelled
-set, `eval:judge` pools and grades them. This is the answer to "how do you know
-retrieval got better?" — and to why hand-maintained golden-query files stay
-empty: nothing was producing usable usage records until the audit log did.
+| 5 | `ingest --fixture demo/fixtures/*` | The PTR-DEMO corpus the gate re-reads citations from |
+| 6 | `embed backfill` | *Meaning, embedded* — local ONNX, no per-query cost |
+| 7 | `ivf build` | The system **measuring its own recall** and choosing a parameter |
+| 8 | `search` | *Two arms* fused by rank, plus tier and freshness |
+| 9 | `search retryHandler` | *Exact terms, identifiers* — the code index, not the prose arm |
+| 10 | quarantine | *Visibility lives on the document* |
+| 11 | `reqs check` | The gate — generated fields recomputed, citations re-read |
+| 12 | `demo/tamper.mjs` | Six edits, six refusals, each naming itself |
+| 13 | `audit` | *Every tool call lands as a row* |
+| 14 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
+| 15 | `serve` over MCP | *Connected over MCP* — an agent pulls ranked, ACL-filtered context |
 
 ---
 
 ## Honest caveats — volunteer these
 
+Say these before someone asks. Every one of them is a thing a sharp person in
+the room will find in ten minutes, and volunteering it is what makes the rest
+of the demo credible.
+
+**The ACL is owner-only against live data.** Visibility is stamped on the
+document and reads fail closed — but every connector currently stamps
+`acl_groups: []`, and `ingested_by` is the OS user. Multi-group visibility works
+only in **fixture mode**, because a fixture can carry the field and a live sync
+does not yet populate it. On a shared server every document would be owned by
+the service account. It is fail-closed and correct; it is also delivering less
+than "fail-closed ACL" implies. Do not claim multi-user visibility.
+
+**This is phase 1 of 4.** What you just watched is elaboration and gating —
+turning a work item into a scored, grounded, refusable requirements artefact.
+Design, decomposition into tasks, and implementation are phases 2, 3 and 4. The
+schema carries `updatedAt` as a staleness pin precisely so a later phase can
+detect that it is working from a body that has moved.
+
+**BM25 is schema and statistics only.** Migration 0017 adds the tables and
+`stats:refresh` computes document frequency, N and avgdl — but the ranking in the
+retrieval path is still `ts_rank`. Nothing is scored by BM25 yet. The groundwork
+is real; the ranking change is not done.
+
+**Code search is exact-equality and unranked.** `search_code` matches
+`ci.value = $4` and orders by path and line number. It is an index lookup, not a
+ranked search: excellent for "where is this identifier", useless for "find me
+code that does roughly this". Zoekt-style ranking and symbol routes are future
+work; the router today only steers arm weights.
+
 **~87% of chunks exceed the embedding model's window.** `eil audit` reports
-`chunks_over_embed_window`. MiniLM stops at ~1024 characters and chunks are
-3200, so the vector arm reads roughly the first third of most chunks. Retrieval
-still works; the ceiling is real and the fix (matching chunk size to the model,
-or a longer-context model) is gated on the eval set existing.
+`chunks_over_embed_window`. MiniLM stops at ~1024 characters and chunks are 3200,
+so the vector arm reads roughly the first third of most chunks. Retrieval still
+works; the ceiling is real, and the fix — matching chunk size to the model, or a
+longer-context model — is gated on the eval set existing.
 
-**The ACL is owner-only in practice.** `ingested_by` is the OS user and every
-connector stamps `acl_groups` empty, so on a shared server every document would
-be owned by the service account. Fail-closed, and currently delivering less than
-"fail-closed ACL" implies. Fine for a single-operator demo; do not claim
-multi-user visibility.
+**There is no cost-in-dollars reporting.** The `llm_calls` table has existed
+since migration 0002 but has only just gained its first writer, and the provider
+this pipeline actually runs on (`CliProvider`, wrapping headless Amp and Copilot)
+reports no token counts at all. So you get call counts and latency, not spend. If
+someone asks "what did that cost?", the honest answer is that the row is there
+and the number is not.
 
-**No Grafana.** It needs Docker. `eil report --out demo/metrics.html` produces a
-self-contained HTML report over the same fact tables.
+**No Grafana.** It is provisioned in the repo but it needs Docker and a real
+Postgres backend, and this demo has neither. `eil report --out demo/metrics.html`
+produces a self-contained HTML report over the same fact tables.
+
+---
+
+## If it breaks, say this
+
+Rehearse this section too. Every one of these has happened.
+
+**The corporate proxy blocks the live ingest.**
+Fall back to the fixture corpus and drop the live beat:
+
+```sh
+node demo/run.mjs                 # no --space, no --project: fixtures only
+```
+
+Say: "the connector is HTTP against your instance and this network will not let
+me out — here is the same pipeline on a fixture corpus." **Nothing else in the
+demo changes.** Beats 3 through 7 are identical, because ingestion normalises
+into one canonical document either way. Do not spend stage time debugging the
+proxy.
+
+**The embedding model is unavailable.**
+`@huggingface/transformers` is an optional dependency and may simply not be
+there. Both embedding steps are optional in the runner and it prints
+`embeddings unavailable — running lexical arms only`. Say exactly that. The four
+lexical arms are complete without it and beats 4 through 7 are unaffected.
+
+**Never** set `EIL_EMBED_PROVIDER=fake` to make the vector arm appear. It emits
+deterministic pseudo-random vectors; the results would be noise dressed as
+meaning. And with the model absent, do not call what you are showing *semantic*
+search — it is lexical search, and it is good.
+
+**The analyser refuses something mid-demo.**
+Read the check id out loud and explain what it caught. **That is the product
+working.** A gate that only ever passes is not a gate. The refusal names itself,
+states the observed value and the expected one, and points at the exact path in
+the artefact — which is the whole argument for building it this way.
+
+The one refusal that is genuinely an accident is `CLARIFY-005` on the *clean*
+artefact: it means the artefact's citations and the ingested corpus have drifted
+apart. `demo/tamper.mjs` checks the clean baseline first and stops with that
+explanation rather than running six confusing tampers on top of it. Fix it by
+re-ingesting the corpus:
+
+```sh
+for f in demo/fixtures/*.json; do
+  case "$f" in *ptrd-*) pnpm eil ingest confluence --fixture "$f";; *) pnpm eil ingest jira --fixture "$f";; esac
+done
+```
+
+**`demo/tamper.mjs` says only 44 of 45 checks ran.**
+The catalog is not reachable, so the one check that leaves the artefact was
+skipped. Check `EIL_DATABASE_URL`, then `pnpm eil db migrate`, then re-ingest as
+above. The script refuses to run the drill in this state on purpose — a tamper
+that silently does not run is worse than one that fails.
+
+**Someone asks for Grafana.**
+It is not shown: it needs Docker and a Postgres backend. Run
+`pnpm eil report --out demo/metrics.html` and open that instead — same fact
+tables, same numbers, no infrastructure.
 
 ---
 
