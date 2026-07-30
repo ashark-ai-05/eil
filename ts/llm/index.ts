@@ -6,6 +6,8 @@
  */
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import type { Db } from "../db.js";
 
@@ -100,7 +102,37 @@ export class CliProvider implements Provider {
   }
 }
 
+/**
+ * Replays a recorded reply. Makes the elaboration loop deterministic in tests
+ * and rehearsal, and lets the whole pipeline run on a machine where neither amp
+ * nor copilot is installed. EIL_LLM_FIXTURE points at a JSON file mapping a
+ * prompt hash to a reply; a `default` entry answers anything unrecorded.
+ */
+export class FixtureProvider implements Provider {
+  name = "fixture";
+  constructor(private replies: Record<string, string>) {}
+
+  async complete(prompt: string, _opts: CompleteOptions = {}): Promise<LLMResult> {
+    const key = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+    const text = this.replies[key] ?? this.replies.default;
+    if (text === undefined) throw new Error(`fixture provider: no reply for prompt ${key}`);
+    return { text, provider: this.name, model: "fixture", latencyMs: 0 };
+  }
+}
+
 const split = (s: string) => s.split(/\s+/).filter(Boolean);
+
+/** Read once, at selection time: a fixture that is missing or malformed must
+ *  fail loudly here rather than as a mystery empty reply mid-run. */
+function loadFixture(): Record<string, string> {
+  const path = process.env.EIL_LLM_FIXTURE;
+  if (!path) throw new Error("fixture provider: set EIL_LLM_FIXTURE to a JSON file of replies");
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as Record<string, string>;
+  } catch (err: any) {
+    throw new Error(`fixture provider: cannot load ${path}: ${err?.message ?? String(err)}`);
+  }
+}
 
 /** Per-call name > EIL_LLM_PROVIDER env > maas default. */
 export function getProvider(name?: string): Provider {
@@ -112,8 +144,12 @@ export function getProvider(name?: string): Provider {
       return new CliProvider("amp", split(process.env.EIL_AMP_ARGV ?? "amp -x"));
     case "copilot":
       return new CliProvider("copilot", split(process.env.EIL_COPILOT_ARGV ?? "copilot -p"));
+    case "fixture":
+      return new FixtureProvider(loadFixture());
     default:
-      throw new Error(`unknown LLM provider: '${selected}' (expected maas | amp | copilot)`);
+      throw new Error(
+        `unknown LLM provider: '${selected}' (expected maas | amp | copilot | fixture)`,
+      );
   }
 }
 
