@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EIL — gated elaboration</title>
+<style>
+  :root {
+    --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e; --warn:#ef7d6b;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63; --warn:#c0442f;
+      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+  }
+  :root[data-theme="dark"]{ --ink:#090e18; --ink-2:#0c1322; --panel:#10192b; --panel-2:#131e33; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --fuse:#eef4fd; --ok:#5ccb8e; --warn:#ef7d6b;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc; color-scheme:dark; }
+  :root[data-theme="light"]{ --ink:#eef1f6; --ink-2:#e7ecf3; --panel:#ffffff; --panel-2:#f2f5fa; --line:#cbd4e2; --line-soft:#dbe2ec;
+    --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --fuse:#0d1524; --ok:#1f9d63; --warn:#c0442f;
+    --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--ink); color:var(--text); font-family:var(--mono); font-size:15px; line-height:1.5;
+    -webkit-font-smoothing:antialiased; letter-spacing:-0.01em;
+    background-image: radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--lex) 8%, transparent), transparent 60%),
+      radial-gradient(110% 70% at 6% 108%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
+    background-attachment:fixed; }
+  .wrap { max-width:1180px; margin:0 auto; padding:clamp(20px,3vw,40px) clamp(14px,3vw,30px) 60px; }
+
+  header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+  .mark { display:flex; align-items:center; gap:12px; }
+  .glyph { width:30px; height:30px; flex:none; }
+  .glyph .tick { stroke:var(--ok); fill:none; }
+  .word { font-size:19px; font-weight:700; letter-spacing:0.02em; }
+  .word span { color:var(--muted); font-weight:500; }
+  .tag { color:var(--muted); font-size:13px; margin:8px 0 0; max-width:70ch; letter-spacing:0; line-height:1.6; }
+  .tag b { color:var(--text); font-weight:600; }
+  .toolbar { display:flex; align-items:center; gap:9px; flex-wrap:wrap; justify-content:flex-end; }
+  .stat { font-size:11px; color:var(--faint); letter-spacing:0.04em; text-align:right; line-height:1.8; width:100%; }
+  .stat b { color:var(--ok); font-weight:600; }
+
+  .btn { font-family:var(--mono); font-size:11px; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted);
+    background:var(--panel); border:1px solid var(--line); padding:8px 12px; border-radius:7px; cursor:pointer;
+    user-select:none; white-space:nowrap; transition:color .15s, border-color .15s, background .15s; }
+  .btn:hover { color:var(--text); border-color:var(--muted); }
+  .btn:focus-visible { outline:2px solid var(--lex); outline-offset:2px; }
+
+  nav.xref { display:flex; gap:14px; flex-wrap:wrap; margin:16px 0 0; font-size:11.5px; letter-spacing:0.02em; }
+  nav.xref a { color:var(--faint); text-decoration:none; border-bottom:1px dashed var(--line); padding-bottom:1px; }
+  nav.xref a:hover { color:var(--lex); border-color:var(--lex); }
+
+  /* ── act scaffolding ─────────────────────────────────────── */
+  section.act { margin:52px 0 0; }
+  .act > h2 { margin:0; font-size:10.5px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--faint);
+    display:flex; align-items:baseline; gap:10px; }
+  .act > h2 .pn { color:var(--line); font-variant-numeric:tabular-nums; }
+  .act > h2 .cue { margin-left:auto; font-weight:400; letter-spacing:0.02em; text-transform:none; color:var(--line); }
+  .lede { font-size:14.5px; color:var(--text); margin:12px 0 0; max-width:74ch; letter-spacing:0; line-height:1.6; }
+  .lede b { color:var(--lex); font-weight:600; }
+  .note { font-size:11.5px; color:var(--faint); letter-spacing:0; line-height:1.6; margin:10px 0 0; max-width:74ch; }
+  .note b { color:var(--muted); font-weight:600; }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:15px 16px; }
+  .card h4 { margin:0 0 3px; font-size:12.5px; font-weight:700; letter-spacing:0.01em; }
+  .card .role { font-size:10px; letter-spacing:0.13em; text-transform:uppercase; color:var(--faint); margin:0 0 9px; }
+  .card p { margin:0; font-size:12px; color:var(--muted); line-height:1.62; letter-spacing:0; }
+  .card code { color:var(--text); background:var(--panel-2); border:1px solid var(--line-soft); border-radius:4px;
+    padding:1px 5px; font-size:11.5px; }
+
+  /* ── act 1 · the spine ───────────────────────────────────── */
+  .spine { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-top:20px; align-items:stretch; }
+  .spine .card { position:relative; }
+  .spine .card::after { content:""; position:absolute; top:0; left:0; right:0; height:2px; border-radius:10px 10px 0 0; }
+  .spine .c1::after { background:var(--lex); }
+  .spine .c2::after { background:var(--ok); }
+  .spine .c3::after { background:var(--vec); }
+  .spine .c1 h4 { color:var(--lex); }
+  .spine .c2 h4 { color:var(--ok); }
+  .spine .c3 h4 { color:var(--vec); }
+  .kv { margin:10px 0 0; font-size:11.5px; color:var(--faint); line-height:1.85; letter-spacing:0; }
+  .kv b { color:var(--muted); font-weight:600; }
+
+  .claim { margin:20px 0 0; padding:16px 18px; border:1px solid var(--line); border-left:2px solid var(--lex);
+    border-radius:0 8px 8px 0; background:var(--panel-2); font-size:15px; letter-spacing:0; }
+  .claim b { color:var(--lex); }
+
+  /* ── act 2 · the chain ─────────────────────────────────────
+     The packet rides its own lane above the boxes rather than across them, so
+     it can never land on top of a word. Ticks drop from the lane to each stop. */
+  .chain { position:relative; margin-top:22px; padding-top:30px; }
+  .rail { display:grid; grid-template-columns:repeat(5, 1fr); gap:10px; position:relative; z-index:1; }
+  .ticks { position:absolute; top:14px; left:0; right:0; height:16px; display:grid;
+    grid-template-columns:repeat(5, 1fr); gap:10px; z-index:0; pointer-events:none; }
+  .ticks i { display:block; width:1px; height:16px; margin:0 auto; background:var(--line); }
+  .stop { text-align:center; }
+  .stop .box { border:1px solid var(--line); background:var(--panel); border-radius:9px; padding:13px 8px;
+    box-shadow:var(--shadow); transition:border-color .3s, box-shadow .3s; }
+  .stop .nm { font-size:12px; font-weight:600; letter-spacing:0.01em; }
+  .stop .sub { font-size:10.5px; color:var(--faint); margin-top:4px; letter-spacing:0; line-height:1.5; }
+  .stop.gate .box { border-color:color-mix(in oklab, var(--ok) 40%, var(--line)); }
+  .stop.gate .nm { color:var(--ok); }
+  .stop.out .box { border-style:dashed; }
+
+  /* the wire the packet rides */
+  .wire { position:absolute; left:10%; right:10%; top:14px; height:1px; background:var(--line); z-index:0; }
+
+  .packet { position:absolute; top:10px; left:10%; width:9px; height:9px; margin-left:-4.5px; border-radius:50%;
+    background:var(--lex); box-shadow:0 0 0 4px color-mix(in oklab, var(--lex) 18%, transparent); z-index:2;
+    animation:travel 11s cubic-bezier(.62,0,.38,1) infinite; }
+  @keyframes travel {
+    0%,6%    { left:10%; opacity:0; }
+    8%       { opacity:1; }
+    14%,20%  { left:10%; }
+    27%,40%  { left:30%; }
+    47%,58%  { left:50%; }
+    65%,84%  { left:70%; background:var(--lex); }
+    86%      { background:var(--ok); }
+    92%,97%  { left:90%; background:var(--ok); opacity:1; }
+    100%     { left:90%; opacity:0; }
+  }
+  /* the gate acknowledges the packet rather than pulsing on its own clock */
+  .stop.gate .box { animation:ack 11s ease-in-out infinite; }
+  @keyframes ack {
+    0%,63%   { border-color:color-mix(in oklab, var(--ok) 40%, var(--line)); box-shadow:var(--shadow); }
+    70%,82%  { border-color:var(--ok); box-shadow:var(--shadow), 0 0 0 3px color-mix(in oklab, var(--ok) 12%, transparent); }
+    90%,100% { border-color:color-mix(in oklab, var(--ok) 40%, var(--line)); box-shadow:var(--shadow); }
+  }
+
+  /* ── the six tampers ─────────────────────────────────────── */
+  .tampers { margin-top:26px; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--panel); box-shadow:var(--shadow); }
+  .tampers .thead, .trow { display:grid; grid-template-columns:26px 1fr 128px; gap:14px; align-items:center;
+    padding:10px 15px; font-size:11.5px; letter-spacing:0; }
+  .tampers .thead { color:var(--faint); font-size:10px; letter-spacing:0.13em; text-transform:uppercase;
+    border-bottom:1px solid var(--line); background:var(--panel-2); }
+  .trow { border-top:1px solid var(--line-soft); cursor:default; transition:background .15s; }
+  .trow:first-of-type { border-top:0; }
+  .trow:hover { background:var(--panel-2); }
+  .trow .n { color:var(--faint); font-variant-numeric:tabular-nums; }
+  .trow .what { color:var(--muted); line-height:1.55; }
+  .trow .what b { color:var(--text); font-weight:600; }
+  .cid { font-size:11px; font-weight:700; letter-spacing:0.03em; color:var(--warn);
+    border:1px solid color-mix(in oklab, var(--warn) 38%, var(--line)); border-radius:5px; padding:3px 7px;
+    text-align:center; white-space:nowrap; background:color-mix(in oklab, var(--warn) 7%, transparent); }
+  .cid.two { font-size:10px; letter-spacing:0; }
+
+  /* ── act 3 · the cascade ─────────────────────────────────── */
+  .split { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-top:20px; }
+  .split .card h4 { font-size:12px; }
+  .split .who { font-size:10px; letter-spacing:0.13em; text-transform:uppercase; margin:0 0 8px; }
+  .split .arith .who { color:var(--lex); }
+  .split .model .who { color:var(--vec); }
+  .split .code  .who { color:var(--ok); }
+
+  .rungs { margin-top:22px; display:flex; flex-direction:column; gap:8px; }
+  .rung { display:grid; grid-template-columns:24px 1fr auto; gap:14px; align-items:center;
+    border:1px solid var(--line); border-radius:8px; padding:11px 14px; background:var(--panel);
+    transition:border-color .45s, background .45s; }
+  .rung .num { font-size:11px; color:var(--faint); font-variant-numeric:tabular-nums; }
+  .rung .nm { font-size:12.5px; letter-spacing:0.01em; }
+  .rung .nm em { font-style:normal; color:var(--faint); font-size:11px; margin-left:9px; letter-spacing:0; }
+  .rung .verdict { font-size:10.5px; color:var(--faint); letter-spacing:0.02em; }
+  .rung.eil { border-color:color-mix(in oklab, var(--lex) 40%, var(--line)); background:var(--panel-2); }
+  .rung.eil .nm { color:var(--lex); font-weight:600; }
+  .rung.human { border-style:dashed; }
+  .rung.human .nm { color:var(--vec); }
+
+  /* rungs light in order, then the branch resolves. one pass per 11s, in step
+     with the packet above so the two diagrams read as one clock. */
+  .rungs.run .rung { animation:probe 11s ease-in-out infinite; }
+  .rungs.run .rung:nth-child(1) { animation-delay:0s; }
+  .rungs.run .rung:nth-child(2) { animation-delay:.5s; }
+  .rungs.run .rung:nth-child(3) { animation-delay:1s; }
+  .rungs.run .rung:nth-child(4) { animation-delay:1.5s; }
+  .rungs.run .rung:nth-child(5) { animation-delay:2s; }
+  @keyframes probe {
+    0%,3%   { border-color:var(--line); }
+    6%,11%  { border-color:color-mix(in oklab, var(--lex) 55%, var(--line)); }
+    16%,100%{ border-color:var(--line); }
+  }
+  .rungs.run .rung.eil { animation:probe-eil 11s ease-in-out infinite; animation-delay:1.5s; }
+  @keyframes probe-eil {
+    0%,3%   { border-color:color-mix(in oklab, var(--lex) 40%, var(--line)); }
+    6%,14%  { border-color:var(--lex); }
+    18%,100%{ border-color:color-mix(in oklab, var(--lex) 40%, var(--line)); }
+  }
+
+  .outcomes { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:18px; }
+  .out-card { border:1px solid var(--line); border-radius:9px; padding:14px 15px; background:var(--panel); box-shadow:var(--shadow); }
+  .out-card.good { border-color:color-mix(in oklab, var(--ok) 34%, var(--line)); }
+  .out-card.ask  { border-color:color-mix(in oklab, var(--vec) 34%, var(--line)); }
+  .out-card h4 { margin:0 0 8px; font-size:12px; }
+  .out-card.good h4 { color:var(--ok); }
+  .out-card.ask h4 { color:var(--vec); }
+  .out-card p { margin:0; font-size:11.5px; color:var(--muted); line-height:1.65; letter-spacing:0; }
+  .out-card .cite { margin-top:9px; font-size:11px; color:var(--faint); line-height:1.6; border-left:2px solid var(--line);
+    padding-left:10px; letter-spacing:0; }
+
+  /* ── measured strip ──────────────────────────────────────── */
+  .measured { margin-top:26px; display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:1px;
+    background:var(--line); border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+  .measured div { background:var(--panel); padding:13px 15px; }
+  .measured .v { font-size:19px; font-weight:700; letter-spacing:-0.02em; color:var(--text); font-variant-numeric:tabular-nums; }
+  .measured .k { font-size:10px; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint); margin-top:4px; }
+
+  footer { margin-top:54px; padding-top:20px; border-top:1px solid var(--line-soft); font-size:11px; color:var(--faint);
+    letter-spacing:0; line-height:1.7; }
+  footer b { color:var(--muted); font-weight:600; }
+
+  :root.paused .packet,
+  :root.paused .stop.gate .box,
+  :root.paused .rungs.run .rung { animation-play-state:paused; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .packet { animation:none; left:70%; }
+    .stop.gate .box, .rungs.run .rung { animation:none; }
+  }
+  @media (max-width: 860px) {
+    .spine, .split, .outcomes { grid-template-columns:1fr; }
+    .rail { grid-template-columns:repeat(2, 1fr); gap:12px; }
+    .wire, .packet, .ticks { display:none; }
+    .chain { padding-top:0; }
+    .tampers .thead, .trow { grid-template-columns:22px 1fr; }
+    .tampers .thead span:last-child, .trow .cid { grid-column:2; text-align:left; justify-self:start; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="mark">
+        <svg class="glyph" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="27" height="27" rx="7" stroke="currentColor" stroke-opacity=".28"/>
+          <path class="tick" d="M9 16.4l4.6 4.6L23 11.6" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="word">gated elaboration<span> · eil</span></div>
+      </div>
+      <p class="tag">A model proposes. <b>Deterministic code decides.</b> A named person signs. Phase 1 of 4 —
+        requirements — over the pre-trade PSR credit service.</p>
+      <nav class="xref">
+        <a href="system-map.html">system map</a>
+        <a href="knowledge-plane.html">knowledge plane</a>
+        <a href="observability-plane.html">observability plane</a>
+        <a href="architecture-schematic.html">schematic</a>
+      </nav>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="motion" aria-pressed="false">pause</button>
+      <button class="btn" id="theme">theme</button>
+      <div class="stat">46 checks · 10 families · <b>596 tests</b></div>
+    </div>
+  </header>
+
+  <!-- ── ACT 1 ─────────────────────────────────────────────── -->
+  <section class="act" id="spine">
+    <h2><span class="pn">01</span> The division of labour <span class="cue">the idea, in one sentence</span></h2>
+
+    <div class="claim">A model is a good estimator and a poor auditor. So it is allowed to
+      <b>estimate</b>, and nothing else. Every number it implies, every rule that follows from that number,
+      and every verdict is computed by a library — and re-checked by a second one that never sees the model.</div>
+
+    <div class="spine">
+      <div class="card c1">
+        <p class="role">the model may</p>
+        <h4>Propose</h4>
+        <p>Two Fibonacci bands and one line of reasoning, per requirement. Nothing else is read from what it returns.</p>
+        <div class="kv">
+          <b>unknowns</b> ∈ 1 2 3 5 8 13 21<br/>
+          <b>complexity</b> ∈ 1 2 3 5 8 13 21<br/>
+          <b>rationale</b> one line
+        </div>
+      </div>
+      <div class="card c2">
+        <p class="role">code decides</p>
+        <h4>Derive, then check</h4>
+        <p>Magnitude, the admissible moves, and the completion verdict are arithmetic. A stored value that
+          disagrees with the recompute is a gate error, not a style note.</p>
+        <div class="kv">
+          <b>magnitude</b> = max(U, C)<br/>
+          <b>≤ 2</b> atomic · <b>3</b> review · <b>≥ 5</b> break down<br/>
+          <b>46 checks</b> across 10 families
+        </div>
+      </div>
+      <div class="card c3">
+        <p class="role">a person signs</p>
+        <h4>Attest</h4>
+        <p>The gate is a floor; the signature is a ceiling. Neither may claim the other's scope, and the
+          artefact never issues its own pass.</p>
+        <div class="kv">
+          <b>approver.kind</b> must be <code>human</code><br/>
+          <b>result</b> ∈ partial · failed<br/>
+          never <code>passed</code>
+        </div>
+      </div>
+    </div>
+
+    <p class="note"><b>Why it holds.</b> The thing that judges the work is not the thing that did the work,
+      and it has no model in it — so the same artefact gets the same verdict every time it is checked.</p>
+  </section>
+
+  <!-- ── ACT 2 ─────────────────────────────────────────────── -->
+  <section class="act" id="chain">
+    <h2><span class="pn">02</span> What the artefact goes through <span class="cue">the tamper drill</span></h2>
+
+    <p class="lede">A ticket goes in. A requirements artefact comes out, and it does not come out at all
+      until <b>46 checks</b> and a named human both agree.</p>
+
+    <div class="chain">
+      <div class="wire" aria-hidden="true"></div>
+      <div class="ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="packet" aria-hidden="true"></div>
+      <div class="rail">
+        <div class="stop">
+          <div class="box">
+            <div class="nm">PTR-401</div>
+            <div class="sub">a thin ticket<br/>one paragraph</div>
+          </div>
+        </div>
+        <div class="stop">
+          <div class="box">
+            <div class="nm">elaborate</div>
+            <div class="sub">score · decompose<br/>ask or ground</div>
+          </div>
+        </div>
+        <div class="stop">
+          <div class="box">
+            <div class="nm">reqs.json</div>
+            <div class="sub">10 nodes · 6 leaves<br/>every field derived</div>
+          </div>
+        </div>
+        <div class="stop gate">
+          <div class="box">
+            <div class="nm">the gate</div>
+            <div class="sub">46 checks<br/>no model in this path</div>
+          </div>
+        </div>
+        <div class="stop out">
+          <div class="box">
+            <div class="nm">signed</div>
+            <div class="sub">3 named people<br/>result: partial</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note"><b>Read the last box carefully.</b> The result is <code>partial</code>. There is no
+      <code>passed</code> in the vocabulary — a phase reports what it did and what it left open, and only a
+      person outside the loop can call it done.</p>
+
+    <div class="tampers">
+      <div class="thead"><span></span><span>Change one field by hand</span><span>Refused by</span></div>
+      <div class="trow"><span class="n">1</span>
+        <span class="what">A stored score edited from <b>2</b> to <b>21</b> — the file now disagrees with its own arithmetic</span>
+        <span class="cid">SCORE-001</span></div>
+      <div class="trow"><span class="n">2</span>
+        <span class="what">The word <b>TBD</b> typed into a requirement — a decision postponed, not made</span>
+        <span class="cid">DEFER-001</span></div>
+      <div class="trow"><span class="n">3</span>
+        <span class="what">A recorded question <b>deleted</b>, its clarify score pass left behind</span>
+        <span class="cid">CLARIFY-001</span></div>
+      <div class="trow"><span class="n">4</span>
+        <span class="what">A quoted citation <b>reworded by one word</b> — re-read from the corpus, character for character</span>
+        <span class="cid">CLARIFY-005</span></div>
+      <div class="trow"><span class="n">5</span>
+        <span class="what">The sign-off changed from a person to <b>the agent</b></span>
+        <span class="cid">GATE-006</span></div>
+      <div class="trow"><span class="n">6</span>
+        <span class="what">The traceability index <b>emptied</b> — it is generated by inverting the tree, so the two now disagree</span>
+        <span class="cid two">META-002 · TRACE-001</span></div>
+    </div>
+
+    <p class="note">Same input, same refusal, every run. Number <b>4</b> is the one that matters most: a
+      citation cannot be invented, because the checker goes back to the document and looks for the words.
+      Number <b>5</b> is the line the whole phase exists to draw.</p>
+  </section>
+
+  <!-- ── ACT 3 ─────────────────────────────────────────────── -->
+  <section class="act" id="cascade">
+    <h2><span class="pn">03</span> Where an answer comes from <span class="cue">grounded, or asked</span></h2>
+
+    <p class="lede">When something is unknown, the pipeline is not allowed to invent it. It works down a fixed
+      order and <b>a person is the last resort, not the first</b>.</p>
+
+    <div class="rungs run">
+      <div class="rung"><span class="num">1</span><span class="nm">CONTEXT.md <em>repo-local</em></span><span class="verdict">tried first</span></div>
+      <div class="rung"><span class="num">2</span><span class="nm">ARCHITECTURE.md <em>repo-local</em></span><span class="verdict">tried next</span></div>
+      <div class="rung"><span class="num">3</span><span class="nm">project docs <em>docs/**</em></span><span class="verdict">tried next</span></div>
+      <div class="rung eil"><span class="num">4</span><span class="nm">the knowledge base <em>Confluence · Jira · code, indexed</em></span><span class="verdict">where most answers are</span></div>
+      <div class="rung human"><span class="num">5</span><span class="nm">ask a named person <em>blocks the artefact</em></span><span class="verdict">last resort</span></div>
+    </div>
+
+    <p class="note"><b>Rung 4 is the one that decides whether any of this pays for itself.</b> Rungs 1–3 are
+      whatever somebody wrote down and never revised. Without a real fourth rung the order collapses to
+      "ask a person", and a careful process becomes an expensive way to generate questions.</p>
+
+    <div class="split">
+      <div class="card arith">
+        <p class="who">arithmetic</p>
+        <h4>Is anything worth reading?</h4>
+        <p>Retrieval scores against a registered floor. A model never gets to decide whether it knows enough.</p>
+      </div>
+      <div class="card model">
+        <p class="who">the model</p>
+        <h4>Does it actually answer?</h4>
+        <p>Relevance is not the same as an answer. A page can be entirely about the question and settle nothing.</p>
+      </div>
+      <div class="card code">
+        <p class="who">code</p>
+        <h4>Are those the real words?</h4>
+        <p>The cited document is re-read and the quote matched character for character. A fabricated citation cannot survive.</p>
+      </div>
+    </div>
+
+    <div class="outcomes">
+      <div class="out-card good">
+        <h4>Grounded — with the words it relied on</h4>
+        <p>Two of the questions were answered from pages nobody would have found: an unlabelled note, last
+          edited fourteen months ago by someone who has since left.</p>
+        <div class="cite">confluence:page:ptrd-2 — flagged <b>hedged</b>: the source said "I haven't measured
+          recently", so the artefact carries a residual risk that a named person accepted, rather than
+          quietly turning a guess into a fact.</div>
+      </div>
+      <div class="out-card ask">
+        <h4>Asked — and the artefact is blocked until it is answered</h4>
+        <p>What happens to orders already working at the venue when a limit is cut? Nothing in the corpus
+          says. The pipeline did not guess.</p>
+        <div class="cite">The top-ranked document was <b>PTR-420</b> — a ticket asking exactly that question,
+          still open. It scored high on relevance and answered nothing, which is precisely the case the
+          three-way split exists to catch.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── measured ──────────────────────────────────────────── -->
+  <section class="act" id="measured">
+    <h2><span class="pn">04</span> This run, measured <span class="cue">not estimated</span></h2>
+    <div class="measured">
+      <div><div class="v">10</div><div class="k">requirement nodes</div></div>
+      <div><div class="v">6</div><div class="k">testable leaves</div></div>
+      <div><div class="v">2</div><div class="k">grounded, cited</div></div>
+      <div><div class="v">1</div><div class="k">asked of a person</div></div>
+      <div><div class="v">1</div><div class="k">residual accepted</div></div>
+      <div><div class="v">0</div><div class="k">tokens to retrieve</div></div>
+    </div>
+    <p class="note"><b>Nothing here is a projection.</b> These come out of the artefact itself. The last one
+      is structural rather than measured: no model sits in the retrieval path, so searching the corpus costs
+      nothing per query.</p>
+  </section>
+
+  <footer>
+    <b>Honest about what this is.</b> Phase 1 of 4 — requirements only; design, planning and implementation
+    are specified and not built. The corpus is synthetic and every page says so on its face. The model's
+    judgments in this run are replayed from a recorded pack so the run is reproducible; everything that
+    checks them is live. Group-level access control works against fixtures, not yet against a live
+    Confluence sync. Call counts and latency are recorded; costs in currency are not.
+  </footer>
+</div>
+
+<script>
+  // Two controls, both remembered. Nothing else is scripted: the diagram is CSS,
+  // so a failed script leaves a static page rather than a broken one.
+  (function () {
+    var root = document.documentElement;
+    var saved = null;
+    try { saved = localStorage.getItem("eil-theme"); } catch (e) {}
+    if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
+
+    document.getElementById("theme").addEventListener("click", function () {
+      var now = root.getAttribute("data-theme");
+      if (!now) now = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      var next = now === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("eil-theme", next); } catch (e) {}
+    });
+
+    var btn = document.getElementById("motion");
+    btn.addEventListener("click", function () {
+      var paused = root.classList.toggle("paused");
+      btn.textContent = paused ? "play" : "pause";
+      btn.setAttribute("aria-pressed", String(paused));
+    });
+
+    // Someone presenting from a machine set to reduce motion gets a still page;
+    // the button would then lie, so say what it is.
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      btn.textContent = "motion off";
+      btn.disabled = true;
+    }
+  })();
+</script>
+</body>
+</html>

@@ -109,6 +109,11 @@ Semantic search, data-trust auditing, metrics and development workflow:
 interactive diagram; open any node to expand it. Partly generated from the
 code, so it can't silently drift.
 
+**[docs/gated-elaboration.html](docs/gated-elaboration.html)** — how a
+requirements artefact is produced and what refuses it: the division of labour,
+the six tampers and the check that catches each, and the order an unknown is
+resolved in before a person is asked.
+
 Also: [architecture-schematic.html](docs/architecture-schematic.html) (the
 pipeline stage by stage), [eil-architecture.html](docs/eil-architecture.html)
 (full solution), [knowledge-plane.html](docs/knowledge-plane.html) and
