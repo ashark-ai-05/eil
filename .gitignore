@@ -12,4 +12,5 @@ node_modules/
 .eil-repos/
 demo/judgments.md
 demo/metrics.html
+demo/eil-metrics.html
 .eil-demo/

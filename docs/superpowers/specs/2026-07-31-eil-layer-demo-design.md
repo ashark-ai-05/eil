@@ -1,7 +1,7 @@
 # EIL-layer demo — design
 
 **Date:** 2026-07-31
-**Status:** approved, ready to implement
+**Status:** built. See "What changed during implementation" at the end.
 
 A 15-minute demonstration of the knowledge plane alone — ingestion, indexing,
 retrieval, cost, governance, observability — for a room of engineers and
@@ -48,21 +48,32 @@ The cost line, stated honestly, is stronger than the fabricated one:
 
 ## The question the demo is built around
 
-> Why does ptc-gateway reject an order when it cannot complete the credit check?
+> How stale can the presettlement view be before an order is rejected?
 
 The answer exists only if all three sources are indexed:
 
 | Source | Contribution |
 |---|---|
-| Confluence `ptrd-4` — Market Access Controls | The obligation: controls apply to every order, not negotiable |
-| Jira `PTR-388` | It happened. psr-limits restarted, gateways held nothing, ~4,100 orders rejected with a `credit-unavailable` reason code |
-| `demo/repo/ptc-gateway/src/creditCheck.ts` | The branch that implements it |
+| Confluence `ptrd-4` — Market Access Controls | The rule: a control that cannot be evaluated has not passed, so the order is rejected |
+| Jira `PTR-415` | The number everyone agreed on — 1s |
+| `demo/repo/ptc-gateway/src/creditCheck.ts` | `MAX_VIEW_AGE_MS`, the line that enforces it |
 
-Scoped to Confluence alone you get the rule in general terms — no reason code,
-no incident, no code. That contrast is step 1.
+Measured: scoped to Confluence it returns the rule and nothing else; unscoped it
+puts the code first, the ticket second and the obligation fourth, with all three
+sources in the top four. That contrast is step 1.
 
-Second question held in reserve, also three-source: maker-checker on limit
-amendments (`ptrd-5` + `PTR-392` + `credit-admin/src/amendment.ts`).
+The originally-specified question — *why does ptc-gateway reject when it cannot
+complete the credit check* — was tried first and rejected. It is phrased in the
+wiki's own vocabulary, so the router treats it as a prose question, down-weights
+the code arm, and `creditCheck.ts` lands at #13 behind twelve prose documents.
+That is the code-crowding protection working as designed; the fix was to pick a
+question that genuinely spans, not to tune the ranker.
+
+Two more that also span all three sources, held in reserve:
+
+- `credit-unavailable reason code` — `PTR-388` first, `creditCheck.ts` second
+- `who may approve a counterparty limit amendment` — `approvalQueue.ts` first,
+  `ptrd-5` fourth
 
 ## Run order — 15 minutes, no Q&A inside it
 
@@ -182,6 +193,61 @@ The demo runner is rehearsed from clean rather than unit-tested:
 
 ```sh
 rm -rf .eil-demo .eil-repos
-export EIL_DATABASE_URL=pglite://.eil-demo
 node demo/eil.mjs
 ```
+
+---
+
+## What changed during implementation
+
+Everything above is as built except where noted here. Each of these was found by
+running the demo rather than by reasoning about it.
+
+**The demo question changed.** See above — the original one buried the code at
+#13.
+
+**`demo/repo/README.md` is not indexed.** It restates the demo's own question,
+so it won the code arm and the top code result was a file describing the demo.
+`--include '**/*.ts'` only.
+
+**`ingest repo --acl-group` is new, and was not in this spec.**
+`normalizeCode` hardcoded `aclGroups: []`, so every repo was owner-only. In the
+governance step that meant switching principal made *all code* vanish as a side
+effect, which misrepresents what the ACL is doing. Empty remains the default and
+remains fail-closed.
+
+**`EIL_PRINCIPAL` is new, and was not in this spec.** `localViewer()` read the
+OS username with no override, and the presenter ingested the corpus and
+therefore owns all of it — so no document could ever be shown being withheld.
+It sits beside the `EIL_USER_GROUPS` override that was already there, at the
+same trust level, local mode only. The boundary at
+`viewerFromAuthenticatedClaims` is unmoved.
+
+**The demo fixtures now carry `grp-engineering`.** Previously all but `ptrd-7`
+had `acl_groups: []`, so a non-owner saw *nothing at all* — fail-closed, but it
+reads as a broken setup rather than a working control. Now the contractor gets
+six useful results with `ptrd-7` simply absent, which is the beat.
+
+**The quarantined credential is an added beat.** `ptrd-6` already carried a
+planted AWS key and database password. It costs twenty seconds and strengthens
+the governance step, so the runner shows it.
+
+**`context-cost` reports a per-match pair as well as a ratio.** The headline
+ratio moves with the corpus — measured 1.5x at four matches, 4.9x at nineteen,
+same query and index, because the one fetched document is a fixed cost that
+amortises. The per-match figures do not move, so those are what generalise to
+someone else's corpus.
+
+**The chunks-over-window figure is ~40%, not the ~87% the older demo README
+quotes.** That number was measured on a different corpus.
+
+**`index:stats` carries a drift guard.** The scoring SQL it prints is asserted
+by test to still appear in `ts/search.ts`.
+
+### Known sharp edge, not fixed
+
+Changing `--include`/`--exclude` on a repo has **no effect on an incremental
+run**: `ingestRepo` short-circuits on the commit SHA before consulting the
+filter, so the previous filter's documents stay indexed. Hit while building
+this. The workaround is to clear the cursor or rebuild. Worth fixing separately;
+it is not demo-specific.
