@@ -249,7 +249,7 @@ const REQS = "demo/PTR-401.reqs.json";
 if (existsSync(REQS)) {
   run(
     "Run the gate over a requirements artefact",
-    "45 checks. Every generated field recomputed, every cited quote re-read out of the corpus.",
+    "46 checks. Every generated field recomputed, every cited quote re-read out of the corpus.",
     ["reqs", "check", REQS],
   );
 

@@ -68,7 +68,7 @@ token storage: **[docs/ingestion.md](docs/ingestion.md)**.
 ## Gating what an agent produces
 
 ```sh
-pnpm eil reqs check demo/PTR-401.reqs.json          # the gate: 45 checks, exit 1 on refusal
+pnpm eil reqs check demo/PTR-401.reqs.json          # the gate: 46 checks, exit 1 on refusal
 pnpm eil reqs check demo/PTR-401.reqs.json --json   # the same result as machine-readable JSON
 pnpm eil reqs check demo/PTR-401.reqs.json --mode lint   # GATE family downgraded, for mid-loop use
 pnpm eil reqs render demo/PTR-401.reqs.json         # project it as self-contained HTML

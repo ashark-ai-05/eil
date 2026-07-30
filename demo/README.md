@@ -148,7 +148,7 @@ pnpm eil reqs check demo/PTR-401.reqs.json
 Every derived field — the magnitude bands, the leaf flags, the traceability index
 — is recomputed from the body and compared, and every cited quote is re-read out
 of the catalog through the same audited tool path an agent would use. It says
-`45 checks run   0 errors   PASSED`.
+`46 checks run   0 errors   PASSED`.
 
 ### Beat 6 — tamper with it
 
@@ -182,7 +182,7 @@ is not merely implausible here — it is mechanically detectable. And number 5 i
 the line the whole phase exists to draw: an agent may draft, score, ground and
 analyse a requirement set. It may never approve one.
 
-The script asserts **45 checks ran** on every single invocation. `CLARIFY-005`
+The script asserts **46 checks ran** on every single invocation. `CLARIFY-005`
 does not fail when the catalog is unreachable — it *disappears*, and the count
 drops to 44. Without that assertion, beat 6 would look identical while proving
 nothing.
@@ -329,7 +329,7 @@ for f in demo/fixtures/*.json; do
 done
 ```
 
-**`demo/tamper.mjs` says only 44 of 45 checks ran.**
+**`demo/tamper.mjs` says only 45 of 46 checks ran.**
 The catalog is not reachable, so the one check that leaves the artefact was
 skipped. Check `EIL_DATABASE_URL`, then `pnpm eil db migrate`, then re-ingest as
 above. The script refuses to run the drill in this state on purpose — a tamper
