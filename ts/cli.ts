@@ -239,6 +239,22 @@ program
   });
 
 program
+  .command("context-cost <query...>")
+  .description("Measure context spent: every match in full vs two-phase search-then-fetch")
+  .option("--limit <n>", "results the search returns", "8")
+  .option("--fetch <n>", "documents the agent is assumed to open", "1")
+  .option("--json", "machine-readable output")
+  .action(async (queries: string[], opts) => {
+    const { runContextCost, formatContextCost } = await import("./contextcost.js");
+    const reports = await runContextCost(queries, Number(opts.limit), Number(opts.fetch));
+    if (opts.json) {
+      console.log(JSON.stringify(reports, null, 2));
+      return;
+    }
+    console.log(reports.map(formatContextCost).join("\n\n"));
+  });
+
+program
   .command("eval")
   .description("Run the golden-query eval: recall@k through the real retrieval path")
   .option("--k <n>", "top-k", "10")
