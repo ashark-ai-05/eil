@@ -224,9 +224,17 @@ program
   .command("search <query>")
   .description("Debug: run search_docs through the tool registry (audited, like MCP)")
   .option("--limit <n>", "max results", "8")
+  .option(
+    "--source <kind...>",
+    "restrict to these sources (confluence | jira | code | obsidian); omit for all",
+  )
   .action(async (query, opts) => {
     const { callTool } = await import("./tools.js");
-    const result = await callTool("search_docs", { query, limit: Number(opts.limit) });
+    const result = await callTool("search_docs", {
+      query,
+      limit: Number(opts.limit),
+      ...(opts.source ? { sources: opts.source } : {}),
+    });
     console.log(JSON.stringify(result, null, 2));
   });
 

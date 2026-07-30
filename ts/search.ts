@@ -114,18 +114,36 @@ export interface Edge {
   ingested: boolean;
 }
 
+/**
+ * Restrict a search to a subset of sources.
+ *
+ * `null`/absent means every source, which is the only behaviour there was
+ * before this existed. An EMPTY array is not the same thing as absent: it
+ * names no sources and therefore matches nothing. Treating `[]` as "no filter"
+ * would turn a caller's mistake into a silent widening of scope, which is the
+ * wrong direction for a predicate that sits next to the ACL.
+ */
+export interface SearchOptions {
+  sources?: readonly string[] | null;
+}
+
+/** Normalised to `null` (no filter) or a non-empty array, once, at the entry point. */
+const sourceFilter = (opts?: SearchOptions): string[] | null =>
+  opts?.sources == null ? null : [...opts.sources];
+
 export async function searchDocs(
   client: Db,
   viewer: Viewer,
   query: string,
   limit = 8,
   embedder?: Embedder,
+  opts?: SearchOptions,
 ): Promise<Record<string, unknown>> {
   return withSpan(
     `${OP.retrieval} eil`,
     { [ATTR.operation]: OP.retrieval, [ATTR.dataSource]: "eil" },
     async (span) => {
-      const out = await searchDocsInner(client, viewer, query, limit, embedder);
+      const out = await searchDocsInner(client, viewer, query, limit, embedder, opts);
       // The arms that actually ran — route != executor is the interesting case,
       // and a silently-missing vector arm shows up here rather than nowhere.
       if (typeof out.route === "string") span.setAttribute("eil.route", out.route);
@@ -142,16 +160,26 @@ async function searchDocsInner(
   query: string,
   limit: number,
   embedder?: Embedder,
+  opts?: SearchOptions,
 ): Promise<Record<string, unknown>> {
   const decision = classify(query);
+  const sources = sourceFilter(opts);
+  // Both shortcuts below bypass the arms entirely and answer out of one source,
+  // so each has to ask permission first. A scope the router can route around is
+  // not a scope: "CHK-9" would return a Jira issue from a search restricted to
+  // the wiki, and the caller would never see which path produced it.
+  const inScope = (source: string) => sources === null || sources.includes(source);
 
-  if (decision.route === "entity") {
+  if (decision.route === "entity" && inScope("jira")) {
     const entityId = `jira:issue:${decision.match}`;
     const doc = await getDoc(client, viewer, entityId, 0, 2_000);
     const neighborhood = await expand(client, viewer, entityId);
     return { route: "entity", entity: doc, linked: neighborhood.edges };
   }
-  if (decision.route === "path" || decision.route === "symbol" || decision.route === "exact") {
+  if (
+    inScope("code") &&
+    (decision.route === "path" || decision.route === "symbol" || decision.route === "exact")
+  ) {
     const { searchCodeIndex } = await import("./code-search.js");
     const kind = decision.route === "exact" ? "literal" : decision.route;
     const code = await searchCodeIndex(client, viewer, {
@@ -191,6 +219,7 @@ async function searchDocsInner(
               (c.tsv @@ qq.strict) AS strict_hit
          FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id CROSS JOIN qq
         WHERE c.tsv @@ qq.loose AND ${visibleSql(4, 5, 6)}
+          AND ($7::text[] IS NULL OR d.source = ANY($7::text[]))
      ), best AS (
        SELECT DISTINCT ON (doc_id) * FROM m ORDER BY doc_id, strict_hit DESC, rank DESC, seq
      ), quota AS (
@@ -203,7 +232,7 @@ async function searchDocsInner(
        FROM quota
       WHERE rn <= $3
       ORDER BY rank DESC, doc_id`,
-    [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, viewer.tenant],
+    [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, viewer.tenant, sources],
   );
 
   const byDoc = new Map<string, SearchResult & { updated: Date | null }>();
@@ -237,7 +266,7 @@ async function searchDocsInner(
   const arms: Record<string, string[]> = {};
   for (const [name, ids] of Object.entries(lists)) if (ids.length > 0) arms[name] = ids;
   try {
-    const vec = await vecArm(client, viewer, query, limit, byDoc, embedder);
+    const vec = await vecArm(client, viewer, query, limit, byDoc, embedder, sources);
     if (vec && vec.length > 0) arms.vec = vec;
   } catch (err: any) {
     console.error(`vec arm skipped: ${err.message}`); // best-effort: degrade to FTS-only
@@ -477,6 +506,7 @@ async function vecArm(
   limit: number,
   byDoc: Map<string, SearchResult & { updated: Date | null }>,
   embedder?: Embedder,
+  sources: string[] | null = null,
 ): Promise<string[] | null> {
   // Build the embedder first (construction is cheap — the local model loads
   // lazily on embed(), not here). May throw if a provider is misconfigured ->
@@ -533,6 +563,7 @@ async function vecArm(
          FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id
         WHERE c.embedding IS NOT NULL AND c.embed_model = $5 AND ${visibleSql(1, 2, 3)}
           AND ($7::int[] IS NULL OR c.cluster_id = ANY($7::int[]))
+          AND ($11::text[] IS NULL OR d.source = ANY($11::text[]))
         ORDER BY CASE WHEN $8::varbit IS NULL OR c.sig IS NULL THEN 0
                       ELSE bit_count(c.sig # $8::varbit) END,
                  c.doc_id, c.seq
@@ -564,6 +595,7 @@ async function vecArm(
       probes ? signature(qv) : null,
       Number.MAX_SAFE_INTEGER, // unbounded when there is nothing to narrow with
       limit * OVERSAMPLE, // survivors handed to the exact rescore
+      sources,
     ],
   );
   for (const row of res.rows) {

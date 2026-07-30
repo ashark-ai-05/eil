@@ -42,9 +42,17 @@ const searchDocsSpec: ToolSpec = {
     "Search indexed org knowledge (Confluence, Jira, notes). Returns compact " +
     "results: ids, titles, snippets. Use get_doc(id) for full content. Ticket " +
     "keys (e.g. PAY-981) resolve directly with their linked context.",
-  schema: z.object({ query: z.string(), limit: z.number().int().default(8) }),
+  schema: z.object({
+    query: z.string(),
+    limit: z.number().int().default(8),
+    // Omit to search everything, which is almost always what an agent wants.
+    // Naming sources is for a caller who already knows where the answer lives —
+    // and for showing what a single-source connector can see on its own.
+    sources: z.array(z.string()).optional(),
+  }),
   requiresEnv: [],
-  handler: (c, v, a) => searchDocs(c, v, a.query, a.limit ?? 8),
+  handler: (c, v, a) =>
+    searchDocs(c, v, a.query, a.limit ?? 8, undefined, { sources: a.sources ?? null }),
 };
 
 /**

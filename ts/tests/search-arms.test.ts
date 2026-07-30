@@ -192,3 +192,72 @@ describe("per-source arms", () => {
     expect(res.executor).toContain("fts_code");
   });
 });
+
+/**
+ * Scoping a search to one source is what a per-source connector can see on its
+ * own. The demo uses it to show the same question answered incompletely and
+ * then completely, so the incomplete answer has to be genuinely incomplete —
+ * a filter that leaked would quietly turn the whole argument into a lie.
+ */
+describe("source scoping", () => {
+  const scoped = async (q: string, sources: string[], limit = 10) =>
+    ((await searchDocs(client, VIEWER, q, limit, undefined, { sources })) as any).results.map(
+      (r: any) => r.id,
+    ) as string[];
+
+  it("returns only the named source", async () => {
+    const got = await scoped("retry backoff", ["confluence"]);
+    expect(got.length).toBeGreaterThan(0);
+    expect(got.every((id) => id.startsWith("confluence:"))).toBe(true);
+  });
+
+  it("accepts several sources at once", async () => {
+    const got = await scoped("retry backoff", ["confluence", "jira"]);
+    expect(got.some((id) => id.startsWith("confluence:"))).toBe(true);
+    expect(got.every((id) => !id.startsWith("code:"))).toBe(true);
+  });
+
+  it("returns nothing for a source that does not exist, rather than everything", async () => {
+    // The failure mode worth guarding: a predicate that silently no-ops on an
+    // unrecognised value looks identical to an unfiltered search, and on stage
+    // it would look like the filter working.
+    expect(await scoped("retry backoff", ["sharepoint"])).toEqual([]);
+  });
+
+  it("leaves an unscoped search exactly as it was", async () => {
+    const unscoped = await ids("retry backoff", 10);
+    const explicitNull = (
+      (await searchDocs(client, VIEWER, "retry backoff", 10, undefined, {
+        sources: null,
+      })) as any
+    ).results.map((r: any) => r.id);
+    expect(explicitNull).toEqual(unscoped);
+  });
+
+  it("does not let the ticket-key shortcut escape the scope", async () => {
+    // "CHK-9" routes straight to the jira entity before any arm runs. Scoped to
+    // confluence, that shortcut must not fire — otherwise a jira document comes
+    // back from a search the caller restricted to the wiki.
+    //
+    // `route` still reports "entity": it is the classifier's decision, and the
+    // codebase keeps route != executor visible on purpose. What must change is
+    // what came back, so that is what this asserts.
+    const res: any = await searchDocs(client, VIEWER, "CHK-9", 8, undefined, {
+      sources: ["confluence"],
+    });
+    // Nothing in the wiki mentions CHK-9, so the honest answer is no results —
+    // which is precisely the point. Unscoped, the same query returns the ticket.
+    expect(res.entity).toBeUndefined();
+    expect((res.results ?? []).every((r: any) => r.id.startsWith("confluence:"))).toBe(true);
+
+    const unscoped: any = await searchDocs(client, VIEWER, "CHK-9", 8);
+    expect(unscoped.entity).toBeDefined();
+  });
+
+  it("does not let the identifier shortcut escape the scope", async () => {
+    // "retryHandler" routes to the code index. Scoped to confluence it must
+    // fall through to the lexical arms and return the prose page instead.
+    const got = await scoped("retryHandler", ["confluence"]);
+    expect(got.every((id) => !id.startsWith("code:"))).toBe(true);
+  });
+});
