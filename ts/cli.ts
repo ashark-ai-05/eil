@@ -239,6 +239,16 @@ program
   });
 
 program
+  .command("index:stats")
+  .description("What is in the index, and the SQL that scores it — read-only")
+  .option("--json", "machine-readable output")
+  .action(async (opts) => {
+    const { runIndexStats, formatIndexStats } = await import("./indexstats.js");
+    const stats = await runIndexStats();
+    console.log(opts.json ? JSON.stringify(stats, null, 2) : formatIndexStats(stats));
+  });
+
+program
   .command("context-cost <query...>")
   .description("Measure context spent: every match in full vs two-phase search-then-fetch")
   .option("--limit <n>", "results the search returns", "8")
