@@ -48,6 +48,7 @@ export const Grounding = z.object({
   traceId: z.string().nullish(),
   hedged: z.boolean().default(false), // [G]
 });
+export type Grounding = z.infer<typeof Grounding>;
 
 export const AcceptanceCriterion = z.object({
   id: z.string().regex(/^AC-\d+$/),
@@ -58,6 +59,7 @@ export const AcceptanceCriterion = z.object({
   then: z.array(z.string().min(1)).min(1),
   observable: z.boolean().default(false), // [G]
 });
+export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterion>;
 
 export const ScorePass = z.object({
   unknowns: Fib,
@@ -68,6 +70,7 @@ export const ScorePass = z.object({
   at: z.string(),
   note: z.string().optional(),
 });
+export type ScorePass = z.infer<typeof ScorePass>;
 
 export interface RequirementNodeT {
   id: string;
@@ -129,6 +132,7 @@ export const Clarification = z.object({
   resolvedFrom: z.enum(RESOLVED_FROM).optional(),
   grounding: z.array(Grounding).default([]),
 });
+export type Clarification = z.infer<typeof Clarification>;
 
 export const Residual = z.object({
   id: z.string().regex(/^RU-\d+$/),
@@ -137,9 +141,14 @@ export const Residual = z.object({
   statement: z.string().min(1),
   mitigation: z.string().optional(),
   /** a residual is only carried on a named human's authority */
-  acceptedBy: z.object({ kind: z.literal("human"), name: z.string().min(1) }),
+  acceptedBy: z.object({
+    /** deliberately loose — UNCERT-002 owns "a residual is only ever carried on a named human's authority" */
+    kind: z.string(),
+    name: z.string().min(1),
+  }),
   acceptedAt: z.string(),
 });
+export type Residual = z.infer<typeof Residual>;
 
 export const Signoff = z.object({
   approvers: z
@@ -156,6 +165,7 @@ export const Signoff = z.object({
   /** deliberately loose — GATE-001 owns "passed is never admissible" */
   result: z.string(),
 });
+export type Signoff = z.infer<typeof Signoff>;
 
 export const ReqsBody = z.object({
   schemaVersion: z.literal("1.0"),

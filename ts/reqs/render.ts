@@ -10,6 +10,21 @@ import { walk } from "./schema.js";
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/**
+ * Neutralises markdown's own metacharacters — distinct from HTML escaping —
+ * so authored content (arbitrary source-document quotes, questions,
+ * statements) cannot forge markdown structure or smuggle raw HTML into
+ * renderers (Confluence, GitHub, …) that interpret this output.
+ */
+const mdEsc = (s: string): string =>
+  s
+    .replace(/\\/g, "\\\\")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/`/g, "\\`")
+    .replace(/\|/g, "\\|")
+    .replace(/\n/g, " ");
+
 const STYLE = `
   :root {
     --ink:#090e18; --panel:#10192b; --line:#223148; --line-soft:#1a2740;
@@ -35,11 +50,11 @@ const STYLE = `
     margin:34px 0 12px; padding-top:18px; border-top:1px solid var(--line-soft); }
   h2:first-of-type { border-top:0; padding-top:0; }
   .sub { color:var(--muted); font-size:13px; margin:0; }
-  .banner-refused { border:1px solid var(--warn); border-radius:10px; background:color-mix(in oklab, var(--warn) 12%, var(--panel));
-    box-shadow:var(--shadow); padding:16px 18px; margin:18px 0 30px; }
-  .banner-refused .title { font-size:16px; font-weight:700; letter-spacing:0.08em; color:var(--warn); text-transform:uppercase; }
-  .banner-refused ul { margin:10px 0 0; padding-left:20px; }
-  .banner-refused li { color:var(--text); font-size:13px; margin:4px 0; }
+  .banner-refused { border:2px solid var(--warn); border-radius:10px; background:color-mix(in oklab, var(--warn) 12%, var(--panel));
+    box-shadow:var(--shadow); padding:20px 22px; margin:18px 0 30px; }
+  .banner-refused .title { font-size:23px; font-weight:800; letter-spacing:0.06em; color:var(--warn); text-transform:uppercase; }
+  .banner-refused ul { margin:12px 0 0; padding-left:20px; }
+  .banner-refused li { color:var(--text); font-size:13.5px; margin:5px 0; }
   .banner-refused code { color:var(--warn); }
   .meta { display:grid; grid-template-columns:auto 1fr; gap:4px 16px; font-size:13px; color:var(--muted); }
   .corpus { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; letter-spacing:0.06em;
@@ -73,6 +88,9 @@ const STYLE = `
   .residual { border-left:2px solid var(--warn); padding:4px 0 4px 12px; margin:0 0 8px; font-size:12.5px; }
   .residual b { color:var(--text); }
   .residual .who { color:var(--muted); font-size:11.5px; }
+  .clarification { border-left:2px solid var(--warn); padding:4px 0 4px 12px; margin:0 0 8px; font-size:12.5px; }
+  .clarification b { color:var(--text); }
+  .clarification .who { color:var(--muted); font-size:11.5px; }
   .signoff { display:flex; gap:24px; flex-wrap:wrap; font-size:13px; }
   .signoff .result { font-weight:700; }
   .approver { color:var(--muted); font-size:12.5px; }
@@ -166,7 +184,7 @@ function groundingHtml(body: ReqsBody): string {
 function clarificationsHtml(body: ReqsBody): string {
   const { grounded, escalated } = clarificationGroups(body);
   const item = (c: Clarification): string =>
-    `<div class="residual"><b>${esc(c.id)}</b> — ${esc(c.question)} <span class="who">(${esc(answeredBy(c))})</span></div>`;
+    `<div class="clarification"><b>${esc(c.id)}</b> — ${esc(c.question)} <span class="who">(${esc(answeredBy(c))})</span></div>`;
   const list = (cs: Clarification[], empty: string): string =>
     cs.length > 0 ? cs.map(item).join("") : `<p class="empty">${empty}</p>`;
   return `<div class="ledger-grp"><h3>Resolved from knowledge base</h3>${list(grounded, "none resolved from the knowledge base")}</div>
@@ -252,9 +270,9 @@ export function renderHtml(body: ReqsBody, findings?: Finding[]): string {
 function mdAc(node: RequirementNodeT): string {
   return (node.acceptanceCriteria ?? [])
     .map((ac) => {
-      const then = ac.then.map((t) => `    - ${t}`).join("\n");
+      const then = ac.then.map((t) => `    - ${mdEsc(t)}`).join("\n");
       const flag = ac.observable ? "" : " _not observable_";
-      return `  - **${ac.id}** (${ac.stakeholder})${flag}\n    - GIVEN ${ac.given}\n    - WHEN ${ac.when}\n    - THEN\n${then}`;
+      return `  - **${ac.id}** (${mdEsc(ac.stakeholder)})${flag}\n    - GIVEN ${mdEsc(ac.given)}\n    - WHEN ${mdEsc(ac.when)}\n    - THEN\n${then}`;
     })
     .join("\n");
 }
@@ -264,7 +282,7 @@ function mdTree(root: RequirementNodeT): string {
   for (const { node, depth } of walk(root)) {
     const s = node.score;
     lines.push(
-      `${"  ".repeat(depth - 1)}- **${node.id}** [${node.decision}] ${s.unknowns}×${s.complexity}→${s.magnitude} — ${node.statement}`,
+      `${"  ".repeat(depth - 1)}- **${node.id}** [${node.decision}] ${s.unknowns}×${s.complexity}→${s.magnitude} — ${mdEsc(node.statement)}`,
     );
     const ac = mdAc(node);
     if (ac) lines.push(ac);
@@ -276,14 +294,16 @@ function mdGrounding(body: ReqsBody): string {
   const rows = allGrounding(body);
   if (rows.length === 0) return "_no grounding recorded_";
   const trs = rows.map(
-    (g) => `| ${g.docId} | ${g.title} | ${g.quote} | ${g.hedged ? "hedged" : ""} |`,
+    (g) =>
+      `| ${mdEsc(g.docId)} | ${mdEsc(g.title)} | ${mdEsc(g.quote)} | ${g.hedged ? "hedged" : ""} |`,
   );
   return `| Document | Title | Quote | |\n| --- | --- | --- | --- |\n${trs.join("\n")}`;
 }
 
 function mdClarifications(body: ReqsBody): string {
   const { grounded, escalated } = clarificationGroups(body);
-  const item = (c: Clarification): string => `- **${c.id}** — ${c.question} (${answeredBy(c)})`;
+  const item = (c: Clarification): string =>
+    `- **${c.id}** — ${mdEsc(c.question)} (${mdEsc(answeredBy(c))})`;
   const list = (cs: Clarification[], empty: string): string =>
     cs.length > 0 ? cs.map(item).join("\n") : `_${empty}_`;
   return `**Resolved from knowledge base**\n\n${list(grounded, "none resolved from the knowledge base")}\n\n**Escalated to a human**\n\n${list(escalated, "none escalated")}`;
@@ -294,7 +314,7 @@ function mdResiduals(body: ReqsBody): string {
   return body.residuals
     .map(
       (r) =>
-        `- **${r.id}** [${r.kind}] — ${r.statement} (accepted by ${r.acceptedBy.name} at ${r.acceptedAt})`,
+        `- **${r.id}** [${r.kind}] — ${mdEsc(r.statement)} (accepted by ${mdEsc(r.acceptedBy.name)} at ${r.acceptedAt})`,
     )
     .join("\n");
 }
@@ -303,9 +323,9 @@ function mdSignoff(body: ReqsBody): string {
   const signoff = body.signoff;
   if (signoff === undefined) return "_not yet signed off_";
   const approvers = signoff.approvers
-    .map((a) => `- ${a.name} · ${a.role} · ${a.kind} · ${a.at}`)
+    .map((a) => `- ${mdEsc(a.name)} · ${mdEsc(a.role)} · ${mdEsc(a.kind)} · ${a.at}`)
     .join("\n");
-  return `Result: **${signoff.result}**\n\n${approvers}`;
+  return `Result: **${mdEsc(signoff.result)}**\n\n${approvers}`;
 }
 
 export function renderMarkdown(body: ReqsBody): string {
@@ -315,14 +335,14 @@ export function renderMarkdown(body: ReqsBody): string {
     cov !== undefined
       ? `\n- coverage: ${cov.leaves} leaves · ${cov.acs} ACs · ${cov.grounded} grounded · ${cov.escalated} escalated · ${cov.carried} carried`
       : "";
-  return `# ${m.workItem} — ${m.title}
+  return `# ${mdEsc(m.workItem)} — ${mdEsc(m.title)}
 
 - corpus mode: **${m.corpusMode}**
 - created: ${m.createdAt}
 - updated: ${m.updatedAt}
 - execution profile: ${m.executionProfile.mode}
 - delivery: ${m.deliveryType.kind} / ${m.deliveryType.tech}
-- generator: ${m.generator.agent} ${m.generator.version}${covLine}
+- generator: ${mdEsc(m.generator.agent)} ${mdEsc(m.generator.version)}${covLine}
 
 ## Requirement tree
 
