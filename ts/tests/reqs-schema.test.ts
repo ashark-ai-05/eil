@@ -8,6 +8,30 @@ describe("reqs schema", () => {
     expect(r.ok).toBe(true);
   });
 
+  /**
+   * Not a lint and not a warning: an artefact that cannot say where its
+   * judgments came from does not validate at all. A replayed run and a live one
+   * are different claims, and a body that declines to make either is the one
+   * state nobody downstream can check.
+   */
+  it("refuses a body whose generator will not say whether it was live or replayed", () => {
+    const b = minimalBody();
+    // Absence, not undefined, is the case under test.
+    const { provenance: _dropped, ...rest } = b.metadata.generator as any;
+    (b.metadata as any).generator = rest;
+    const r = parseReqs(b);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.issues.join(" ")).toContain("metadata.generator.provenance");
+
+    (b.metadata.generator as any).provenance = "probably live";
+    expect(parseReqs(b).ok).toBe(false);
+
+    for (const p of ["live", "replay"]) {
+      (b.metadata.generator as any).provenance = p;
+      expect(parseReqs(b).ok).toBe(true);
+    }
+  });
+
   it("rejects a node id that does not extend its parent's pattern", () => {
     const b = minimalBody();
     (b.tree as any).id = "REQ-1";

@@ -176,6 +176,9 @@ silently accept the next.
 pnpm eil reqs check demo/PTR-401.reqs.json
 ```
 
+The artefact was produced by `eil reqs elaborate`, replaying a recorded model
+run — see [Record and replay](#record-and-replay) below, and say so out loud.
+
 **Say:** this is a requirements artefact an agent produced. Forty-six checks.
 Every derived field — the magnitude bands, the leaf flags, the traceability index
 — is recomputed from the body and compared, and every cited quote is re-read out
@@ -244,6 +247,82 @@ claude mcp add eil -- pnpm -s --dir "$PWD" eil serve
 
 ---
 
+## Record and replay
+
+A live model in front of executives is the highest-variance thing in the room,
+and on a laptop with no working model CLI it is not available at all. So the
+demo replays a **recorded** run.
+
+```sh
+# record: wrap whichever provider is selected, and write the pack as it goes
+pnpm eil reqs elaborate PTR-401 --record demo/PTR-401.replay.json
+
+# replay: any command that calls a model picks the pack up from the environment
+EIL_LLM_FIXTURE=demo/PTR-401.replay.json pnpm eil reqs elaborate PTR-401
+```
+
+A pack is a JSON file with a provenance block and one entry per prompt:
+
+```json
+{
+  "recordedAt": "2026-07-30T19:25:58.038Z",
+  "provider": "hand-authored-during-build",
+  "model": null,
+  "note": "why this pack exists, and anything a reader must not mistake",
+  "replies": { "<sha256 prefix of the prompt>": { "text": "…", "latencyMs": 1840 } }
+}
+```
+
+Four things worth knowing:
+
+- **Only the model's own judgments are replayed.** Retrieval, the confidence
+  arithmetic, the resolution cascade, the re-reading of every cited quote out of
+  the catalog, the assembler and all 46 checks run live against the ingested
+  corpus, on every run.
+- **The artefact says it was replayed.** `metadata.generator.provenance` is
+  `"replay"`, it is a **required** schema field, and both projections carry a
+  line in plain words — `judgments: replayed from a recorded run (…)`. An
+  artefact that cannot say where its judgments came from does not validate.
+- **`agent` and `model` name what produced the recording**, not the machinery
+  that read it back, so `llm_calls` records what actually produced each reply.
+  The replay itself lands on the `caller` column as `reqs-elaborate (replay)` —
+  a replayed call cost nothing and must not be summed into model spend.
+- **Replay keeps the run's rhythm.** Each reply carries the latency the recorded
+  call really took, and the replay sleeps it. The demo takes about twenty
+  seconds over the elaboration rather than finishing before the room has read
+  the first line.
+
+Rebuild the whole artefact — elaboration, human pass, projection — with:
+
+```sh
+pnpm demo:reqs                  # replay the committed pack
+pnpm demo:reqs --rebuild-pack   # re-author the recorded run first
+```
+
+Rebuild the pack whenever `ts/reqs/prompt.ts` changes: replies are keyed by the
+sha256 of the exact prompt, so a reworded instruction block retires the pack.
+
+### Why the artefact needs a human pass
+
+`eil reqs elaborate` alone produces a **refused** artefact, and correctly so:
+
+```
+UNCERT-001   REQ-ROOT.2.2.residualRef   a review-zone leaf must reference an accepted residual
+CLARIFY-002  clarifications.2.answer    CL-3 carries no answer at all
+```
+
+That refusal is a worklist, and it is work only people can do. The elaboration
+loop cannot write a sign-off — there is no code in it that can — it cannot accept
+a residual, because a residual is only ever carried on a named human's authority,
+and it cannot answer an escalation, because the point of escalating is that
+nothing in the corpus answers it. `scripts/build-demo-reqs.ts` records those
+three human acts: d.mercer answers the in-flight-order question, s.iyer accepts
+the residual on the hedged 250ms citation, and the three roles sign — in that
+order, because `GATE-002` refuses an artefact signed while its own analysis still
+holds errors.
+
+---
+
 ## The walk, against the system map
 
 What `node demo/run.mjs` actually does, in order:
@@ -259,12 +338,13 @@ What `node demo/run.mjs` actually does, in order:
 | 7 | `ivf build` | The system **measuring its own recall** and choosing a parameter |
 | 8 | `search` | *Four lexical arms* (strict and loose, prose and code) plus a vector arm when the local model is available, fused by rank, plus tier and freshness |
 | 9 | `search "deploying the payment service"` | The quarantined credential is not retrievable — absent from tsv, embeddings and snippets |
-| 10 | `reqs check` | The gate — generated fields recomputed, citations re-read |
-| 11 | `demo/tamper.mjs` | Six edits, six refusals, each naming itself |
-| 12 | `audit` | *Every tool call lands as a row* |
-| 13 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
-| 14 | `report --out demo/metrics.html` | The fact tables, as a self-contained page |
-| 15 | `serve` over MCP | *Connected over MCP* — an agent pulls ranked, ACL-filtered context |
+| 10 | `reqs elaborate PTR-401` | The elaboration loop, replaying the recorded model run — real retrieval, real cascade, real citation verification. Comes out **REFUSED**, which is the honest output |
+| 11 | `reqs check` | The gate — generated fields recomputed, citations re-read |
+| 12 | `demo/tamper.mjs` | Six edits, six refusals, each naming itself |
+| 13 | `audit` | *Every tool call lands as a row* |
+| 14 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
+| 15 | `report --out demo/metrics.html` | The fact tables, as a self-contained page |
+| 16 | `serve` over MCP | *Connected over MCP* — an agent pulls ranked, ACL-filtered context |
 
 Passing the optional flags adds steps rather than changing any of these:
 `--repo` adds `ingest repo` (*Clone, walk* — commit dates become recency) and
@@ -304,6 +384,23 @@ would give you owner-level visibility only — `acl_groups: []` with `ingested_b
 as the only grant, and on a shared server every document owned by the service
 account. That is a known gap, and it is in the connectors, not in the
 enforcement. Say it plainly if asked; do not claim live multi-user visibility.
+
+**The model's judgments are a recording, and the recording was written by
+hand.** `demo/PTR-401.replay.json` is a replay pack: the model's own bounded
+judgments — two scoring bands, one question, the child statements, the acceptance
+criteria, and the answers/quote rulings — replayed rather than called. They were
+**authored during the build of this demo**, because `amp` is non-functional and
+`copilot` is not installed on the machine it was built on. No model produced
+them, which is why the pack's `model` is `null` and its `provider` says
+`hand-authored-during-build` in the file itself. It is not a captured run of a
+production model and must never be described as one. What is **not** replayed is
+everything that does the checking: retrieval, the confidence arithmetic, the
+resolution cascade, the re-reading of every cited quote out of the catalog, the
+assembler and all 46 checks — those run live on every invocation, and the
+artefact stamps itself `provenance: replay` so the projection cannot be mistaken
+for a live run. Recording and replay are a real feature of the pipeline
+(`--record`, `EIL_LLM_FIXTURE`), not demo scaffolding; a run against a live
+provider records a pack of exactly the same shape.
 
 **This is phase 1 of 4.** What you just watched is elaboration and gating —
 turning a work item into a scored, grounded, refusable requirements artefact.
@@ -408,6 +505,11 @@ tables, same numbers, no infrastructure.
 ```sh
 rm -rf .eil-demo .eil-repos demo/metrics.html demo/judgments.md
 ```
+
+`demo/PTR-401.reqs.json`, `demo/PTR-401.html` and `demo/PTR-401.replay.json` are
+committed, so the gate and the tamper drill work on a fresh clone with nothing
+generated. Rebuild them with `pnpm demo:reqs` if you change the corpus or the
+prompts.
 
 Everything lived in `.eil-demo/`. Nothing was installed, and nothing outside the
 repo was touched.

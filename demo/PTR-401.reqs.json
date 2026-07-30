@@ -1,0 +1,528 @@
+{
+  "schemaVersion": "1.0",
+  "metadata": {
+    "workItem": "PTR-401",
+    "title": "PTR-401: Intraday PSR limit amendment",
+    "deliveryType": {
+      "kind": "backend",
+      "tech": "legacy"
+    },
+    "createdAt": "2026-07-30T19:34:56.763Z",
+    "updatedAt": "2026-07-30T19:35:17.967Z",
+    "executionProfile": {
+      "mode": "full"
+    },
+    "generator": {
+      "agent": "eil reqs elaborate via hand-authored-during-build",
+      "model": null,
+      "version": "0.2.0",
+      "provenance": "replay"
+    },
+    "corpusMode": "fixtures"
+  },
+  "tree": {
+    "id": "REQ-ROOT",
+    "nodeKey": "ptr-401-intraday-psr-limit-amendment",
+    "statement": "PTR-401: Intraday PSR limit amendment",
+    "score": {
+      "unknowns": 8,
+      "complexity": 8,
+      "magnitude": 8,
+      "decision": "decompose",
+      "at": "2026-07-30T19:34:57.276Z",
+      "note": "nobody has decided what happens to an order already working at the venue when the limit comes down"
+    },
+    "scoreHistory": [
+      {
+        "unknowns": 8,
+        "complexity": 8,
+        "magnitude": 8,
+        "decision": "decompose",
+        "at": "2026-07-30T19:34:57.276Z",
+        "note": "nobody has decided what happens to an order already working at the venue when the limit comes down"
+      }
+    ],
+    "decision": "decompose",
+    "isLeaf": false,
+    "children": [
+      {
+        "id": "REQ-ROOT.1",
+        "parentId": "REQ-ROOT",
+        "nodeKey": "risk-ops-can-raise-and-approve-a-counterparty-li",
+        "statement": "Risk Ops can raise and approve a counterparty limit amendment that takes effect the same day.",
+        "score": {
+          "unknowns": 2,
+          "complexity": 2,
+          "magnitude": 2,
+          "decision": "leaf",
+          "at": "2026-07-30T19:34:58.784Z",
+          "note": "the two-person amendment path is written down and credit-admin enforces it, so almost nothing here is open"
+        },
+        "scoreHistory": [
+          {
+            "unknowns": 2,
+            "complexity": 2,
+            "magnitude": 2,
+            "decision": "leaf",
+            "at": "2026-07-30T19:34:58.784Z",
+            "note": "the two-person amendment path is written down and credit-admin enforces it, so almost nothing here is open"
+          }
+        ],
+        "decision": "leaf",
+        "isLeaf": true,
+        "acceptanceCriteria": [
+          {
+            "id": "AC-1",
+            "stakeholder": "Risk Ops",
+            "given": "an amendment raised in credit-admin by one Risk Ops user",
+            "when": "a second, different Risk Ops user approves it",
+            "then": [
+              "credit-admin records the amendment as approved and hands it to psr-limits the same day",
+              "the approve action is refused with a separation-of-duties reason code when the approver is the user who raised it"
+            ],
+            "observable": true
+          }
+        ],
+        "grounding": []
+      },
+      {
+        "id": "REQ-ROOT.2",
+        "parentId": "REQ-ROOT",
+        "nodeKey": "an-approved-amendment-reaches-every-gateway-s-li",
+        "statement": "An approved amendment reaches every gateway's limit snapshot on the day it is approved.",
+        "score": {
+          "unknowns": 5,
+          "complexity": 5,
+          "magnitude": 5,
+          "decision": "decompose",
+          "at": "2026-07-30T19:35:00.494Z",
+          "note": "the refresh path is described in somebody's working notes rather than a design, and its timing is unmeasured"
+        },
+        "scoreHistory": [
+          {
+            "unknowns": 5,
+            "complexity": 5,
+            "magnitude": 5,
+            "decision": "decompose",
+            "at": "2026-07-30T19:35:00.494Z",
+            "note": "the refresh path is described in somebody's working notes rather than a design, and its timing is unmeasured"
+          }
+        ],
+        "decision": "decompose",
+        "isLeaf": false,
+        "children": [
+          {
+            "id": "REQ-ROOT.2.1",
+            "parentId": "REQ-ROOT.2",
+            "nodeKey": "psr-limits-publishes-each-amended-counterparty-r",
+            "statement": "psr-limits publishes each amended counterparty record and every gateway replaces its entry in place.",
+            "score": {
+              "unknowns": 2,
+              "complexity": 2,
+              "magnitude": 2,
+              "decision": "leaf",
+              "at": "2026-07-30T19:35:02.004Z",
+              "note": "the per-counterparty publish and in-place replace is agreed and recorded, leaving only the ordering rule"
+            },
+            "scoreHistory": [
+              {
+                "unknowns": 2,
+                "complexity": 2,
+                "magnitude": 2,
+                "decision": "leaf",
+                "at": "2026-07-30T19:35:02.004Z",
+                "note": "the per-counterparty publish and in-place replace is agreed and recorded, leaving only the ordering rule"
+              }
+            ],
+            "decision": "leaf",
+            "isLeaf": true,
+            "acceptanceCriteria": [
+              {
+                "id": "AC-2",
+                "stakeholder": "Platform on-call",
+                "given": "an approved amendment for one counterparty",
+                "when": "psr-limits publishes the amended record",
+                "then": [
+                  "every gateway snapshot holds the new limit for that counterparty and no other counterparty's entry changes",
+                  "a publish older than the record already held is dropped, and the snapshot version does not go backwards"
+                ],
+                "observable": true
+              }
+            ],
+            "grounding": []
+          },
+          {
+            "id": "REQ-ROOT.2.2",
+            "parentId": "REQ-ROOT.2",
+            "nodeKey": "the-gateway-acts-on-an-amended-limit-inside-the",
+            "statement": "The gateway acts on an amended limit inside the agreed end-to-end refresh time.",
+            "score": {
+              "unknowns": 3,
+              "complexity": 2,
+              "magnitude": 3,
+              "decision": "leaf",
+              "at": "2026-07-30T19:35:05.993Z",
+              "note": "a 250ms target now exists, but its own author records that he never measured it, so it is a target and not a fact"
+            },
+            "scoreHistory": [
+              {
+                "unknowns": 5,
+                "complexity": 2,
+                "magnitude": 5,
+                "decision": "clarify",
+                "at": "2026-07-30T19:35:03.719Z",
+                "note": "the end-to-end refresh time is the largest unknown: the only figure anyone has written hedges itself"
+              },
+              {
+                "unknowns": 3,
+                "complexity": 2,
+                "magnitude": 3,
+                "decision": "leaf",
+                "at": "2026-07-30T19:35:05.993Z",
+                "note": "a 250ms target now exists, but its own author records that he never measured it, so it is a target and not a fact"
+              }
+            ],
+            "decision": "leaf",
+            "isLeaf": true,
+            "acceptanceCriteria": [
+              {
+                "id": "AC-3",
+                "stakeholder": "Risk Ops",
+                "given": "an amendment approved in credit-admin",
+                "when": "psr-limits publishes it to the gateways",
+                "then": [
+                  "the gateway evaluates the next order for that counterparty against the amended limit within 250ms of approval",
+                  "the age of each gateway's snapshot is exported as a metric"
+                ],
+                "observable": true
+              }
+            ],
+            "grounding": [],
+            "resolvedFrom": "knowledge_base",
+            "residualRef": "RU-1"
+          },
+          {
+            "id": "REQ-ROOT.2.3",
+            "parentId": "REQ-ROOT.2",
+            "nodeKey": "intraday-utilisation-is-measured-against-the-ame",
+            "statement": "Intraday utilisation is measured against the amended limit without waiting for the overnight netting cycle.",
+            "score": {
+              "unknowns": 3,
+              "complexity": 5,
+              "magnitude": 5,
+              "decision": "decompose",
+              "at": "2026-07-30T19:35:09.599Z",
+              "note": "netting is settled — end of day only — so what is left is the accumulate-only behaviour and the increase case"
+            },
+            "scoreHistory": [
+              {
+                "unknowns": 5,
+                "complexity": 5,
+                "magnitude": 5,
+                "decision": "clarify",
+                "at": "2026-07-30T19:35:07.701Z",
+                "note": "whether intraday utilisation can come down at all before the overnight cycle is not settled anywhere"
+              },
+              {
+                "unknowns": 3,
+                "complexity": 5,
+                "magnitude": 5,
+                "decision": "decompose",
+                "at": "2026-07-30T19:35:09.599Z",
+                "note": "netting is settled — end of day only — so what is left is the accumulate-only behaviour and the increase case"
+              }
+            ],
+            "decision": "decompose",
+            "isLeaf": false,
+            "children": [
+              {
+                "id": "REQ-ROOT.2.3.1",
+                "parentId": "REQ-ROOT.2.3",
+                "nodeKey": "utilisation-accumulated-intraday-is-released-onl",
+                "statement": "Utilisation accumulated intraday is released only by the overnight netting cycle.",
+                "score": {
+                  "unknowns": 2,
+                  "complexity": 2,
+                  "magnitude": 2,
+                  "decision": "leaf",
+                  "at": "2026-07-30T19:35:11.105Z",
+                  "note": "the accumulate-only behaviour is now stated plainly and the only work is holding the desk to it"
+                },
+                "scoreHistory": [
+                  {
+                    "unknowns": 2,
+                    "complexity": 2,
+                    "magnitude": 2,
+                    "decision": "leaf",
+                    "at": "2026-07-30T19:35:11.105Z",
+                    "note": "the accumulate-only behaviour is now stated plainly and the only work is holding the desk to it"
+                  }
+                ],
+                "decision": "leaf",
+                "isLeaf": true,
+                "acceptanceCriteria": [
+                  {
+                    "id": "AC-4",
+                    "stakeholder": "Risk Ops",
+                    "given": "a counterparty whose utilisation has accumulated during the day",
+                    "when": "a closing trade for that counterparty is executed before the overnight batch",
+                    "then": [
+                      "the utilisation counter for that counterparty does not decrease",
+                      "the headroom returned to the desk is unchanged by the closing trade"
+                    ],
+                    "observable": true
+                  }
+                ],
+                "grounding": []
+              },
+              {
+                "id": "REQ-ROOT.2.3.2",
+                "parentId": "REQ-ROOT.2.3",
+                "nodeKey": "an-increased-limit-gives-the-counterparty-headro",
+                "statement": "An increased limit gives the counterparty headroom as soon as the amendment is approved.",
+                "score": {
+                  "unknowns": 1,
+                  "complexity": 2,
+                  "magnitude": 2,
+                  "decision": "leaf",
+                  "at": "2026-07-30T19:35:12.816Z",
+                  "note": "an increase simply raises the number the check compares against, and the publish path is the same one"
+                },
+                "scoreHistory": [
+                  {
+                    "unknowns": 1,
+                    "complexity": 2,
+                    "magnitude": 2,
+                    "decision": "leaf",
+                    "at": "2026-07-30T19:35:12.816Z",
+                    "note": "an increase simply raises the number the check compares against, and the publish path is the same one"
+                  }
+                ],
+                "decision": "leaf",
+                "isLeaf": true,
+                "acceptanceCriteria": [
+                  {
+                    "id": "AC-5",
+                    "stakeholder": "Front office",
+                    "given": "a counterparty sitting at its current limit",
+                    "when": "an increase is approved and published",
+                    "then": [
+                      "an order rejected for credit a moment earlier is accepted once the gateway holds the increased limit",
+                      "the rejection and the acceptance are both logged with the limit version each was evaluated against"
+                    ],
+                    "observable": true
+                  }
+                ],
+                "grounding": []
+              }
+            ],
+            "grounding": [],
+            "resolvedFrom": "knowledge_base"
+          }
+        ],
+        "grounding": []
+      },
+      {
+        "id": "REQ-ROOT.3",
+        "parentId": "REQ-ROOT",
+        "nodeKey": "orders-already-working-at-the-venue-are-treated",
+        "statement": "Orders already working at the venue are treated according to an agreed rule when a limit is reduced.",
+        "score": {
+          "unknowns": 8,
+          "complexity": 5,
+          "magnitude": 8,
+          "decision": "clarify",
+          "at": "2026-07-30T19:35:14.525Z",
+          "note": "no source states what becomes of an order already at the venue when its counterparty's limit is reduced"
+        },
+        "scoreHistory": [
+          {
+            "unknowns": 8,
+            "complexity": 5,
+            "magnitude": 8,
+            "decision": "clarify",
+            "at": "2026-07-30T19:35:14.525Z",
+            "note": "no source states what becomes of an order already at the venue when its counterparty's limit is reduced"
+          }
+        ],
+        "decision": "clarify",
+        "isLeaf": false,
+        "grounding": []
+      },
+      {
+        "id": "REQ-ROOT.4",
+        "parentId": "REQ-ROOT",
+        "nodeKey": "a-presettlement-credit-check-that-cannot-be-eval",
+        "statement": "A presettlement credit check that cannot be evaluated during an amendment rejects the order.",
+        "score": {
+          "unknowns": 2,
+          "complexity": 2,
+          "magnitude": 2,
+          "decision": "leaf",
+          "at": "2026-07-30T19:35:16.422Z",
+          "note": "fail closed on an unevaluated control is stated as non-negotiable, so the behaviour is not in doubt"
+        },
+        "scoreHistory": [
+          {
+            "unknowns": 2,
+            "complexity": 2,
+            "magnitude": 2,
+            "decision": "leaf",
+            "at": "2026-07-30T19:35:16.422Z",
+            "note": "fail closed on an unevaluated control is stated as non-negotiable, so the behaviour is not in doubt"
+          }
+        ],
+        "decision": "leaf",
+        "isLeaf": true,
+        "acceptanceCriteria": [
+          {
+            "id": "AC-6",
+            "stakeholder": "Compliance",
+            "given": "a gateway that cannot evaluate the presettlement credit check while an amendment is being applied",
+            "when": "an order arrives for that counterparty",
+            "then": [
+              "the order is rejected with a credit-unavailable reason code",
+              "the rejection records which control could not be evaluated"
+            ],
+            "observable": true
+          }
+        ],
+        "grounding": []
+      }
+    ],
+    "grounding": []
+  },
+  "clarifications": [
+    {
+      "id": "CL-1",
+      "nodeId": "REQ-ROOT.2.2",
+      "question": "What end to end time was the refresh aiming for?",
+      "options": [],
+      "answer": {
+        "freetext": "Was aiming for 250ms end to end from the change landing in credit-admin to the gateway acting on it, and I think we got roughly there, but I haven't measured recently."
+      },
+      "answeredBy": {
+        "kind": "knowledge_base",
+        "name": "confluence:page:ptrd-2"
+      },
+      "answeredAt": "2026-07-30T19:35:05.489Z",
+      "resultingDetail": "Answered from confluence:page:ptrd-2 — Gateway Notes. The quote below was re-read from that document and matched character for character.",
+      "resolvedFrom": "knowledge_base",
+      "grounding": [
+        {
+          "source": "confluence",
+          "docId": "confluence:page:ptrd-2",
+          "title": "Gateway Notes",
+          "url": "https://confluence.example.com/display/PTR-DEMO/ptrd-2",
+          "quote": "Was aiming for 250ms end to end from the change landing in credit-admin to the gateway acting on it, and I think we got roughly there, but I haven't measured recently.",
+          "retrievedAt": "2026-07-30T19:35:05.488Z",
+          "traceId": "ae4e3eb8-a9bb-4fc8-bced-7f1b8fb44067",
+          "hedged": true
+        }
+      ]
+    },
+    {
+      "id": "CL-2",
+      "nodeId": "REQ-ROOT.2.3",
+      "question": "Is netting applied intraday, or does utilisation only accumulate until the overnight batch has run?",
+      "options": [],
+      "answer": {
+        "freetext": "Netting is applied end of day only, never intraday. Intraday, utilisation only goes up: every order adds its contribution and nothing comes off until the overnight batch has run."
+      },
+      "answeredBy": {
+        "kind": "knowledge_base",
+        "name": "confluence:page:ptrd-3"
+      },
+      "answeredAt": "2026-07-30T19:35:09.094Z",
+      "resultingDetail": "Answered from confluence:page:ptrd-3 — PSR limit model - notes. The quote below was re-read from that document and matched character for character.",
+      "resolvedFrom": "knowledge_base",
+      "grounding": [
+        {
+          "source": "confluence",
+          "docId": "confluence:page:ptrd-3",
+          "title": "PSR limit model - notes",
+          "url": "https://confluence.example.com/display/PTR-DEMO/ptrd-3",
+          "quote": "Netting is applied end of day only, never intraday. Intraday, utilisation only goes up: every order adds its contribution and nothing comes off until the overnight batch has run.",
+          "retrievedAt": "2026-07-30T19:35:09.094Z",
+          "traceId": "a45a12e3-57f3-4c38-b195-bf9aad2f9ce6",
+          "hedged": false
+        }
+      ]
+    },
+    {
+      "id": "CL-3",
+      "nodeId": "REQ-ROOT.3",
+      "question": "What happens to orders already working at the venue when a counterparty limit is reduced?",
+      "options": [],
+      "answeredBy": {
+        "kind": "human",
+        "name": "d.mercer"
+      },
+      "grounding": [],
+      "answer": {
+        "freetext": "Orders already working at the venue complete against the limit that was in force when they were accepted; the reduced limit binds every order received after the amendment is approved. Risk and compliance settled this together, and the decision is to be written back onto PTR-420, which currently records none."
+      },
+      "answeredAt": "2026-07-30T19:35:17.967Z",
+      "resolvedFrom": "human",
+      "resultingDetail": "Answered by d.mercer, the work item's reporter, on the authority of risk and compliance. No document in the corpus states this, so this answer carries no citation and none is implied — it is a decision that was taken, recorded as one."
+    }
+  ],
+  "residuals": [
+    {
+      "id": "RU-1",
+      "kind": "ResidualUncertainty",
+      "nodeId": "REQ-ROOT.2.2",
+      "statement": "The 250ms end-to-end refresh target is carried on a page of working notes whose author wrote, in the same sentence, that he thinks it was met and has not measured it recently. Nothing else in the corpus states a measured figure, so the build starts against a target nobody has confirmed.",
+      "mitigation": "Measure the credit-admin to gateway refresh on the current kit before build starts and replace the target with the measured figure. s.iyer owns the publish-ordering write-up this depends on.",
+      "acceptedBy": {
+        "kind": "human",
+        "name": "s.iyer"
+      },
+      "acceptedAt": "2026-07-30T19:35:17.967Z"
+    }
+  ],
+  "traceability": {
+    "AC-1": "REQ-ROOT.1",
+    "AC-2": "REQ-ROOT.2.1",
+    "AC-3": "REQ-ROOT.2.2",
+    "AC-4": "REQ-ROOT.2.3.1",
+    "AC-5": "REQ-ROOT.2.3.2",
+    "AC-6": "REQ-ROOT.4"
+  },
+  "coverage": {
+    "leaves": 6,
+    "acs": 6,
+    "unknownsTotal": 10,
+    "grounded": 2,
+    "escalated": 1,
+    "carried": 1
+  },
+  "analysis": {
+    "ranAt": "2026-07-30T19:35:17.967Z",
+    "checksRun": 46,
+    "findings": []
+  },
+  "signoff": {
+    "result": "partial",
+    "approvers": [
+      {
+        "name": "d.mercer",
+        "role": "PO",
+        "kind": "human",
+        "at": "2026-07-30T19:35:17.967Z"
+      },
+      {
+        "name": "s.iyer",
+        "role": "TechLead",
+        "kind": "human",
+        "at": "2026-07-30T19:35:17.967Z"
+      },
+      {
+        "name": "n.okafor",
+        "role": "QA",
+        "kind": "human",
+        "at": "2026-07-30T19:35:17.967Z"
+      }
+    ]
+  }
+}

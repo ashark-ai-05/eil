@@ -169,3 +169,47 @@ describe("renderMarkdown stamps a refused artefact", () => {
     expect(renderMarkdown(minimalBody())).not.toContain("REFUSED");
   });
 });
+
+/**
+ * Provenance has to survive the projection, because the projection is what the
+ * room actually reads. A replayed run that renders identically to a live one
+ * would put the whole honesty claim behind a JSON file nobody opens.
+ */
+describe("both projections say where the judgments came from", () => {
+  function withGenerator(over: Partial<ReqsBody["metadata"]["generator"]>): ReqsBody {
+    const b = clone(minimalBody());
+    b.metadata.generator = {
+      ...b.metadata.generator,
+      ...over,
+    } as ReqsBody["metadata"]["generator"];
+    return b;
+  }
+
+  it("words a replay so it cannot be read as a live model call", () => {
+    const b = withGenerator({
+      agent: "eil reqs elaborate via copilot",
+      model: null,
+      provenance: "replay",
+    });
+    // The markdown projection escapes the parentheses, because the producer
+    // name is authored content like everything else on the page.
+    expect(renderHtml(b)).toContain("replayed from a recorded run (copilot)");
+    expect(renderMarkdown(b)).toContain("judgments: replayed from a recorded run \\(copilot\\)");
+    for (const out of [renderHtml(b), renderMarkdown(b)]) {
+      expect(out).toContain("judgments");
+      // The word "live" must not appear on that line under any spelling.
+      expect(out).not.toContain("judgments: live");
+    }
+  });
+
+  it("words a live run as live, and names the model when there is one", () => {
+    const b = withGenerator({
+      agent: "eil reqs elaborate via maas",
+      model: "nemotron",
+      provenance: "live",
+    });
+    expect(renderMarkdown(b)).toContain("judgments: live \\(maas, nemotron\\)");
+    expect(renderHtml(b)).toContain("live (maas, nemotron)");
+    expect(renderMarkdown(b)).not.toContain("replayed");
+  });
+});

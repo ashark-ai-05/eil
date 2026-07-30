@@ -15,7 +15,7 @@ export function minimalBody(): ReqsBody {
       createdAt: at,
       updatedAt: at,
       executionProfile: { mode: "full" },
-      generator: { agent: "copilot", model: null, version: "0.1.0" },
+      generator: { agent: "copilot", model: null, version: "0.1.0", provenance: "live" },
       corpusMode: "fixtures",
     },
     tree: {

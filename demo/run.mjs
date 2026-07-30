@@ -266,18 +266,49 @@ if (!has("skip-secrets")) {
   );
 }
 
+// Elaborate the work item, replaying a recorded model run.
+//
+// This is the pipeline actually running: real retrieval, the real resolution
+// cascade, every cited quote re-read out of the catalog, and the real gate. What
+// is replayed is only the model's own bounded judgments — two scoring bands, one
+// question, the child statements, the acceptance criteria, and the answers/quote
+// ruling — out of demo/PTR-401.replay.json.
+//
+// Replayed on purpose, and said out loud rather than hidden: a live model in
+// front of a room is the highest-variance thing in it, and the artefact this
+// produces stamps itself `provenance: replay` so nobody downstream can mistake
+// it for a captured production run. EIL_LLM_FIXTURE is respected if the
+// presenter has already set it — including at a live provider's pack.
+//
+// It writes to the run directory, not over the committed artefact: what comes
+// out here is REFUSED, correctly, because it carries a question only a human can
+// answer. The committed demo/PTR-401.reqs.json is that same run after the humans
+// worked the refusal, and it is what the gate and the tamper drill then use.
+const PACK = "demo/PTR-401.replay.json";
+const REQS = "demo/PTR-401.reqs.json";
+const ELABORATED = join(DATA, "PTR-401.elaborated.reqs.json");
+
+if (!has("skip-corpus") && existsSync(PACK)) {
+  env.EIL_LLM_FIXTURE = process.env.EIL_LLM_FIXTURE ?? PACK;
+  run(
+    "Elaborate the work item",
+    "The model's judgments are REPLAYED from a recorded run, so the demo is reproducible in this room. Everything doing the checking is live: retrieval, the cascade, and every citation re-read out of the corpus. It comes out REFUSED — one question nobody in the corpus answers, and one citation from a source that hedges.",
+    ["reqs", "elaborate", "PTR-401", "--out", ELABORATED],
+    { optional: true },
+  );
+}
+
 // The gate. Skipped rather than failed when the artefact is absent, because a
 // fresh clone has not run the elaboration yet and a missing file is not a
 // refusal — the two must never look alike. But skipping is not a detail: these
 // are the two beats the whole demo builds to, and a one-line parenthetical
 // scrolls past. So the skip is a banner that names the file, the command that
 // creates it, and what did not happen.
-const REQS = "demo/PTR-401.reqs.json";
 const gateRan = existsSync(REQS);
 if (gateRan) {
   run(
     "Run the gate over a requirements artefact",
-    "46 checks. Every generated field recomputed, every cited quote re-read out of the corpus.",
+    "The same run, after three humans worked the refusal: the escalation answered, the hedged citation carried as a named residual, and only then signed. 46 checks. Every generated field recomputed, every cited quote re-read out of the corpus.",
     ["reqs", "check", REQS],
   );
 
@@ -294,7 +325,7 @@ if (gateRan) {
   warn("  !!  THE TWO MOST IMPORTANT BEATS OF THIS DEMO DID NOT RUN  !!");
   warn("");
   warn(`  Missing file:   ${REQS}`);
-  warn(`  Create it with: pnpm eil reqs elaborate PTR-401 --out ${REQS}`);
+  warn(`  Create it with: pnpm demo:reqs`);
   warn("");
   warn("  NOT RUN  the gate          eil reqs check — 46 checks over a signed artefact");
   warn("  NOT RUN  the tamper drill  node demo/tamper.mjs — six edits, six refusals");

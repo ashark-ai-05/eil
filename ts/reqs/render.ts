@@ -140,6 +140,24 @@ function clarificationGroups(body: ReqsBody): {
 const answeredBy = (c: Clarification): string =>
   c.answeredBy ? `${c.answeredBy.kind} · ${c.answeredBy.name}` : "unanswered";
 
+/** `metadata.generator.agent` is written by the elaboration loop as
+ *  "eil reqs elaborate via <producer>"; the projection wants the producer. */
+const AGENT_PREFIX = "eil reqs elaborate via ";
+
+/**
+ * Where the judgments in this artefact came from, in words a non-engineer
+ * reads once and understands — and never a phrase under which a replay could
+ * be mistaken for a model that was called this morning.
+ */
+export function judgmentsLine(generator: ReqsBody["metadata"]["generator"]): string {
+  const agent = generator.agent;
+  const via = agent.startsWith(AGENT_PREFIX) ? agent.slice(AGENT_PREFIX.length) : agent;
+  const who = generator.model ? `${via}, ${generator.model}` : via;
+  return generator.provenance === "replay"
+    ? `replayed from a recorded run (${who})`
+    : `live (${who})`;
+}
+
 // ── HTML ──
 
 function bannerHtml(findings: Finding[] | undefined): string {
@@ -249,6 +267,7 @@ export function renderHtml(body: ReqsBody, findings?: Finding[]): string {
   <h2>Metadata</h2>
   <div class="meta">
     <div>corpus mode</div><div><span class="corpus ${esc(m.corpusMode)}">${esc(m.corpusMode)}</span></div>
+    <div>judgments</div><div>${esc(judgmentsLine(m.generator))}</div>
     <div>created</div><div>${esc(m.createdAt)}</div>
     <div>updated</div><div>${esc(m.updatedAt)}</div>
     <div>execution profile</div><div>${esc(m.executionProfile.mode)}</div>
@@ -363,6 +382,7 @@ export function renderMarkdown(body: ReqsBody, findings?: Finding[]): string {
   return `${bannerMd(findings)}# ${mdEsc(m.workItem)} — ${mdEsc(m.title)}
 
 - corpus mode: **${m.corpusMode}**
+- judgments: ${mdEsc(judgmentsLine(m.generator))}
 - created: ${m.createdAt}
 - updated: ${m.updatedAt}
 - execution profile: ${m.executionProfile.mode}

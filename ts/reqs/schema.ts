@@ -202,6 +202,17 @@ export const ReqsBody = z.object({
       agent: z.string(),
       model: z.string().nullish(),
       version: z.string(),
+      /**
+       * REQUIRED, and required for the same reason `corpusMode` is: an artefact
+       * that cannot say where its judgments came from should not validate.
+       *
+       * "live"   — a provider was called directly during this run.
+       * "replay" — the judgments came out of a recorded pack (EIL_LLM_FIXTURE).
+       *            `agent` and `model` then name what produced the RECORDING,
+       *            so the artefact says both what produced these judgments and
+       *            that they were replayed rather than called.
+       */
+      provenance: z.enum(["live", "replay"]),
     }),
     /** stamped so no run can be misrepresented as the other */
     corpusMode: z.enum(["fixtures", "live"]),

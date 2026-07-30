@@ -872,6 +872,12 @@ reqs
   .option("--kind <kind>", `delivery kind: ${DELIVERY_KINDS.join(" | ")}`, "backend")
   .option("--tech <tech>", `delivery technology: ${DELIVERY_TECH.join(" | ")}`, "legacy")
   .option("--ask <name>", "the human named on every escalated clarification")
+  .option(
+    "--record <path>",
+    "write a replay pack of this run (prompt hash, reply, measured latency) — " +
+      "replay it later with EIL_LLM_FIXTURE=<path>",
+  )
+  .option("--record-note <text>", "free text stored in the recorded pack's provenance block")
   .action(async (workItem: string, opts) => {
     // Declared facts about the delivery, not model judgments — so they are
     // options with defaults rather than another thing to ask a model.
@@ -904,11 +910,18 @@ reqs
           tech: opts.tech as (typeof DELIVERY_TECH)[number],
         },
         ...(opts.ask ? { escalateTo: opts.ask } : {}),
+        ...(opts.record ? { record: opts.record } : {}),
+        ...(opts.recordNote ? { recordNote: opts.recordNote } : {}),
       });
       const findings = body.analysis?.findings ?? [];
       const errors = findings.filter((f) => f.severity === "error");
       const cov = body.coverage;
       console.log(`wrote ${out}`);
+      // Said on every run, not only on a replay: "which of these two was this?"
+      // must never be a question the operator has to work out afterwards.
+      const { judgmentsLine } = await import("./reqs/render.js");
+      console.log(`  judgments: ${judgmentsLine(body.metadata.generator)}`);
+      if (opts.record) console.log(`  recorded the run to ${opts.record}`);
       if (cov)
         console.log(
           `  ${cov.leaves} leaves · ${cov.acs} ACs · ${cov.grounded} grounded · ` +

@@ -377,8 +377,13 @@ const selected = only === null ? TAMPERS : TAMPERS.filter((t) => String(t.n) ===
 
 const dir = mkdtempSync(join(tmpdir(), "eil-tamper-"));
 
-/** The one command that produces the real demo artefact — printed wherever it is missing. */
-const GENERATE_CMD = `pnpm eil reqs elaborate PTR-401 --out ${DEFAULT_SOURCE}`;
+/**
+ * The one command that produces the real demo artefact — printed wherever it is
+ * missing. It runs `eil reqs elaborate` against the recorded model run, then
+ * applies the human pass the refusal asks for: the elaboration alone cannot
+ * write a sign-off, and tamper 5 needs one.
+ */
+const GENERATE_CMD = "pnpm demo:reqs";
 
 let source = positional[0] ?? DEFAULT_SOURCE;
 let fellBack = false;

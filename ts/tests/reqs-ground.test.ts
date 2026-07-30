@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Db } from "../db.js";
-import { FixtureProvider, type Provider, getProvider } from "../llm/index.js";
+import {
+  FixtureProvider,
+  type Provider,
+  REPLAY_SUFFIX,
+  RecordingProvider,
+  getProvider,
+  normalisePack,
+  promptKey,
+} from "../llm/index.js";
 import { analyse } from "../reqs/analyse.js";
 import { REGISTERED_CONSTANTS as K } from "../reqs/constants.js";
 import { type ElaborateDeps, detectCorpusMode, elaborate } from "../reqs/elaborate.js";
@@ -397,10 +405,112 @@ describe("FixtureProvider", () => {
       const provider = getProvider("fixture");
       expect(provider.name).toBe("fixture");
       expect((await provider.complete("anything")).text).toBe("recorded");
+      // A pack pointed at by the environment selects replay on its own: one
+      // decision should not need two variables that can disagree.
+      expect(getProvider().name).toBe("fixture");
     } finally {
       if (previous === undefined) delete process.env.EIL_LLM_FIXTURE;
       else process.env.EIL_LLM_FIXTURE = previous;
     }
+  });
+
+  /**
+   * The pack format carries provenance because a replay that cannot say what
+   * produced it is indistinguishable from a live call — the exact confusion
+   * this whole phase exists to make impossible.
+   */
+  it("reports the pack's own provider and model, never the literal 'fixture'", async () => {
+    const prompt = "what is the staleness cutoff?";
+    const provider = new FixtureProvider({
+      recordedAt: "2026-07-30T09:00:00.000Z",
+      provider: "copilot",
+      model: "gpt-5.2",
+      note: "captured while rehearsing",
+      replies: { [promptKey(prompt)]: { text: "5s", latencyMs: 0 } },
+    });
+
+    const res = await provider.complete(prompt);
+    // The provider that produced the TEXT, and separately the fact of replay.
+    expect(res.provider).toBe("copilot");
+    expect(res.model).toBe("gpt-5.2");
+    expect(res.provenance).toBe("replay");
+    // The provider itself is still the fixture machinery; only the RESULT
+    // speaks for the recording.
+    expect(provider.name).toBe("fixture");
+  });
+
+  it("accepts the old flat Record<string, string> pack shape", () => {
+    const pack = normalisePack({ abc: "one", default: "two" });
+    expect(pack.replies).toEqual({ abc: { text: "one" }, default: { text: "two" } });
+    // A pack with no provenance to report claims none: no model, no timing, and
+    // the honest under-claim of "fixture" as the producer.
+    expect(pack.provider).toBe("fixture");
+    expect(pack.model).toBeNull();
+    expect(pack.replies.abc?.latencyMs).toBeUndefined();
+  });
+
+  it("sleeps the recorded latency, so a replayed run keeps the rhythm of a real one", async () => {
+    const prompt = "how long did this take?";
+    const provider = new FixtureProvider({
+      recordedAt: "2026-07-30T09:00:00.000Z",
+      provider: "copilot",
+      model: null,
+      note: "",
+      replies: { [promptKey(prompt)]: { text: "ok", latencyMs: 120 } },
+    });
+
+    const started = performance.now();
+    const res = await provider.complete(prompt);
+    const elapsed = performance.now() - started;
+    // Reproduced, not invented: the reported latency is the RECORDED one, and
+    // the call really took about that long.
+    expect(res.latencyMs).toBe(120);
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+
+    // A pack with no recorded latency waits for nothing at all.
+    const instant = new FixtureProvider({ default: "ok" });
+    const before = performance.now();
+    expect((await instant.complete("anything")).latencyMs).toBe(0);
+    expect(performance.now() - before).toBeLessThan(80);
+  });
+});
+
+/** Recording is the other half of replay: without it a pack can only be typed
+ *  out by hand, which is the thing the pack is supposed to replace. */
+describe("RecordingProvider", () => {
+  it("records prompt hash, reply and MEASURED latency, and replays identically", async () => {
+    const dir = await repoWith({});
+    const path = join(dir, "pack.json");
+    const inner: Provider = {
+      name: "copilot",
+      async complete(_prompt) {
+        await new Promise((r) => setTimeout(r, 60));
+        return { text: "recorded reply", provider: "copilot", model: "gpt-5.2" };
+      },
+    };
+    const recorder = new RecordingProvider(inner, path, "why this pack exists");
+
+    const live = await recorder.complete("a prompt");
+    expect(live.text).toBe("recorded reply");
+    // The wrapper is transparent: it does not rename the backend it wraps.
+    expect(recorder.name).toBe("copilot");
+
+    // Written as the run proceeds, so a run that dies half way still leaves a
+    // usable pack of what it got through.
+    const pack = normalisePack(JSON.parse(await readFile(path, "utf-8")));
+    expect(pack.provider).toBe("copilot");
+    expect(pack.model).toBe("gpt-5.2");
+    expect(pack.note).toBe("why this pack exists");
+    expect(Date.parse(pack.recordedAt)).not.toBeNaN();
+    const recorded = pack.replies[promptKey("a prompt")];
+    expect(recorded?.text).toBe("recorded reply");
+    // The wall time this call really took, not a number anybody chose.
+    expect(recorded?.latencyMs).toBeGreaterThanOrEqual(50);
+
+    const replayed = await new FixtureProvider(pack).complete("a prompt");
+    expect(replayed.text).toBe("recorded reply");
+    expect(replayed.provider).toBe("copilot");
+    expect(replayed.provenance).toBe("replay");
   });
 });
 
@@ -413,15 +523,17 @@ describe("FixtureProvider", () => {
  */
 type Scripted = Partial<Record<"score" | "children" | "question" | "criteria" | "judge", string>>;
 
+function pickReply(replies: Scripted, prompt: string): string | undefined {
+  if (prompt.includes(AC_PROMPT)) return replies.criteria;
+  if (prompt.includes(CHILDREN_PROMPT)) return replies.children;
+  if (prompt.includes(QUESTION_PROMPT)) return replies.question;
+  if (prompt.includes(JUDGE_PROMPT)) return replies.judge;
+  if (prompt.includes(SCORE_PROMPT)) return replies.score;
+  return undefined;
+}
+
 function scriptedProvider(replies: Scripted, seen: string[] = []): Provider {
-  const pick = (prompt: string): string | undefined => {
-    if (prompt.includes(AC_PROMPT)) return replies.criteria;
-    if (prompt.includes(CHILDREN_PROMPT)) return replies.children;
-    if (prompt.includes(QUESTION_PROMPT)) return replies.question;
-    if (prompt.includes(JUDGE_PROMPT)) return replies.judge;
-    if (prompt.includes(SCORE_PROMPT)) return replies.score;
-    return undefined;
-  };
+  const pick = (prompt: string): string | undefined => pickReply(replies, prompt);
   return {
     name: "fixture",
     async complete(prompt, opts) {
@@ -586,12 +698,95 @@ describe("elaborate", () => {
     for (const row of logged) {
       expect(row.text).toContain("llm_calls");
       expect(row.params[0]).toBe("fixture"); // provider
-      expect(row.params[2]).toBe("reqs-elaborate"); // caller
+      // These replies were REPLAYED out of a pack, and the ledger says so. The
+      // caller carries the marker, not the provider column: `provider` answers
+      // "who produced this judgment" and `caller` answers "what did this run
+      // spend" — and a replay spent nothing.
+      expect(row.params[2]).toBe(`reqs-elaborate${REPLAY_SUFFIX}`); // caller
       // CliProvider reports no usage, so counts stay null rather than invented.
       expect(row.params[3]).toBeNull();
       expect(row.params[4]).toBeNull();
       expect(row.params[6]).toBe(true); // ok
     }
+  });
+
+  /**
+   * The same rule `corpusMode` holds for the corpus, held for the judgments: a
+   * run that replayed a pack must not be presentable as a live model call.
+   */
+  it("stamps generator.provenance from the replies, and names what produced them", async () => {
+    const pick = (prompt: string): string => pickReply(BASE_REPLIES, prompt) ?? "";
+    const replayed = await elaborate("PTR-401", deps());
+    // BASE_REPLIES goes through FixtureProvider, so this run IS a replay — and
+    // the legacy flat pack it uses has no producer to name beyond itself.
+    expect(replayed.metadata.generator.provenance).toBe("replay");
+    expect(replayed.metadata.generator.agent).toBe("eil reqs elaborate via fixture");
+
+    // A pack that names its producer puts THAT in the artefact: the reader is
+    // told what produced the judgments AND that they were replayed.
+    const pack = {
+      recordedAt: "2026-07-30T09:00:00.000Z",
+      provider: "copilot",
+      model: "gpt-5.2",
+      note: "",
+      replies: {} as Record<string, { text: string }>,
+    };
+    const viaPack: Provider = {
+      name: "fixture",
+      complete: (prompt, opts) =>
+        new FixtureProvider({ ...pack, replies: { default: { text: pick(prompt) } } }).complete(
+          prompt,
+          opts,
+        ),
+    };
+    const named = await elaborate("PTR-401", deps({ provider: viaPack }));
+    expect(named.metadata.generator.provenance).toBe("replay");
+    expect(named.metadata.generator.agent).toBe("eil reqs elaborate via copilot");
+    expect(named.metadata.generator.model).toBe("gpt-5.2");
+
+    // And a provider that answers for itself is live, with no replay marker.
+    const liveProvider: Provider = {
+      name: "maas",
+      async complete(prompt) {
+        return { text: pick(prompt), provider: "maas", model: "nemotron" };
+      },
+    };
+    const live = await elaborate("PTR-401", deps({ provider: liveProvider }));
+    expect(live.metadata.generator.provenance).toBe("live");
+    expect(live.metadata.generator.agent).toBe("eil reqs elaborate via maas");
+  });
+
+  it("records the run to a pack that replays to the same artefact", async () => {
+    const pick = (prompt: string): string => pickReply(BASE_REPLIES, prompt) ?? "";
+    const dir = await repoWith({});
+    const path = join(dir, "pack.json");
+    const recorded = await elaborate(
+      "PTR-401",
+      deps({
+        provider: {
+          name: "maas",
+          async complete(p) {
+            return { text: pick(p), provider: "maas", model: "nemotron" };
+          },
+        },
+        record: path,
+        recordNote: "recorded while rehearsing",
+      }),
+    );
+    expect(recorded.metadata.generator.provenance).toBe("live");
+
+    const pack = normalisePack(JSON.parse(await readFile(path, "utf-8")));
+    expect(pack.provider).toBe("maas");
+    expect(pack.model).toBe("nemotron");
+    expect(pack.note).toBe("recorded while rehearsing");
+    expect(Object.keys(pack.replies).length).toBeGreaterThan(0);
+
+    // Replaying the pack reproduces the same tree from the same prompts — which
+    // is the whole claim a recorded run makes.
+    const replayed = await elaborate("PTR-401", deps({ provider: new FixtureProvider(pack) }));
+    expect(replayed.tree).toEqual(recorded.tree);
+    expect(replayed.metadata.generator.provenance).toBe("replay");
+    expect(replayed.metadata.generator.agent).toBe("eil reqs elaborate via maas");
   });
 
   it("stamps corpusMode from the catalog it actually read, not from a flag", async () => {

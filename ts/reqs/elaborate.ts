@@ -41,6 +41,7 @@ import type { Db } from "../db.js";
 import {
   type LLMResult,
   type Provider,
+  RecordingProvider,
   getProvider,
   logCall,
   parseJsonReply,
@@ -91,6 +92,11 @@ export interface ElaborateDeps {
   /** injected (tests); otherwise selected by EIL_LLM_PROVIDER */
   provider?: Provider | undefined;
   providerName?: string | undefined;
+  /** write a replay pack of this run to this path, as it proceeds. Wraps
+   *  WHICHEVER provider was selected, so recording works on any backend. */
+  record?: string | undefined;
+  /** free text stored in the pack's provenance block */
+  recordNote?: string | undefined;
   /** the work item's title and prose; read from the catalog when absent */
   title?: string | undefined;
   brief?: string | undefined;
@@ -184,6 +190,10 @@ class Elaboration {
   private nodes = 0;
   private clCount = 0;
   private model: string | null = null;
+  /** what the replies SAID produced them — on a replay that is the pack's
+   *  provider, not the fixture machinery that read the pack */
+  private producer: string;
+  private replayed = false;
 
   constructor(
     private readonly workItem: string,
@@ -192,16 +202,29 @@ class Elaboration {
     private readonly escalateTo: string,
     private readonly deps: ElaborateDeps,
   ) {
-    this.provider = deps.provider ?? getProvider(deps.providerName);
+    const selected = deps.provider ?? getProvider(deps.providerName);
+    // Recording wraps whatever was selected, so `--record` works on every
+    // backend and cannot change which backend answers.
+    this.provider =
+      deps.record === undefined
+        ? selected
+        : new RecordingProvider(selected, deps.record, deps.recordNote ?? "");
+    this.producer = this.provider.name;
     this.maxNodes = deps.maxNodes ?? DEFAULT_MAX_NODES;
   }
 
   get providerName(): string {
-    return this.provider.name;
+    return this.producer;
   }
 
   get generatorModel(): string | null {
     return this.model;
+  }
+
+  /** "replay" the moment any reply reported itself as one — a run that replayed
+   *  even one judgment is not a live run. */
+  get provenance(): "live" | "replay" {
+    return this.replayed ? "replay" : "live";
   }
 
   get ledger(): Clarification[] {
@@ -246,6 +269,8 @@ class Elaboration {
         throw new Error(`${CALLER}: model call failed: ${String(err?.message ?? err)}`);
       }
       if (result.model) this.model = result.model;
+      if (result.provider) this.producer = result.provider;
+      if (result.provenance === "replay") this.replayed = true;
       try {
         const reply = parseJsonReply(result.text);
         await this.record(result, true);
@@ -588,6 +613,9 @@ export async function elaborate(workItem: string, deps: ElaborateDeps): Promise<
         agent: `eil reqs elaborate via ${loop.providerName}`,
         model: loop.generatorModel,
         version: await version(),
+        // Recorded from the replies themselves, not from a flag: a run that
+        // replayed a pack cannot stamp itself as a live model call.
+        provenance: loop.provenance,
       },
       corpusMode,
     },

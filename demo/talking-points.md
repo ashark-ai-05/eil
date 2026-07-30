@@ -113,6 +113,15 @@ Say the honest bit too — it's stronger, not weaker:
 > Same input, same answer, every time. There's no model anywhere in that. The
 > thing that judges the work isn't the thing that did the work.
 
+And say this while it's running — it's a strength, so don't bury it:
+
+> The model's answers here are a recording of a run, not a live call, so this is
+> reproducible in the room and you'll get the same document tomorrow.
+>
+> Everything doing the checking is live: the retrieval, the forty-six checks, and
+> the re-reading of every quote out of the corpus. Either way the citations get
+> verified against the actual pages — that part never trusts the model.
+
 ---
 
 ## 4 — Where the answer came from
@@ -124,9 +133,9 @@ Open `demo/PTR-401.html`.
 Point at a citation:
 
 > That one came out of a page called "Gateway Notes." No labels, last edited
-> fourteen months ago by someone who's left. The answer is in the first
-> paragraph. Nobody was ever going to find that page. This found it in about
-> forty milliseconds.
+> fourteen months ago by someone who's left, and it's somebody's notes to self.
+> The answer is halfway down it. Nobody was ever going to find that page. This
+> found it in about forty milliseconds.
 
 Then switch to the browser and put "Gateway Notes" up in Confluence next to the
 citation. Let the room read the sentence in the page and the sentence in the
@@ -156,10 +165,11 @@ Then the line worth pausing on:
 
 If someone asks about the hedge marker:
 
-> That page didn't say "the cutoff is five seconds." It said "I think it's five
-> seconds, check with the team." So it's cited, and it's flagged as hedged, and
-> it carries a risk somebody has to accept by name. It doesn't turn someone's
-> guess into a fact just because it's now in a document.
+> That page didn't say "the refresh takes 250 milliseconds." It said it was
+> aiming for 250, that the author thinks it got roughly there, and that he hasn't
+> measured it recently. So it's cited, it's flagged as hedged, and it carries a
+> risk that s.iyer has accepted by name. It doesn't turn someone's guess into a
+> fact just because it's now in a document.
 
 ---
 
@@ -238,8 +248,7 @@ Say these yourself. It buys more than it costs.
 - **Embeddings unavailable.** Say it's running on text search only. Do not use
   the fake embedder and do not call it semantic search.
 - **`tamper.mjs` exits 1 saying it skipped tampers.** The artefact hasn't been
-  generated. Run:
-  `pnpm eil reqs elaborate PTR-401 --out demo/PTR-401.reqs.json`
+  generated. Run: `pnpm demo:reqs`
 - **Grafana.** Not showing it. Needs Docker. `eil report` instead.
 
 ---
