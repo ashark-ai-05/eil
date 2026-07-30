@@ -12,6 +12,17 @@ if you lose the thread. Say them in your own words.
 | 5 | What it's worth, and what I'm asking for | 11:30 – 13:30 |
 | 6 | Questions | 13:30 – 15:00 |
 
+**Before the room comes in**, in the terminal you will use:
+
+```sh
+export EIL_DATABASE_URL=pglite://.eil-demo
+pnpm eil reqs check demo/PTR-401.reqs.json    # expect: 46 checks, 0 errors, PASSED
+```
+
+If that says PASSED you are ready. If it refuses on `CLARIFY-005`, the terminal
+is pointed at the wrong catalog — set the variable above and run it again. Do
+not skip this; it is the one setup mistake that makes the gate look broken.
+
 Have open: a terminal, `demo/PTR-401.html` in a browser tab, and the PTR-DEMO
 Confluence page **Gateway Notes** in a third tab — you show that one in beat 4
 so the room can see where the text lives. The demo itself never touches

@@ -173,8 +173,15 @@ silently accept the next.
 ### Beat 5 — the gate
 
 ```sh
+export EIL_DATABASE_URL=pglite://.eil-demo    # if it is not already set
 pnpm eil reqs check demo/PTR-401.reqs.json
 ```
+
+`CLARIFY-005` re-reads every cited document out of the catalog, so this command
+needs one. Point it somewhere unmigrated and it refuses the *clean* artefact —
+correctly, since it cannot verify the citations, but it reads like the gate
+failing. `demo/run.mjs` and `demo/tamper.mjs` set the variable themselves; a
+command typed by hand does not.
 
 The artefact was produced by `eil reqs elaborate`, replaying a recorded model
 run — see [Record and replay](#record-and-replay) below, and say so out loud.

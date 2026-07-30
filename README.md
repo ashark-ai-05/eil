@@ -68,6 +68,9 @@ token storage: **[docs/ingestion.md](docs/ingestion.md)**.
 ## Gating what an agent produces
 
 ```sh
+# The gate re-reads every cited document out of the catalog, so point at one:
+export EIL_DATABASE_URL=pglite://.eil-demo
+
 pnpm eil reqs check demo/PTR-401.reqs.json          # the gate: 46 checks, exit 1 on refusal
 pnpm eil reqs check demo/PTR-401.reqs.json --json   # the same result as machine-readable JSON
 pnpm eil reqs check demo/PTR-401.reqs.json --mode lint   # GATE family downgraded, for mid-loop use
