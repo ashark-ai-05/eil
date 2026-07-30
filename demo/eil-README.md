@@ -9,6 +9,11 @@ before, and what a colleague reads to run it without you.
 > the wrong one in front of the wrong room is the most expensive mistake
 > available here.
 
+For a one-page picture to put on a second screen — the five steps, the cost
+mechanic, and what else could be built on the same substrate — open
+[docs/eil-platform.html](../docs/eil-platform.html). The full wiring diagram is
+[docs/system-map.html](../docs/system-map.html).
+
 ```sh
 node demo/eil.mjs
 ```
