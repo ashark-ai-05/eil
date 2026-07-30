@@ -1,0 +1,24 @@
+{
+  "key": "PTR-388",
+  "url": "https://jira.example.com/browse/PTR-388",
+  "fields": {
+    "summary": "Credit check rejected valid orders after psr-limits restart",
+    "status": "Done",
+    "issuetype": "Bug",
+    "project": "PTR",
+    "reporter": "s.iyer",
+    "created": "2025-03-04T07:55:00+00:00",
+    "updated": "2025-03-19T16:10:00+00:00",
+    "description": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\npsr-limits was restarted on Tuesday morning during a patching window. For about\nninety seconds afterwards ptc-gateway rejected every order that needed a credit\ncheck — a little over 4,100 orders across two XDEM sessions — with a\ncredit-unavailable reason code. Clients noticed and the desk had to explain it.\n\nRoot cause is that the gateways came up holding nothing and psr-limits had not\nfinished loading, so the check could not be evaluated at all.\n",
+    "comments": [
+      {
+        "author": "s.iyer",
+        "body": "For the record, the rejections were correct. The market access controls page is explicit that a pre-trade control which cannot be evaluated must reject the order, and that is exactly what happened. The defect is that we restarted into an empty snapshot in the first place. Fix is warm-up: psr-limits loads and publishes a full set before it accepts traffic, and ptc-gateway will not open a venue session until it holds a snapshot. We are not relaxing the check, and I would rather nobody proposed it again."
+      },
+      {
+        "author": "n.okafor",
+        "body": "Regression case added — restart psr-limits under load and assert the gateway does not open a session early. Passing on the release candidate."
+      }
+    ]
+  }
+}

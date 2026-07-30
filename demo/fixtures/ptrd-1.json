@@ -1,0 +1,13 @@
+{
+  "id": "ptrd-1",
+  "title": "Pre-Trade Risk Controls — Architecture Overview",
+  "url": "https://confluence.example.com/display/PTR-DEMO/ptrd-1",
+  "author": "s.iyer",
+  "created": "2024-09-03T10:20:00+00:00",
+  "updated": "2026-03-11T15:05:00+00:00",
+  "ancestors": [
+    "PTR-DEMO"
+  ],
+  "acl_groups": [],
+  "body": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\n## What sits where\n\nEvery order we send to XDEM on behalf of a client passes through ptc-gateway\nfirst. ptc-gateway is the only one of these components in the synchronous order\npath: it evaluates the control set — order size, price collar, restricted\ninstrument list, and the presettlement credit check — and then either forwards\nthe order onto the venue session or rejects it back to the client with a reason\ncode. Nothing else is permitted in that path.\n\nThe credit check does not leave the process. ptc-gateway answers it out of\npsr-cache, an in-process snapshot of the current limit and utilisation picture.\npsr-cache is fed by psr-limits, which owns limit state, holds the utilisation\ncounters and decides what the numbers actually are. Behind psr-limits again sits\ncredit-admin, which is where a person changes a limit; credit-admin writes to\npsr-limits and never talks to a gateway directly.\n\nFront to back, then: ptc-gateway, then psr-cache, then psr-limits, then\ncredit-admin. Only the first two are anywhere near latency sensitive. The\nfurther along that chain you go the more it looks like an ordinary internal\nservice with a database behind it.\n\n## Before you change anything\n\nRead PTR-388. It is the rejection burst after a psr-limits restart and it is the\nreason the failure behaviour in the credit path is what it is. People who have\nnot read it tend to arrive with a proposal to make the check softer.\n\nLimit administration itself — who may change a number, and what approvals apply\nto it — is documented elsewhere and out of scope here.\n\nThe attached diagram is from the original design review and is still roughly\nright, except the box labelled risk-gateway, which is now ptc-gateway.\n"
+}

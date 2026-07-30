@@ -1,0 +1,24 @@
+{
+  "key": "PTR-392",
+  "url": "https://jira.example.com/browse/PTR-392",
+  "fields": {
+    "summary": "Add maker-checker to credit-admin limit changes",
+    "status": "Done",
+    "issuetype": "Story",
+    "project": "PTR",
+    "reporter": "d.mercer",
+    "created": "2025-03-20T10:05:00+00:00",
+    "updated": "2025-06-11T13:20:00+00:00",
+    "description": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nA limit change in credit-admin can currently be made and take effect on the\nauthority of one Risk Ops user. Audit have asked for maker-checker: the user who\nraises an amendment must not be the user who approves it, and credit-admin should\nenforce that itself rather than leaving it to procedure and a runbook.\n",
+    "comments": [
+      {
+        "author": "n.okafor",
+        "body": "Tested in UAT with two Risk Ops accounts. d.mercer raised the amendment and was refused when trying to approve it; s.iyer approved the same amendment from the second account and it went through to psr-limits. Also confirmed that granting both roles to a single user does not get round the check."
+      },
+      {
+        "author": "d.mercer",
+        "body": "Runbook updated. Worth saying out loud that this means one person alone on shift cannot move a limit at all."
+      }
+    ]
+  }
+}

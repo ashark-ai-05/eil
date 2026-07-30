@@ -1,0 +1,13 @@
+{
+  "id": "ptrd-2",
+  "title": "Gateway Notes",
+  "url": "https://confluence.example.com/display/PTR-DEMO/ptrd-2",
+  "author": "a.whitfield",
+  "created": "2024-11-19T08:41:00+00:00",
+  "updated": "2025-05-06T16:40:00+00:00",
+  "ancestors": [
+    "PTR-DEMO"
+  ],
+  "acl_groups": [],
+  "body": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nNotes to self while working on the gateway. Not reviewed by anyone, don't treat\nthis as design.\n\nLatency budget on the XDEM path is 250us wire to wire — client order hitting our\nNIC to the order leaving it. The whole control set has to fit inside that, which\nis why we are so unwilling to let anything new into it. The presettlement check\nis a small part of the budget, under about 40us, though that number is off the\nold kit and I never re-ran it after we moved.\n\nThe check reads a local snapshot in the gateway process. It does not call\npsr-limits. Calling psr-limits over the network is 2-8ms depending on where the\npods land and how loaded it is, which is a non starter in the order path — 8ms is\nmore than thirty times the entire budget.\n\nRefresh is a push, not a poll: psr-limits publishes on change and the gateway\napplies it to the snapshot. Was aiming for 250ms end to end from the change\nlanding in credit-admin to the gateway acting on it, and I think we got roughly\nthere, but I haven't measured recently.\n\nThere's a staleness cutoff, I think 5s, after which we reject. Check with the\npsr-limits team.\n\nThe kill switch is a separate path and does not go anywhere near the snapshot —\nit stops the session, it does not wave orders past a control.\n\nTODO: document the add-on factor refresh properly\n"
+}

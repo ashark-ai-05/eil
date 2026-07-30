@@ -1,0 +1,15 @@
+{
+  "id": "ptrd-7",
+  "title": "Counterparty Static Data",
+  "url": "https://confluence.example.com/display/PTR-DEMO/ptrd-7",
+  "author": "d.mercer",
+  "created": "2024-09-30T12:15:00+00:00",
+  "updated": "2026-07-01T11:40:00+00:00",
+  "ancestors": [
+    "PTR-DEMO"
+  ],
+  "acl_groups": [
+    "grp-risk-ops"
+  ],
+  "body": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nRestricted to grp-risk-ops deliberately. A counterparty's credit line is our own\nview of that counterparty's creditworthiness. It is commercially sensitive, and\nno client should be able to read their own number — or anybody else's — off an\ninternal wiki. Two requests to open this page to all of engineering have been\ndeclined. If you need a limit for a test, invent one.\n\nCPTY-ALPHA is a large dealer, faced out of the London entity, and carries the\nbiggest presettlement line we run on this venue at 250m USD equivalent, with a\nsub-limit of 60m beyond five years tenor. Utilisation rarely gets past half of\nthat outside index roll weeks, so it is not the name that wakes anybody up.\n\nCPTY-BRAVO is a regional bank and is faced out of both London and Singapore. The\nLondon line is 80m and Singapore is 25m. Those are separate lines and neither one\nlends headroom to the other, which CPTY-BRAVO's own treasury team has never quite\naccepted. CPTY-BRAVO runs much closer to its line than CPTY-ALPHA does and is\nthe name Risk Ops actually watches on a busy day.\n\nBoth are reviewed annually by credit. The review dates live in the credit system\nand not on this page, because this page would not be updated.\n"
+}
