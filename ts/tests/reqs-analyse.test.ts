@@ -1707,3 +1707,32 @@ describe("the catalogue, by family", () => {
       expect(registered.filter((r) => r === id)).toEqual([id]);
   });
 });
+
+import { execFile } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+const run = promisify(execFile);
+
+describe("eil reqs check — exit codes are the gate", () => {
+  const write = (body: unknown) => {
+    const p = join(mkdtempSync(join(tmpdir(), "reqs-")), "reqs.json");
+    writeFileSync(p, JSON.stringify(body, null, 2));
+    return p;
+  };
+
+  it("exits 0 on a clean artefact", async () => {
+    const { stdout } = await run("pnpm", ["-s", "eil", "reqs", "check", write(minimalBody())]);
+    expect(stdout).toContain("0 errors");
+  });
+
+  it("exits 1 and names the check on a tampered magnitude", async () => {
+    const b = clone(minimalBody());
+    (b.tree as any).score.magnitude = 21;
+    await expect(run("pnpm", ["-s", "eil", "reqs", "check", write(b)])).rejects.toMatchObject({
+      code: 1,
+      stdout: expect.stringContaining("SCORE-001"),
+    });
+  });
+});
