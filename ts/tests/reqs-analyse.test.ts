@@ -520,6 +520,67 @@ describe("TREE-006 — uniform depth does not fire on a single leaf or on mixed 
   });
 });
 
+/**
+ * The defect TREE-007 exists for: a tree that never bottoms out. AC-001 only
+ * asks LEAVES for acceptance criteria, so a body of nothing but branches
+ * satisfies it vacuously — and one with zero leaves and zero acceptance criteria
+ * passed the entire gate on that technicality.
+ */
+const leaflessBody = (): any => {
+  const clarifyNode = (id: string, key: string): any => ({
+    id,
+    parentId: "REQ-ROOT",
+    nodeKey: key,
+    statement: `unresolved ${id}`,
+    score: { unknowns: 8, complexity: 8, magnitude: 8, decision: "clarify", at: AT },
+    scoreHistory: [{ unknowns: 8, complexity: 8, magnitude: 8, decision: "clarify", at: AT }],
+    decision: "clarify",
+    isLeaf: false,
+    grounding: [],
+  });
+  const b = clone(minimalBody()) as any;
+  b.tree = branchNode("REQ-ROOT", undefined, "limit-amendment.root", [
+    clarifyNode("REQ-ROOT.1", "child.one"),
+    clarifyNode("REQ-ROOT.2", "child.two"),
+  ]);
+  b.clarifications = [1, 2].map((n) => ({
+    id: `CL-${n}`,
+    nodeId: `REQ-ROOT.${n}`,
+    question: "Which staleness cutoff applies?",
+    answer: { freetext: "five seconds" },
+  }));
+  b.traceability = {};
+  return b;
+};
+
+describe("TREE-007 — an artefact that specifies nothing is not certifiable", () => {
+  it("refuses a tree with no leaves at all, which every other check passed", async () => {
+    const r = await analyse(leaflessBody());
+    const f = r.findings.find((x) => x.id === "TREE-007");
+    expect(f?.path).toBe("tree");
+    expect(f?.message).toContain("3 nodes and not one of them is a leaf");
+    expect(f?.message).toContain("expected at least 1");
+    expect(r.ok).toBe(false);
+  });
+
+  it("is the ONLY refusal on that body — the rest of the gate really did pass it", async () => {
+    // The bug verbatim: without TREE-007 this body has no error-severity finding
+    // at all, and an empty grounding table and an empty AC list are certified.
+    const r = await analyse(leaflessBody());
+    expect(r.findings.map((x) => x.id)).toEqual(["TREE-007"]);
+  });
+
+  it("stays silent on the minimal body, whose root is itself a leaf", async () => {
+    expect(await fire("TREE-007", clone(minimalBody()))).toEqual([]);
+    expect(await ids(clone(minimalBody()))).not.toContain("TREE-007");
+  });
+
+  it("stays silent whenever the tree bottoms out somewhere", async () => {
+    expect(await ids(twoLeafBody())).not.toContain("TREE-007");
+    expect(await ids(chainBody(4))).not.toContain("TREE-007");
+  });
+});
+
 describe("SCORE-001 — the message is read aloud, so it carries both values", () => {
   it("states the stored band, the recomputed band and the inputs", async () => {
     const b = clone(minimalBody()) as any;
@@ -847,10 +908,10 @@ describe("META-002 — derived fields are generated, never authored", () => {
 });
 
 describe("the catalogue", () => {
-  it("registers 45 checks across 10 families with no duplicate ids", () => {
+  it("registers 46 checks across 10 families with no duplicate ids", () => {
     const all = allChecks();
-    expect(all).toHaveLength(45);
-    expect(new Set(all.map((c) => c.id)).size).toBe(45);
+    expect(all).toHaveLength(46);
+    expect(new Set(all.map((c) => c.id)).size).toBe(46);
     const families = new Set(all.map((c) => c.id.split("-")[0]));
     expect(families).toEqual(
       new Set([
@@ -903,8 +964,13 @@ const TASK_7_CHECKS = [
   "GATE-006",
 ];
 
+/** Added after task 7, and held to the same two obligations as everything above:
+ *  it fires on a body stating exactly its defect, and it is silent on the clean
+ *  one. TREE-007 closes AC-001's vacuous case — a tree with no leaves. */
+const LATER_CHECKS = ["TREE-007"];
+
 describe("no task-7 check false-positives on the clean body", () => {
-  it.each(TASK_7_CHECKS)("%s stays silent on the clean body", async (id) => {
+  it.each([...TASK_7_CHECKS, ...LATER_CHECKS])("%s stays silent on the clean body", async (id) => {
     expect(await fire(id, clone(minimalBody()))).toEqual([]);
   });
 });
@@ -1689,7 +1755,7 @@ describe("the catalogue, by family", () => {
     }).toEqual({
       SCHEMA: 7,
       SCORE: 5,
-      TREE: 6,
+      TREE: 7,
       AC: 6,
       CLARIFY: 6,
       UNCERT: 3,
@@ -1702,8 +1768,10 @@ describe("the catalogue, by family", () => {
 
   it("every task-6 and task-7 check id is registered exactly once", () => {
     const registered = allChecks().map((c) => c.id);
-    expect(registered.length).toBe(TASK_6_CHECKS.length + TASK_7_CHECKS.length);
-    for (const id of [...TASK_6_CHECKS, ...TASK_7_CHECKS])
+    expect(registered.length).toBe(
+      TASK_6_CHECKS.length + TASK_7_CHECKS.length + LATER_CHECKS.length,
+    );
+    for (const id of [...TASK_6_CHECKS, ...TASK_7_CHECKS, ...LATER_CHECKS])
       expect(registered.filter((r) => r === id)).toEqual([id]);
   });
 });

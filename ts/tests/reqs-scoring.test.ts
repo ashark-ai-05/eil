@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { RRF_K } from "../core/fusion.js";
+import { TIER_PRIOR } from "../core/ranking.js";
 import { FIB, REGISTERED_CONSTANTS as K } from "../reqs/constants.js";
 import {
   decisionSpace,
@@ -71,6 +73,76 @@ describe("recommendAction", () => {
         }
       }
     }
+  });
+});
+
+/**
+ * The guard that makes a units error impossible to reintroduce quietly.
+ *
+ * `top_score` and `score_gap` are WEIGHTED RRF scores, not normalised relevance
+ * scores, and nothing about the name says so. A floor picked as if the scale ran
+ * 0-1 sits ABOVE everything the scale can produce, and the failure is silent by
+ * construction: `tryKnowledgeBase` escalates before it spends a single get_doc,
+ * so every unknown lands on a human, the grounding table comes out empty, and no
+ * test, no log line and no exit code says why. That is exactly what a floor of
+ * 0.12 did here against an achievable maximum of ~0.094.
+ *
+ * So the ceiling is RECOMPUTED from the fusion constant and the ranking modifier
+ * on every run, and the floors are asserted strictly below it. If RRF_K, the
+ * arm set or TIER_PRIOR is retuned and a floor is left behind, this fails first.
+ */
+describe("the grounding floors are reachable on the scale they are measured on", () => {
+  /** `rrf` gives an arm ranking a document first `w / (k + 0 + 1)`, with `w <= 1`. */
+  const ONE_ARM_AT_RANK_1 = 1 / (RRF_K + 1);
+
+  /** fts_prose, fts_prose_loose, fts_code, fts_code_loose, vec — `armWeights` in
+   *  ts/search.ts names exactly these, and an arm absent from a result set
+   *  contributes nothing at all. */
+  const MAX_ARMS = 5;
+
+  /** A prose question (the only kind the cascade asks) fires the two prose arms
+   *  and the vector arm at full weight; the code arms usually do not fire at all. */
+  const PROSE_ROUTE_ARMS = 3;
+
+  /** `modifier` is prior x recency, recency <= 1, so the ceiling is the best prior. */
+  const MAX_MODIFIER = Math.max(...Object.values(TIER_PRIOR));
+
+  /** Every arm agreeing at rank 0 on the best-tier, freshest document there is. */
+  const maxTopScore = MAX_ARMS * ONE_ARM_AT_RANK_1 * MAX_MODIFIER;
+  const maxProseTopScore = PROSE_ROUTE_ARMS * ONE_ARM_AT_RANK_1 * MAX_MODIFIER;
+  /** `score_gap` is top1 - top5, and top5 >= 0, so the gap shares that ceiling. */
+  const maxScoreGap = maxTopScore;
+
+  it("the arithmetic still says what the constants say it says", () => {
+    expect(maxTopScore).toBeCloseTo(0.094, 3);
+    expect(maxProseTopScore).toBeCloseTo(0.057, 3);
+  });
+
+  it("groundingTopScoreFloor is strictly below the achievable maximum", () => {
+    // A floor at or above the achievable maximum does not tighten the cascade —
+    // it disables it. Every unknown escalates to a human on every corpus with
+    // every model, the artefact's grounding table is empty, and the run still
+    // exits 0. The floor must be a threshold, not a ceiling.
+    expect(K.groundingTopScoreFloor).toBeGreaterThan(0);
+    expect(K.groundingTopScoreFloor).toBeLessThan(maxTopScore);
+    // And below the ceiling a PROSE question can actually reach, which is the
+    // only route the resolution cascade ever takes.
+    expect(K.groundingTopScoreFloor).toBeLessThan(maxProseTopScore);
+  });
+
+  it("groundingScoreGapFloor is strictly below the achievable gap", () => {
+    // Same failure, same silence: a gap floor above the largest gap the scale can
+    // produce refuses every result set as "the sources disagree".
+    expect(K.groundingScoreGapFloor).toBeGreaterThan(0);
+    expect(K.groundingScoreGapFloor).toBeLessThan(maxScoreGap);
+    expect(K.groundingScoreGapFloor).toBeLessThan(maxProseTopScore);
+  });
+
+  it("both floors are derived from RRF_K rather than written as decimals", () => {
+    // Stated as the multiple, so a hand-picked decimal pasted back in fails here
+    // even if it happens to sit under today's ceiling.
+    expect(K.groundingTopScoreFloor / ONE_ARM_AT_RANK_1).toBeCloseTo(1.5, 10);
+    expect(K.groundingScoreGapFloor / ONE_ARM_AT_RANK_1).toBeCloseTo(0.6, 10);
   });
 });
 

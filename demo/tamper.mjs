@@ -15,9 +15,9 @@
  *
  *  1. CLARIFY-005 — the only check that leaves the artefact and re-reads the
  *     cited document — is SKIPPED, not failed, when no catalog is reachable. The
- *     sole trace is `checksRun` being 44 instead of 45, which nobody notices on
+ *     sole trace is `checksRun` being 45 instead of 46, which nobody notices on
  *     a projector. Tamper 4 would then look like a pass while never having run.
- *     So every run asserts `checksRun === 45` and stops loudly if it is not.
+ *     So every run asserts `checksRun === 46` and stops loudly if it is not.
  *
  *  2. An unresolvable `docId` is an ERROR by design, so ANY drift between the
  *     ingested corpus and the artefact's citations refuses the CLEAN artefact.
@@ -32,7 +32,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const EXPECTED_CHECKS = 45;
+const EXPECTED_CHECKS = 46;
 const DEFAULT_SOURCE = "demo/PTR-401.reqs.json";
 
 const args = process.argv.slice(2);
@@ -131,15 +131,15 @@ function runCheck(file) {
 }
 
 /**
- * The silent-skip guard. 44 is not "one check short" — it is specifically the
- * one check that leaves the artefact, and its absence turns tamper 4 into
- * theatre. Name the cause, because "44" on its own tells a presenter nothing.
+ * The silent-skip guard. One short is not "one check short" — it is specifically
+ * the one check that leaves the artefact, and its absence turns tamper 4 into
+ * theatre. Name the cause, because the number alone tells a presenter nothing.
  */
 function assertChecksRun(result, where) {
   if (result.checksRun === EXPECTED_CHECKS) return;
   if (result.checksRun === EXPECTED_CHECKS - 1) {
     die([
-      `Only 44 of ${EXPECTED_CHECKS} checks ran (${where}).`,
+      `Only ${EXPECTED_CHECKS - 1} of ${EXPECTED_CHECKS} checks ran (${where}).`,
       "",
       "CLARIFY-005 — the check that re-reads every cited quote out of the corpus —",
       "was SKIPPED because no document resolver was available. It does not fail when",

@@ -377,6 +377,35 @@ const TREE_006: Check = {
   },
 };
 
+const TREE_007: Check = {
+  id: "TREE-007",
+  severity: "error",
+  run({ body }: CheckContext) {
+    // AC-001 asks for acceptance criteria on LEAVES, so a tree with no leaves
+    // satisfies it vacuously — and a body of nothing but branches passed the
+    // entire gate, with zero acceptance criteria, on that technicality. The
+    // decomposition has to bottom out somewhere or nothing was ever specified.
+    let nodes = 0;
+    let leaves = 0;
+    for (const { node } of walk(body.tree)) {
+      nodes += 1;
+      // The DECLARED decision, exactly as AC-001 reads it: META-002 owns whether
+      // `isLeaf` agrees with it, so the two checks cannot disagree about what a
+      // leaf is.
+      if (node.decision === "leaf") leaves += 1;
+    }
+    if (leaves > 0) return [];
+    return [
+      {
+        id: "TREE-007",
+        severity: "error",
+        path: "tree",
+        message: `the tree holds ${nodes} ${nodes === 1 ? "node" : "nodes"} and not one of them is a leaf; expected at least 1 — acceptance criteria are stated on leaves, so a tree that never bottoms out states none at all, and an artefact that specifies nothing must not be certifiable`,
+      },
+    ];
+  },
+};
+
 /** `Date.parse` in one place, so every timestamp is judged by the same rule. */
 const instant = (at: unknown): number | null => {
   if (typeof at !== "string") return null;
@@ -567,6 +596,7 @@ export const STRUCTURAL_CHECKS: Check[] = [
   TREE_004,
   TREE_005,
   TREE_006,
+  TREE_007,
   META_001,
   META_002,
   META_003,
