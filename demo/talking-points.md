@@ -12,7 +12,10 @@ if you lose the thread. Say them in your own words.
 | 5 | What it's worth, and what I'm asking for | 11:30 – 13:30 |
 | 6 | Questions | 13:30 – 15:00 |
 
-Have open: a terminal, and `demo/PTR-401.html` in a browser tab.
+Have open: a terminal, `demo/PTR-401.html` in a browser tab, and the PTR-DEMO
+Confluence page **Gateway Notes** in a third tab — you show that one in beat 4
+so the room can see where the text lives. The demo itself never touches
+Confluence; the tab is a visual aid.
 
 ---
 
@@ -91,9 +94,9 @@ Six edits. Six refusals. Talk over it:
 > I typed "TBD" into a requirement. A requirement that says TBD hasn't been
 > elaborated. It's been postponed.
 >
-> I reworded a quote by one word. It went back to the actual Confluence page and
-> re-read it. The quote isn't there any more, so the citation is a lie, so the
-> document is refused.
+> I reworded a quote by one word. It went back to the document it cited, re-read
+> it, and looked for that quote character for character. It isn't there any
+> more, so the citation is a lie, so the document is refused.
 
 Then land the last one:
 
@@ -124,6 +127,18 @@ Point at a citation:
 > fourteen months ago by someone who's left. The answer is in the first
 > paragraph. Nobody was ever going to find that page. This found it in about
 > forty milliseconds.
+
+Then switch to the browser and put "Gateway Notes" up in Confluence next to the
+citation. Let the room read the sentence in the page and the sentence in the
+artefact and see they are the same.
+
+> And there's the page. That's the sentence it quoted.
+
+*Note to you, not to the room:* this is a visual aid. The tool read its own
+indexed copy of that page, not Confluence — the whole demo runs off a local
+corpus, which is why there's no network anywhere in this. If someone asks
+directly, say exactly that; it costs nothing and the content is identical
+either way.
 
 Then the more interesting half:
 
@@ -195,12 +210,16 @@ Say these yourself. It buys more than it costs.
 - **This is phase one of four.** Requirements only. Design, planning and
   implementation are specified and not built. Starting here was deliberate —
   it's where the expensive mistakes are made.
-- **The pages you saw are synthetic.** I wrote them so this runs on a laptop
-  with no network. Every one carries a banner saying so. The same content is in
-  Confluence, so what you're watching is exactly what the live run does.
-- **Access control is owner-only against live data.** Group-level visibility
-  works against fixtures, not against our Confluence yet. Don't let me claim
-  otherwise.
+- **The pages you saw are synthetic, and they're in Confluence so you can look
+  at them.** I wrote them for this. Every one carries a banner saying so. The
+  demo doesn't fetch them — it reads its own indexed copy of the same text off
+  this laptop, so nothing you're watching depends on the network.
+- **The group-level access control is real, and it's fed from the local
+  corpus.** Visibility is stamped on the document, reads fail closed, and one
+  page is restricted to a group — a caller outside that group gets no trace of
+  it. What's missing is upstream: no connector stamps groups yet, so a live
+  Confluence sync would give us owner-level visibility only. Known gap, and
+  it's in the connector, not in the enforcement.
 - **No cost reporting.** Call counts and latency, yes. Pounds and tokens, no —
   the CLIs we use don't report them.
 - **The retrieval is deliberately conservative.** On a small corpus it escalates
@@ -210,8 +229,10 @@ Say these yourself. It buys more than it costs.
 
 ## If it breaks
 
-- **Live Confluence won't reach.** Fall back to fixtures. Same content, same
-  behaviour. Say so and carry on — nothing else changes.
+- **Someone wants to see it run against the real Confluence, now.** Don't.
+  Say the connectors are real and scoped, offer to show them afterwards, and
+  open the page in the browser instead — that's what they actually want to
+  look at. There is no network in this run and that is the point.
 - **The gate refuses something you expected to pass.** Read the check ID out
   loud. That *is* the product working. Don't apologise for it.
 - **Embeddings unavailable.** Say it's running on text search only. Do not use

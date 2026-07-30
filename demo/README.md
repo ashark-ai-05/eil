@@ -1,4 +1,4 @@
-# Demo — your org's data, nothing installed
+# Demo — nothing installed, nothing on the network
 
 Runs on **PGlite**: real Postgres compiled to WASM, loaded out of `node_modules`.
 No Docker, no Postgres server, no admin rights. The embedding model is vendored
@@ -8,42 +8,68 @@ Every step below corresponds to a node in **[docs/system-map.html](../docs/syste
 open it alongside and walk the diagram as you go.
 
 ```sh
-node demo/run.mjs --repo /path/to/your/repo --space ENG --project PAY
+node demo/run.mjs
 ```
+
+That is the whole invocation. The corpus is the local fixture set in
+`demo/fixtures/`, so the run needs no VPN, no corporate proxy and no
+credentials.
+
+**The same pages also exist in Confluence and Jira, for the audience to look
+at.** They are visual props: you can put a citation on screen and then show the
+room the page it names. The demo itself never fetches them — it reads its own
+indexed copy of the same text, ingested from the fixture. Nothing in the run
+depends on the network being there.
 
 ---
 
-## Setup (once)
+## Before you are standing in front of anyone
+
+```sh
+eil demo:preflight
+```
+
+It checks the backend, the model and the clone cache, and prints the fix for
+anything wrong. It is read-only, so run it as often as you like.
+
+It also probes both connectors, which the fixture run does not need. With
+`EIL_CONFLUENCE_URL` and `EIL_JIRA_URL` unset it reports them as `--` /
+*"this source will be skipped"* and that is the expected line. If they **are**
+set in your shell it will try to reach them, and a `FAIL` there is not a
+problem for this demo — unset them before rehearsing if you would rather not
+look at it.
+
+Add `--repo /path/to/your/repo` only if you are also indexing a repository; it
+then catches two things that otherwise surface as raw git errors mid-demo:
+
+- a **stale `.eil-repos/`** — `git clone` into a non-empty directory just fails
+- your repo's **actual branch**; the default is `main` and plenty of repos are `master`
+
+<details>
+<summary><strong>Optional — pointing this at a real Atlassian instance</strong> (not used for the demo)</summary>
+
+The live connectors are real, and this is how you use them. None of it is needed
+for `node demo/run.mjs`.
 
 ```sh
 export EIL_CONFLUENCE_URL=https://confluence.your.org   # base URL, no /wiki, no trailing path
 export EIL_JIRA_URL=https://jira.your.org
 eil auth login confluence      # PAT goes to the OS keychain, never to disk
 eil auth login jira
+
+node demo/run.mjs --repo /path/to/your/repo --space ENG --project PAY
 ```
 
-Then, **before you are standing in front of anyone**:
-
-```sh
-eil demo:preflight --repo /path/to/your/repo
-```
-
-It checks the backend, the model, both connectors, and the repo — and prints the
-fix for anything wrong. It is read-only, so run it as often as you like. Two
-things it catches that otherwise surface as raw git or HTTP errors mid-demo:
-
-- a **stale `.eil-repos/`** — `git clone` into a non-empty directory just fails
-- your repo's **actual branch**; the default is `main` and plenty of repos are `master`
-
-## Scoping — read this before pointing it at a real instance
-
-`--space` and `--project` are **required** for the live sources. An unscoped
-Confluence sync pulls the entire instance, which is a poor first impression and
-an unkind thing to do to your org's API from a laptop. Start with one space and
-one project.
+**Always scope the sync.** `--space` and `--project` are required by
+`eil ingest confluence` / `eil ingest jira` for a reason: an unscoped Confluence
+sync pulls the entire instance, which is a poor first impression and an unkind
+thing to do to your org's API from a laptop. Start with one space and one
+project.
 
 Connectors run on **your** personal token: you can only index what you could
 already read.
+
+</details>
 
 ---
 
@@ -70,16 +96,7 @@ pnpm eil db migrate
 process. Nothing was installed, no Docker, no admin rights, and this same schema
 runs unchanged against a real cluster.
 
-### Beat 2 — your data, on your credentials
-
-```sh
-pnpm eil ingest confluence --space ENG
-pnpm eil ingest jira --project PAY
-pnpm eil ingest repo /path/to/repo --branch main --name repo --include '**/*.*'
-```
-
-Plus the fixture corpus the requirements artefact cites, which the runner ingests
-for you:
+### Beat 2 — the corpus goes in
 
 ```sh
 for f in demo/fixtures/*.json; do
@@ -88,10 +105,23 @@ done
 pnpm eil stats:refresh
 ```
 
-**Say:** the connector uses *your* personal token, so it can only index what you
-could already read. Sync is incremental from a stored cursor and hash-gated —
-re-running costs nothing. Commit dates become recency; issue links, labels and
-imports become graph edges.
+Eight Confluence pages and five Jira tickets, read off disk. Ingestion
+normalises a fixture and a live sync into the same canonical document, so
+everything downstream is the code path that runs in production.
+
+**Say:** these are the pages you can see in Confluence — this is reading its own
+indexed copy of them. Issue links and labels become graph edges. Ingest is
+incremental from a stored cursor and hash-gated, so re-running costs nothing.
+
+Optionally, on your own estate — not part of this demo:
+
+```sh
+pnpm eil ingest confluence --space ENG      # your personal token; only what you could already read
+pnpm eil ingest jira --project PAY
+pnpm eil ingest repo /path/to/repo --branch main --name repo --include '**/*.*'
+```
+
+Commit dates become recency; imports and ticket keys become edges.
 
 ### Beat 3 — retrieval, with no LLM in the loop
 
@@ -178,8 +208,9 @@ Run one on its own if someone asks:
 node demo/tamper.mjs --tamper 4
 ```
 
-**Say:** number 4 is the one that leaves the artefact. The gate re-fetches the
-cited page and greps for the quote character for character. A fabricated citation
+**Say:** number 4 is the one that leaves the artefact. The gate re-reads the
+cited document out of the catalog and greps for the quote character for
+character — the same audited tool path an agent would use. A fabricated citation
 is not merely implausible here — it is mechanically detectable. And number 5 is
 the line the whole phase exists to draw: an agent may draft, score, ground and
 analyse a requirement set. It may never approve one.
@@ -215,23 +246,31 @@ claude mcp add eil -- pnpm -s --dir "$PWD" eil serve
 
 ## The walk, against the system map
 
+What `node demo/run.mjs` actually does, in order:
+
 | # | Step | The map node it demonstrates |
 |---|---|---|
-| 1 | `db migrate` | *Zero-install backend* — 19 migrations, no server |
-| 2 | `ingest confluence --space` | *Only the spaces you name* |
-| 3 | `ingest jira --project` | *Projects scoped by* — issue links and labels become edges |
-| 4 | `ingest repo` | *Clone, walk* — commit dates become recency |
-| 5 | `ingest --fixture demo/fixtures/*` | The PTR-DEMO corpus the gate re-reads citations from |
+| 1 | `demo:preflight` | Backend and model checked before anyone is watching |
+| 2 | `db migrate` | *Zero-install backend* — 19 migrations, no server |
+| 3 | `ingest --fixture demo/fixtures/*` | The PTR-DEMO corpus, read off disk — the pages and tickets the gate re-reads citations from; issue links and labels become edges |
+| 4 | `stats:refresh` | Document frequency, N and avgdl — the BM25 groundwork |
+| 5 | `ingest --fixture demo/secret-page.json` | *Visibility lives on the document* — the planted credential page, quarantined at ingest |
 | 6 | `embed backfill` | *Meaning, embedded* — local ONNX, no per-query cost |
 | 7 | `ivf build` | The system **measuring its own recall** and choosing a parameter |
 | 8 | `search` | *Four lexical arms* (strict and loose, prose and code) plus a vector arm when the local model is available, fused by rank, plus tier and freshness |
-| 9 | `search retryHandler` | *Exact terms, identifiers* — the code index, not the prose arm |
-| 10 | quarantine | *Visibility lives on the document* |
-| 11 | `reqs check` | The gate — generated fields recomputed, citations re-read |
-| 12 | `demo/tamper.mjs` | Six edits, six refusals, each naming itself |
-| 13 | `audit` | *Every tool call lands as a row* |
-| 14 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
+| 9 | `search "deploying the payment service"` | The quarantined credential is not retrievable — absent from tsv, embeddings and snippets |
+| 10 | `reqs check` | The gate — generated fields recomputed, citations re-read |
+| 11 | `demo/tamper.mjs` | Six edits, six refusals, each naming itself |
+| 12 | `audit` | *Every tool call lands as a row* |
+| 13 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
+| 14 | `report --out demo/metrics.html` | The fact tables, as a self-contained page |
 | 15 | `serve` over MCP | *Connected over MCP* — an agent pulls ranked, ACL-filtered context |
+
+Passing the optional flags adds steps rather than changing any of these:
+`--repo` adds `ingest repo` (*Clone, walk* — commit dates become recency) and
+`search retryHandler` (*Exact terms, identifiers* — the code index, not the
+prose arm); `--space` and `--project` add the live `ingest confluence --space`
+and `ingest jira --project` (*Only the spaces you name*).
 
 ---
 
@@ -246,19 +285,25 @@ gate re-reads citations from was written for this demonstration — the pre-trad
 risk platform, the limit-reduction argument, the contradictory gateway notes.
 Each page carries a `SYNTHETIC DEMO CONTENT` banner in its own body saying so:
 illustrative only, not a production reference, not to be cited in design or
-change documentation. It exists so the demo runs identically offline and against
-a real Atlassian estate — the pipeline does not know the difference, because
-ingestion normalises both into the same canonical document. Say this while the
-gate is on screen re-reading those citations; it is the first thing a sharp
-person in the room will wonder about the plausible-looking pages.
+change documentation. The same pages have been created in Confluence and Jira so
+the room can look at them, but the demo does not read them from there: it reads
+its own indexed copy, ingested from the fixture. Ingestion normalises a fixture
+and a live sync into the same canonical document, so the pipeline does not know
+the difference. Say this while the gate is on screen re-reading those citations;
+it is the first thing a sharp person in the room will wonder about the
+plausible-looking pages.
 
-**The ACL is owner-only against live data.** Visibility is stamped on the
-document and reads fail closed — but every connector currently stamps
-`acl_groups: []`, and `ingested_by` is the OS user. Multi-group visibility works
-only in **fixture mode**, because a fixture can carry the field and a live sync
-does not yet populate it. On a shared server every document would be owned by
-the service account. It is fail-closed and correct; it is also delivering less
-than "fail-closed ACL" implies. Do not claim multi-user visibility.
+**The group-level ACL in this run is real, and it is fixture-fed.** Visibility
+is stamped on the document and every read fails closed. It works here because
+the fixture carries `acl_groups`: `ptrd-7` is restricted to `grp-risk-ops`, so a
+caller is granted that page by group membership, and a caller who is neither the
+owner nor in the group gets no trace of it — no title, no snippet, no count.
+That is the real enforcement path in `ts/search.ts`, not a demo shim. The gap is
+upstream of it: **no connector stamps groups yet**, so a live Confluence sync
+would give you owner-level visibility only — `acl_groups: []` with `ingested_by`
+as the only grant, and on a shared server every document owned by the service
+account. That is a known gap, and it is in the connectors, not in the
+enforcement. Say it plainly if asked; do not claim live multi-user visibility.
 
 **This is phase 1 of 4.** What you just watched is elaboration and gating —
 turning a work item into a scored, grounded, refusable requirements artefact.
@@ -300,18 +345,21 @@ produces a self-contained HTML report over the same fact tables.
 
 Rehearse this section too. Every one of these has happened.
 
-**The corporate proxy blocks the live ingest.**
-Fall back to the fixture corpus and drop the live beat:
+**Someone asks to see it against the real Confluence, live, now.**
+Don't. The run is scoped to fixtures on purpose: it removes the proxy, the VPN
+and the credentials from the risk list, and `corpus_mode` says `fixtures` on
+every artefact so no run can be misrepresented. Say: "the connectors are real
+and scoped — `eil ingest confluence --space ENG` — and I'll show you that on my
+machine afterwards. What's on screen now is the same pipeline, because ingestion
+normalises a fixture and a live sync into the same canonical document." Then
+switch to the browser and show the page in Confluence, which is what they
+actually want to see. Do not spend stage time on a network.
 
-```sh
-node demo/run.mjs                 # no --space, no --project: fixtures only
-```
-
-Say: "the connector is HTTP against your instance and this network will not let
-me out — here is the same pipeline on a fixture corpus." **Nothing else in the
-demo changes.** Beats 3 through 7 are identical, because ingestion normalises
-into one canonical document either way. Do not spend stage time debugging the
-proxy.
+**Someone asks whether it is really reading anything.**
+Show the citation, then open that page in Confluence in the browser. The text
+matches character for character — that is the point of `CLARIFY-005`. Be clear
+that the tool read its own indexed copy: it is the same content, ingested from
+the fixture, and nothing in this run went out to the network.
 
 **The embedding model is unavailable.**
 `@huggingface/transformers` is an optional dependency and may simply not be

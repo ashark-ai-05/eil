@@ -1,16 +1,24 @@
 #!/usr/bin/env node
 /**
- * The whole demo, on YOUR data, with nothing installed.
+ * The whole demo, with nothing installed and nothing on the network.
  *
- *   node demo/run.mjs --repo /path/to/your/repo --space ENG --project PAY
+ *   node demo/run.mjs
+ *
+ * That is the whole invocation. The corpus is the local fixture set in
+ * demo/fixtures/, so the run needs no VPN, no proxy and no credentials.
  *
  * No Docker, no Postgres: the backend is PGlite, which is real Postgres compiled
  * to WASM and loaded out of node_modules. The embedding model is vendored in the
  * repo, so the vector arm needs no network either.
  *
- * Scoped by construction. `--space` and `--project` are REQUIRED for the live
- * sources, because an unscoped Confluence sync pulls the entire instance — which
- * is a bad first experience and a bad thing to do to your org's API on a laptop.
+ * Optional, for pointing this at your own estate rather than the demo corpus:
+ *
+ *   node demo/run.mjs --repo /path/to/your/repo --space ENG --project PAY
+ *
+ * `--space` and `--project` scope the live connectors, because an unscoped
+ * Confluence sync pulls the entire instance — a bad first experience and an
+ * unkind thing to do to your org's API from a laptop. They are not needed for
+ * the demo above.
  *
  * Every step prints the command it is about to run, so the demo is legible: the
  * audience sees the CLI, not a wrapper.
@@ -29,24 +37,30 @@ const has = (name) => args.includes(`--${name}`);
 
 if (has("help")) {
   console.log(`
-eil demo — real data, zero install
+eil demo — zero install, no network
 
-  node demo/run.mjs [options]
+  node demo/run.mjs
 
-  --repo <path>      a local git repository to index
-  --branch <name>    branch to index (default: the repo's current HEAD)
-  --space <KEYS>     Confluence space key(s), comma-separated   [required for Confluence]
-  --project <KEYS>   Jira project key(s), comma-separated       [required for Jira]
+  Runs on the local PTR-DEMO fixture corpus in demo/fixtures/. No VPN, no
+  proxy, no credentials, no Atlassian instance involved.
+
+Options:
   --data <dir>       PGlite directory (default: .eil-demo)
   --keep             do not wipe --data first
   --skip-secrets     do not ingest the planted secret page
   --skip-corpus      do not ingest the PTR-DEMO fixture corpus (skips the gate beats)
 
-Credentials, if you want the live sources:
-  export EIL_CONFLUENCE_URL=https://confluence.your.org
-  export EIL_JIRA_URL=https://jira.your.org
-  eil auth login confluence     # stored in the OS keychain, never on disk
-  eil auth login jira
+Optional — point it at your own estate instead:
+  --repo <path>      a local git repository to index
+  --branch <name>    branch to index (default: the repo's current HEAD)
+  --space <KEYS>     Confluence space key(s), comma-separated  (scopes the live sync)
+  --project <KEYS>   Jira project key(s), comma-separated      (scopes the live sync)
+
+  The live connectors need credentials:
+    export EIL_CONFLUENCE_URL=https://confluence.your.org
+    export EIL_JIRA_URL=https://jira.your.org
+    eil auth login confluence     # stored in the OS keychain, never on disk
+    eil auth login jira
 `);
   process.exit(0);
 }
@@ -109,10 +123,13 @@ if (existsSync(".eil-repos")) rmSync(".eil-repos", { recursive: true, force: tru
 if (!has("keep") && existsSync(DATA)) rmSync(DATA, { recursive: true, force: true });
 
 console.log(`\x1b[1mEIL demo\x1b[0m — backend: PGlite at ${DATA} (no server, no admin rights)`);
+if (!SPACE && !PROJECT) {
+  console.log("            corpus:  demo/fixtures/ (local — this run makes no network calls)");
+}
 
 run(
   "Preflight",
-  "Prove the credentials, the model and the repo all work BEFORE the audience is watching.",
+  "Prove the backend, the model and anything you pointed it at all work BEFORE the audience is watching.",
   ["demo:preflight", ...(REPO ? ["--repo", REPO] : [])],
   { optional: true },
 );
@@ -129,7 +146,9 @@ if (SPACE) {
     ["ingest", "confluence", "--space", SPACE],
   );
 } else {
-  console.log("\n   (skipping Confluence: pass --space ENG to include it)");
+  console.log(
+    "\n   Confluence source: the local fixture corpus in demo/fixtures/. The live connector is not in use.",
+  );
 }
 
 if (PROJECT) {
@@ -140,7 +159,9 @@ if (PROJECT) {
     PROJECT,
   ]);
 } else {
-  console.log("\n   (skipping Jira: pass --project PAY to include it)");
+  console.log(
+    "\n   Jira source: the local fixture corpus in demo/fixtures/. The live connector is not in use.",
+  );
 }
 
 if (REPO) {
@@ -157,10 +178,13 @@ if (REPO) {
     ["ingest", "repo", REPO, "--branch", branch, "--name", name, "--include", "**/*.*"],
   );
 } else {
-  console.log("\n   (skipping code: pass --repo /path/to/repo to include it)");
+  console.log(
+    "\n   Code: no repository given. Pass --repo /path/to/repo to add the code index.",
+  );
 }
 
-// The PTR-DEMO corpus the requirements artefact cites. This is NOT optional
+// The PTR-DEMO corpus the requirements artefact cites, and — unless you passed
+// --space/--project — the corpus the whole demo runs on. This is NOT optional
 // decoration: CLARIFY-005 re-reads every cited quote out of the catalog, so
 // without these documents the gate refuses the CLEAN artefact — which on a
 // projector looks exactly like the gate misfiring. Ingest before the gate beats.
@@ -171,7 +195,7 @@ if (!has("skip-corpus") && existsSync(FIXTURES)) {
     .sort();
   runEach(
     "Ingest the demo corpus",
-    "Eight Confluence pages and five Jira tickets, deliberately contradictory. The requirements artefact cites them by id, and the gate re-reads every citation.",
+    "Eight Confluence pages and five Jira tickets, deliberately contradictory, read from disk. The requirements artefact cites them by id, and the gate re-reads every citation out of the catalog.",
     files.map((f) => [
       "ingest",
       f.startsWith("ptrd-") ? "confluence" : "jira",

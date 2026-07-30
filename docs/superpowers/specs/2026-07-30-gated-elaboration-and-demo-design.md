@@ -321,6 +321,25 @@ The same corpus reached two ways. Identical content, so identical behaviour.
 `metadata.corpus_mode` is stamped into the artefact, so no run can be
 misrepresented as the other.
 
+> **2026-07-30 — the demo was subsequently scoped to fixtures only.**
+> Both modes remain in the product: `--space` / `--project` and
+> `eil ingest confluence --space` / `eil ingest jira --project` are unchanged
+> and supported. What changed is the demo. The presented run is `fixtures`
+> only — `node demo/run.mjs` with no flags — and `live` is documented as an
+> optional path for someone pointing EIL at their own estate.
+>
+> The PTR-DEMO corpus is still created in Confluence and Jira, but as a
+> **visual aid rather than an ingestion source**: the presenter shows a
+> citation on screen and then shows the audience the page it names. The demo
+> reads its own indexed copy, ingested from `demo/fixtures/`.
+>
+> Why: it takes the corporate proxy, the VPN and credential handling off the
+> risk list for a live presentation, and it makes `corpusMode: "fixtures"`
+> accurate on every run rather than a thing that depends on how the runner was
+> invoked. The consequence for the corpus sheet is that exact page ids,
+> ancestors and issue-link wiring no longer have to match the fixtures — only
+> the banner and the body text do, because those are what appear on screen.
+
 **Embeddings are optional.** `@huggingface/transformers` is an
 `optionalDependency` that has not materialised locally and may not behind a
 corporate proxy. The four lexical arms are complete. `demo/run.mjs` step 7 must
