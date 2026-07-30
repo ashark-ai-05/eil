@@ -86,9 +86,10 @@ checks that catch them.
 
 - **Fail-closed ACL on every read.** Visibility is stamped on the document, not
   asked of the query. An unstamped doc is owner-only, so a bug fails *closed*.
-- **Deterministic.** Two arms — Postgres full-text and a local vector model —
-  fused with reciprocal-rank fusion. Same query, same corpus, same order. No
-  LLM in the retrieval path.
+- **Deterministic.** Four lexical arms — strict and loose Postgres full-text,
+  over prose and over the code index — plus a vector arm when the local model is
+  available, fused with reciprocal-rank fusion. Same query, same corpus, same
+  order. No LLM in the retrieval path.
 - **Incremental.** Cursor sync, content hashing, and delete-tombstones, so
   results can't outlive their source.
 - **One Postgres, no extension.** PGlite, embedded PG, system PG, or an org

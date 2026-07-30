@@ -195,8 +195,8 @@ if (!has("skip-secrets")) {
 // Both embedding steps are OPTIONAL, and the demo continues without them.
 // `@huggingface/transformers` is an optional dependency: it has not materialised
 // on this machine, and behind a corporate proxy it may never. The four lexical
-// arms — prose FTS, loose FTS, BM25 scoring and the exact code index — are
-// complete without it; what is lost is the vector arm, and saying so out loud is
+// arms — strict and loose FTS over prose, strict and loose over the code index —
+// are complete without it; what is lost is the vector arm, and saying so is
 // a better demo than a stack trace. Never substitute EIL_EMBED_PROVIDER=fake:
 // that produces random vectors, and calling the result semantic search is a lie.
 const EMBED_FALLBACK = "   embeddings unavailable — running lexical arms only";
@@ -221,7 +221,7 @@ else if (
 
 run(
   "Search",
-  "Two lexical arms and a vector arm, fused by rank. Note top_score / arms_contributing.",
+  "Four lexical arms — strict and loose, prose and code — plus a vector arm when the local model is available, fused by rank. Note top_score / arms_contributing.",
   ["search", "how do we handle retries"],
   { optional: true },
 );
@@ -244,9 +244,13 @@ if (!has("skip-secrets")) {
 
 // The gate. Skipped rather than failed when the artefact is absent, because a
 // fresh clone has not run the elaboration yet and a missing file is not a
-// refusal — the two must never look alike.
+// refusal — the two must never look alike. But skipping is not a detail: these
+// are the two beats the whole demo builds to, and a one-line parenthetical
+// scrolls past. So the skip is a banner that names the file, the command that
+// creates it, and what did not happen.
 const REQS = "demo/PTR-401.reqs.json";
-if (existsSync(REQS)) {
+const gateRan = existsSync(REQS);
+if (gateRan) {
   run(
     "Run the gate over a requirements artefact",
     "46 checks. Every generated field recomputed, every cited quote re-read out of the corpus.",
@@ -259,7 +263,23 @@ if (existsSync(REQS)) {
     "demo/tamper.mjs",
   );
 } else {
-  console.log(`\n   (skipping the gate: ${REQS} has not been generated yet)`);
+  const warn = (s) => console.log(`\x1b[1;31m${s}\x1b[0m`);
+  const rule = "━".repeat(78);
+  console.log("");
+  warn(rule);
+  warn("  !!  THE TWO MOST IMPORTANT BEATS OF THIS DEMO DID NOT RUN  !!");
+  warn("");
+  warn(`  Missing file:   ${REQS}`);
+  warn(`  Create it with: pnpm eil reqs elaborate PTR-401 --out ${REQS}`);
+  warn("");
+  warn("  NOT RUN  the gate          eil reqs check — 46 checks over a signed artefact");
+  warn("  NOT RUN  the tamper drill  node demo/tamper.mjs — six edits, six refusals");
+  warn("");
+  warn("  The tamper drill IS the beat; everything above it is setup. Generate the");
+  warn("  artefact and re-run before presenting — as it stands the demo stops short");
+  warn("  of its own point.");
+  warn(rule);
+  console.log("");
 }
 
 run("Audit", "Integrity invariants, plus the quarantine worklist. ok:true is the assertion.", [
@@ -284,6 +304,12 @@ run("Metrics report", "Self-contained HTML over the fact tables — no Grafana, 
   "--out",
   "demo/metrics.html",
 ], { optional: true });
+
+if (!gateRan) {
+  console.log(
+    `\n\x1b[1;31mIncomplete: the gate and the tamper drill were skipped — ${REQS} does not exist.\x1b[0m`,
+  );
+}
 
 console.log(`
 \x1b[1mDone.\x1b[0m

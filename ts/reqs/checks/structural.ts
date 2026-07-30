@@ -508,6 +508,24 @@ const META_002: Check = {
       });
     }
 
+    // The assembler generates `hedged` on CLARIFICATION grounding too, not only
+    // on tree grounding, and the projected page drops the HEDGED badge when it
+    // is flipped. Walking the tree alone left a generated field that could be
+    // authored and pass — which is exactly the claim this check exists to make
+    // false. `clarifications` is index-aligned with `assembled.clarifications`
+    // by construction: the assembler maps it one-for-one.
+    body.clarifications.forEach((c, ci) => {
+      const g = assembled.clarifications[ci];
+      c.grounding.forEach((grounding, gi) => {
+        differ(
+          `clarifications.${ci}.grounding.${gi}.hedged`,
+          `clarifications.${ci}.grounding.${gi}.hedged`,
+          grounding.hedged,
+          g?.grounding[gi]?.hedged,
+        );
+      });
+    });
+
     for (const key of new Set([
       ...Object.keys(body.traceability),
       ...Object.keys(assembled.traceability),

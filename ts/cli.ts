@@ -954,17 +954,17 @@ reqs
       const ext = opts.markdown ? ".md" : ".html";
       const out: string = opts.out ?? `${file.replace(/\.[^./\\]+$/, "")}${ext}`;
       mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, opts.markdown ? renderMarkdown(body) : renderHtml(body, result.findings));
+      writeFileSync(
+        out,
+        opts.markdown ? renderMarkdown(body, result.findings) : renderHtml(body, result.findings),
+      );
       const errors = result.findings.filter((f) => f.severity === "error");
       console.log(`wrote ${out}`);
       if (errors.length > 0) {
         const named = [...new Set(errors.map((f) => f.id))].join(", ");
-        // renderMarkdown takes no findings, so only the HTML page carries the stamp.
-        console.log(
-          opts.markdown
-            ? `  REFUSED by ${named} — markdown carries no banner; render HTML to show it`
-            : `  stamped REFUSED by ${named}`,
-        );
+        // Both projections carry the stamp: the file itself has to be the record,
+        // because the console line does not travel with it.
+        console.log(`  stamped REFUSED by ${named}`);
       }
     } finally {
       if (client) await client.end();

@@ -99,10 +99,12 @@ imports become graph edges.
 pnpm eil search "how do we handle a limit reduction"
 ```
 
-**Say:** four arms — strict full-text, loose full-text, the exact code index, and
-(when the model is available) a vector arm — fused by reciprocal rank. Point at
-`arms_contributing` and `top_score` in the JSON. Same query, same corpus, same
-order, every time. Nothing here spends a token.
+**Say:** four lexical arms — strict and loose full-text over prose, strict and
+loose over the code index — plus a vector arm when the local model is available,
+all fused by reciprocal rank. Point at `arms_contributing` and `top_score` in the
+JSON; `arms_contributing` counts the arms that actually returned something, so
+expect 3 to 5. Same query, same corpus, same order, every time. Nothing here
+spends a token.
 
 If the embedding model is present, this is the one to slow down on:
 
@@ -144,7 +146,7 @@ silently accept the next.
 pnpm eil reqs check demo/PTR-401.reqs.json
 ```
 
-**Say:** this is a requirements artefact an agent produced. Forty-five checks.
+**Say:** this is a requirements artefact an agent produced. Forty-six checks.
 Every derived field — the magnitude bands, the leaf flags, the traceability index
 — is recomputed from the body and compared, and every cited quote is re-read out
 of the catalog through the same audited tool path an agent would use. It says
@@ -184,7 +186,7 @@ analyse a requirement set. It may never approve one.
 
 The script asserts **46 checks ran** on every single invocation. `CLARIFY-005`
 does not fail when the catalog is unreachable — it *disappears*, and the count
-drops to 44. Without that assertion, beat 6 would look identical while proving
+drops to 45. Without that assertion, beat 6 would look identical while proving
 nothing.
 
 ### Beat 7 — all of it is a row
@@ -222,7 +224,7 @@ claude mcp add eil -- pnpm -s --dir "$PWD" eil serve
 | 5 | `ingest --fixture demo/fixtures/*` | The PTR-DEMO corpus the gate re-reads citations from |
 | 6 | `embed backfill` | *Meaning, embedded* — local ONNX, no per-query cost |
 | 7 | `ivf build` | The system **measuring its own recall** and choosing a parameter |
-| 8 | `search` | *Two arms* fused by rank, plus tier and freshness |
+| 8 | `search` | *Four lexical arms* (strict and loose, prose and code) plus a vector arm when the local model is available, fused by rank, plus tier and freshness |
 | 9 | `search retryHandler` | *Exact terms, identifiers* — the code index, not the prose arm |
 | 10 | quarantine | *Visibility lives on the document* |
 | 11 | `reqs check` | The gate — generated fields recomputed, citations re-read |
@@ -238,6 +240,17 @@ claude mcp add eil -- pnpm -s --dir "$PWD" eil serve
 Say these before someone asks. Every one of them is a thing a sharp person in
 the room will find in ten minutes, and volunteering it is what makes the rest
 of the demo credible.
+
+**The PTR-DEMO corpus is synthetic.** Every Confluence page and Jira ticket the
+gate re-reads citations from was written for this demonstration — the pre-trade
+risk platform, the limit-reduction argument, the contradictory gateway notes.
+Each page carries a `SYNTHETIC DEMO CONTENT` banner in its own body saying so:
+illustrative only, not a production reference, not to be cited in design or
+change documentation. It exists so the demo runs identically offline and against
+a real Atlassian estate — the pipeline does not know the difference, because
+ingestion normalises both into the same canonical document. Say this while the
+gate is on screen re-reading those citations; it is the first thing a sharp
+person in the room will wonder about the plausible-looking pages.
 
 **The ACL is owner-only against live data.** Visibility is stamped on the
 document and reads fail closed — but every connector currently stamps

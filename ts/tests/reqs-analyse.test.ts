@@ -1571,6 +1571,53 @@ describe("META-002 — every generated field, not only traceability", () => {
     expect(f?.message).toContain("expected true");
   });
 
+  /**
+   * The assembler generates `hedged` on clarification grounding as well as on
+   * tree grounding, and the projection drops the HEDGED badge when it is
+   * flipped. META-002 walked the tree only, so this laundering passed the gate
+   * with 46 checks and 0 findings — falsifying "editing one is detectable:
+   * `check` recomputes them all". Two grounding rows, the SECOND one flipped,
+   * so the path has to be index-precise and not merely present.
+   */
+  it("refuses a hedged flag turned off on CLARIFICATION grounding", async () => {
+    const b = tamper((b2) => {
+      b2.clarifications = [
+        {
+          id: "CL-1",
+          nodeId: "REQ-ROOT",
+          question: "What is the staleness cutoff for the PSR cache?",
+          options: [],
+          answeredBy: { kind: "knowledge_base", name: "confluence:page:ptrd-2" },
+          grounding: [
+            {
+              source: "confluence",
+              docId: "confluence:page:ptrd-1",
+              title: "PSR Platform Overview",
+              quote: "The psr-cache is refreshed within 250ms of an amendment",
+              retrievedAt: AT,
+              hedged: false,
+            },
+            {
+              source: "confluence",
+              docId: "confluence:page:ptrd-2",
+              title: "Gateway Notes",
+              quote: "There's a staleness cutoff, I think 5s",
+              retrievedAt: AT,
+              hedged: false,
+            },
+          ],
+        },
+      ];
+    });
+    const findings = (await analyse(b)).findings.filter((x) => x.id === "META-002");
+    const f = findings.find((x) => x.path === "clarifications.0.grounding.1.hedged");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("error");
+    expect(f?.message).toContain("expected true");
+    // the first row is honestly unhedged — it must not be reported
+    expect(findings.map((x) => x.path)).not.toContain("clarifications.0.grounding.0.hedged");
+  });
+
   it("refuses a hand-flipped observable flag", async () => {
     const f = (
       await analyse(

