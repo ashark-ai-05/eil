@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assemble, nextAcId } from "../reqs/assemble.js";
+import { renderHtml, renderMarkdown } from "../reqs/render.js";
 import { clone, minimalBody } from "./helpers/reqs-fixture.js";
 
 describe("assemble", () => {
@@ -66,5 +67,50 @@ describe("assemble", () => {
   it("is idempotent — assembling twice changes nothing", () => {
     const once = assemble(clone(minimalBody()));
     expect(assemble(clone(once))).toEqual(once);
+  });
+});
+
+describe("render", () => {
+  it("is a pure projection — same body in, same string out", () => {
+    const b = assemble(clone(minimalBody()));
+    expect(renderHtml(b)).toBe(renderHtml(clone(b)));
+  });
+
+  it("stamps REFUSED when any finding is an error", () => {
+    const b = assemble(clone(minimalBody()));
+    const html = renderHtml(b, [
+      {
+        id: "SCORE-001",
+        severity: "error",
+        path: "tree.score",
+        message: "stored 21, recomputed 2",
+      },
+    ]);
+    expect(html).toContain("REFUSED");
+    expect(html).toContain("SCORE-001");
+  });
+
+  it("does not stamp REFUSED for warnings alone", () => {
+    const b = assemble(clone(minimalBody()));
+    const html = renderHtml(b, [
+      {
+        id: "AC-005",
+        severity: "warning",
+        path: "tree.acceptanceCriteria.0",
+        message: "not observable",
+      },
+    ]);
+    expect(html).not.toContain("REFUSED");
+  });
+
+  it("shows the corpus mode so a run cannot be misrepresented", () => {
+    const b = assemble(clone(minimalBody()));
+    expect(renderMarkdown(b)).toContain("fixtures");
+  });
+
+  it("embeds no external references", () => {
+    const html = renderHtml(assemble(clone(minimalBody())));
+    expect(html).not.toMatch(/https?:\/\/(?!www\.w3\.org)/);
+    expect(html).not.toContain("<script");
   });
 });
