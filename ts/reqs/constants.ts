@@ -14,7 +14,11 @@ export const REGISTERED_CONSTANTS = {
   thresholdAtomic: 2,
   /** M at or above this must break down. */
   thresholdDecompose: 5,
-  /** Unknowns at or above this make `clarify` admissible. */
+  /** Unknowns at or above this make `clarify` admissible. `recommendAction`
+   *  gates its clarify drive rule through `decisionSpace`, which only admits
+   *  clarify in the must_break_down zone — so if this floor is ever retuned
+   *  below `thresholdDecompose`, clarify stays inadmissible below that zone
+   *  regardless; retune `thresholdDecompose` too if that is not the intent. */
   clarifyUnknownsFloor: 5,
   /** Recursion ceiling; a branch at this depth must carry a clarification or residual. */
   maxDepth: 6,

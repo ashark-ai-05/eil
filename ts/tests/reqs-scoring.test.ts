@@ -60,6 +60,18 @@ describe("recommendAction", () => {
     expect(recommendAction(1, 1)).toBe("leaf");
     expect(recommendAction(3, 2)).toBe("leaf");
   });
+  it("never recommends an action that decisionSpace forbids, for any threshold-plausible inputs", () => {
+    const priorUCandidates = [undefined, ...FIB];
+    for (const u of FIB) {
+      for (const c of FIB) {
+        const admissible = decisionSpace(u, c);
+        for (const priorU of priorUCandidates) {
+          const action = recommendAction(u, c, priorU);
+          expect(admissible).toContain(action);
+        }
+      }
+    }
+  });
 });
 
 describe("lexicons", () => {
@@ -68,11 +80,11 @@ describe("lexicons", () => {
     expect(hasHedge("Haven't measured recently")).toBe(true);
     expect(hasHedge("The cutoff is 5s, asserted in the runbook")).toBe(false);
   });
-  it("detects a hedge phrase even when hard-wrapped across a newline", () => {
-    expect(hasHedge("There's a staleness cutoff, I think\n5s")).toBe(true);
+  it("detects a hedge phrase with the newline inside the phrase itself", () => {
+    expect(hasHedge("Check\nwith the psr-limits team")).toBe(true);
   });
-  it("detects a hedge phrase split across a newline in the middle", () => {
-    expect(hasHedge("Check with the\npsr-limits team")).toBe(true);
+  it("detects a different hedge phrase with the newline inside the phrase itself", () => {
+    expect(hasHedge("Haven't\nmeasured recently")).toBe(true);
   });
   it("detects deferral markers", () => {
     expect(hasDeferral("latency budget TBD")).toBe(true);

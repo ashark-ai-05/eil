@@ -37,10 +37,21 @@ export function decisionSpace(u: Fib, c: Fib): Decision[] {
 /**
  * Adds the clarify drive rule: when a structural pass leaves the unknowns at or
  * above where they started and at or above the floor, decomposing again is
- * blind — the unknown is inherent and a human has to be asked.
+ * blind — the unknown is inherent and a human has to be asked. The drive rule
+ * only ever selects "clarify", so it is gated through `decisionSpace` rather
+ * than re-deriving admissibility here — the two functions cannot disagree
+ * about what is legal, under any retuning of the thresholds.
  */
 export function recommendAction(u: Fib, c: Fib, priorU?: Fib): Decision {
-  if (priorU !== undefined && u >= priorU && u >= K.clarifyUnknownsFloor) return "clarify";
+  const admissible = decisionSpace(u, c);
+  if (
+    priorU !== undefined &&
+    u >= priorU &&
+    u >= K.clarifyUnknownsFloor &&
+    admissible.includes("clarify")
+  ) {
+    return "clarify";
+  }
   const z = zone(magnitude(u, c));
   return z === "must_break_down" ? "decompose" : "leaf";
 }
