@@ -1153,4 +1153,41 @@ embed
     }
   });
 
-program.parseAsync(process.argv);
+/**
+ * The one place a failed command becomes something a person can act on.
+ *
+ * CatalogNotReady already carries a finished message, so it prints as-is with
+ * no stack. Postgres's undefined_table / undefined_column / unknown-database
+ * and a refused connection get the same treatment plus the database they were
+ * talking to: on this CLI those nearly always mean "pointed at the wrong
+ * catalog", and a driver stack trace sends people hunting a bug that is not
+ * there. Everything else re-throws untouched — hiding real stacks would cost
+ * more than it saves.
+ */
+program.parseAsync(process.argv).catch(async (err: any) => {
+  const { CatalogNotReady, safeDsn } = await import("./db.js");
+  if (err instanceof CatalogNotReady) {
+    console.error("\n" + err.message + "\n");
+    process.exit(2);
+  }
+  if (["42P01", "42703", "3D000", "ECONNREFUSED"].includes(err?.code)) {
+    console.error(
+      [
+        "",
+        String(err.message),
+        "",
+        "  database   " + safeDsn(),
+        process.env.EIL_DATABASE_URL
+          ? "             (from EIL_DATABASE_URL)"
+          : "             (the default — EIL_DATABASE_URL is not set in this shell)",
+        "",
+        "  That usually means this command is pointed at the wrong catalog.",
+        "  For the demo:  export EIL_DATABASE_URL=pglite://.eil-demo",
+        "  To create it:  eil db migrate",
+        "",
+      ].join("\n"),
+    );
+    process.exit(2);
+  }
+  throw err;
+});

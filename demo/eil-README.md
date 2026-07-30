@@ -233,9 +233,15 @@ tables with no infrastructure.
 
 ## If it breaks
 
-**A search returns nothing, or the gate looks broken.**
-`EIL_DATABASE_URL` is not set in that terminal. This is the one that will
-happen. `export EIL_DATABASE_URL=pglite://.eil-demo` and run it again.
+**A command says the catalog is behind, or names the wrong database.**
+`EIL_DATABASE_URL` is not set in that terminal, so the CLI fell back to its
+default DSN (`postgresql:///eil`) and found a stale database there. This is the
+one that will happen — the runner sets the variable itself, a hand-typed command
+does not. The command names the database it reached and exits 2:
+
+```sh
+export EIL_DATABASE_URL=pglite://.eil-demo
+```
 
 **`executor` shows no `fts_code`.**
 No code is indexed. Re-run step 3:

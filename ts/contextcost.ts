@@ -20,7 +20,7 @@
  * result, because an assumption you cannot see is not one the room can check.
  */
 
-import { type Db, connect } from "./db.js";
+import { type Db, assertCatalogReady, connect } from "./db.js";
 import { GET_DOC_MAX_CHARS, type Viewer, getDoc, localViewer, searchDocs } from "./search.js";
 
 /** Rule of thumb, not a tokenizer. Reported as approximate wherever it is shown. */
@@ -193,6 +193,7 @@ export async function runContextCost(
 ): Promise<ContextCostReport[]> {
   const client = await connect();
   try {
+    await assertCatalogReady(client);
     const viewer = localViewer();
     const out: ContextCostReport[] = [];
     for (const query of queries) {

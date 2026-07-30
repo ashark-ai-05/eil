@@ -14,7 +14,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CanonicalDoc } from "../contracts/models.js";
-import { type Db, connect, migrate } from "../db.js";
+import {
+  CatalogNotReady,
+  type Db,
+  assertCatalogReady,
+  connect,
+  migrate,
+  pendingMigrations,
+  safeDsn,
+} from "../db.js";
 import { SCORING_SQL, indexStats } from "../indexstats.js";
 import { upsertDocument } from "../store.js";
 
@@ -93,5 +101,39 @@ describe("index stats", () => {
     );
     const normalise = (sql: string) => sql.replace(/\s+/g, " ").trim();
     expect(normalise(searchSrc)).toContain(normalise(SCORING_SQL));
+  });
+
+  it("refuses a catalog that is behind, instead of failing on a missing column", async () => {
+    // The real report: after the demo, a hand-typed command falls back to the
+    // default DSN and lands on a stale database. The raw driver error
+    // ("column c.tenant does not exist") reads like a bug in the command.
+    const bare = mkdtempSync(join(tmpdir(), "eil-bare-"));
+    const saved = process.env.EIL_DATABASE_URL;
+    process.env.EIL_DATABASE_URL = `pglite://${bare}`;
+    const empty = await connect();
+    try {
+      expect((await pendingMigrations(empty)).length).toBeGreaterThan(0);
+      await expect(indexStats(empty)).rejects.toBeInstanceOf(CatalogNotReady);
+      await expect(assertCatalogReady(empty)).rejects.toThrow(/No catalog here/);
+    } finally {
+      await empty.end();
+      if (saved === undefined) delete process.env.EIL_DATABASE_URL;
+      else process.env.EIL_DATABASE_URL = saved;
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("reports nothing pending once migrated", async () => {
+    expect(await pendingMigrations(client)).toEqual([]);
+  });
+
+  it("never prints a password from the DSN", async () => {
+    // These messages name the database, and a connection string is exactly the
+    // kind of thing that ends up in a screenshot or a bug report.
+    expect(safeDsn("postgresql://eil:hunter2@db.internal:5432/eil")).toBe(
+      "postgresql://eil:***@db.internal:5432/eil",
+    );
+    expect(safeDsn("postgresql:///eil")).toBe("postgresql:///eil");
+    expect(safeDsn("pglite://.eil-demo")).toBe("pglite://.eil-demo");
   });
 });

@@ -33,6 +33,82 @@ export function dsn(): string {
 }
 
 /**
+ * The DSN with any password removed, for printing.
+ *
+ * Every message that names the database a command is talking to goes through
+ * here. A connection string is exactly the kind of thing that ends up in a
+ * screenshot, a bug report or a shared terminal.
+ */
+export function safeDsn(url: string = dsn()): string {
+  return url.replace(/(\/\/[^/@]*:)[^@]*@/, "$1***@");
+}
+
+/**
+ * Migrations that exist on disk but have not been applied to this database.
+ *
+ * A database with no "schema_migrations" table at all has had none applied —
+ * that is an empty catalog, not an error, so it reports every migration as
+ * pending rather than throwing.
+ */
+export async function pendingMigrations(client: Db): Promise<string[]> {
+  const all = migrationFiles().map((m) => m.name);
+  try {
+    const res = await client.query("SELECT name FROM schema_migrations");
+    const done = new Set(res.rows.map((r) => r.name as string));
+    return all.filter((n) => !done.has(n));
+  } catch {
+    return all;
+  }
+}
+
+/**
+ * Raised when a command is pointed at a database that cannot answer it.
+ *
+ * Carries a finished, human-readable message: the CLI prints it verbatim and
+ * suppresses the stack, because a driver stack trace for "you are talking to
+ * the wrong database" sends people looking for a bug that is not there.
+ */
+export class CatalogNotReady extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CatalogNotReady";
+  }
+}
+
+/**
+ * Refuse to run a read that needs a current schema against one that is behind.
+ *
+ * The failure this prevents is specific and was hit for real: the demo runner
+ * sets EIL_DATABASE_URL itself, so a command typed by hand afterwards falls
+ * back to "postgresql:///eil" and lands on whatever stale database happens to
+ * be there. The raw error from that ("column c.tenant does not exist") reads
+ * like a bug in the command rather than a pointer at the wrong catalog.
+ */
+export async function assertCatalogReady(client: Db): Promise<void> {
+  const pending = await pendingMigrations(client);
+  if (pending.length === 0) return;
+  const total = migrationFiles().length;
+  const empty = pending.length === total;
+  throw new CatalogNotReady(
+    [
+      empty
+        ? `No catalog here — none of the ${total} migrations have been applied.`
+        : `This catalog is ${pending.length} migration(s) behind (first missing: ${pending[0]}).`,
+      "",
+      `  database   ${safeDsn()}`,
+      process.env.EIL_DATABASE_URL
+        ? "             (from EIL_DATABASE_URL)"
+        : "             (the default — EIL_DATABASE_URL is not set in this shell)",
+      "",
+      process.env.EIL_DATABASE_URL
+        ? "  Bring it up to date:   eil db migrate"
+        : "  If you meant the demo:  export EIL_DATABASE_URL=pglite://.eil-demo",
+      process.env.EIL_DATABASE_URL ? "" : "  Otherwise migrate it:   eil db migrate",
+    ].join("\n"),
+  );
+}
+
+/**
  * Zero-install backend: EIL_DATABASE_URL=pglite://<data-dir> runs real
  * Postgres (WASM, in-process) from node_modules — no server, no admin
  * rights. PGlite itself enforces NO lock on its data dir — two processes can
@@ -104,7 +180,7 @@ async function connectPglite(url: string): Promise<Db> {
   };
 }
 
-/** Swap the database in a DSN. node-postgres IGNORES a `database` config field
+/** Swap the database in a DSN. node-postgres IGNORES a "database" config field
  * when connectionString is present, so overrides must happen in the URL itself.
  * PGlite has one database per data dir — overrides are meaningless there. */
 export function withDatabase(dsnStr: string, database: string): string {

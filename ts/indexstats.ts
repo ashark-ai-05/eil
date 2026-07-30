@@ -11,7 +11,7 @@
  * Everything here is read-only.
  */
 
-import { type Db, connect, dsn } from "./db.js";
+import { type Db, assertCatalogReady, connect, dsn } from "./db.js";
 import { GET_DOC_MAX_CHARS } from "./search.js";
 
 /**
@@ -60,6 +60,8 @@ export interface IndexStats {
 const num = (v: unknown): number => Number(v ?? 0);
 
 export async function indexStats(client: Db): Promise<IndexStats> {
+  // Before any query that assumes the current schema.
+  await assertCatalogReady(client);
   const version = await client.query("SELECT version() AS v");
   // Core extensions ship with every Postgres and are not something anyone has
   // to install; listing them would bury the answer. pgvector, if it were here,
