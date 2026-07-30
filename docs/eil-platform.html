@@ -63,7 +63,7 @@
   .t-sm { font-size:9.5px; fill:var(--muted); }
   .t-xs { font-size:8.5px; fill:var(--faint); }
   .w { fill:none; stroke:var(--faint); stroke-width:1.6; stroke-linecap:round; }
-  .w.lex { stroke:var(--lex); } .w.vec { stroke:var(--vec); } .w.fuse { stroke:var(--fuse); } .w.ok { stroke:var(--ok); }
+  .w.lex { stroke:var(--lex); } .w.fuse { stroke:var(--fuse); }
   .tip { fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
 
   /* ── motion — the same three keyframes system-map.html uses ─────────── */
@@ -73,8 +73,6 @@
     .signal { stroke-dasharray:6 9; animation:dash 13s linear infinite; }
     .signal.slow { stroke-dasharray:5 8; animation:dash 22s linear infinite; }
     .pulse { animation:floaty 3s ease-in-out infinite; }
-    .fill { animation:grow .9s cubic-bezier(.22,.8,.3,1) both; }
-    @keyframes grow { from { width:0; } }
   }
 
   .legend { display:flex; gap:18px; flex-wrap:wrap; margin:14px 2px 0; font-size:10.5px; color:var(--muted); letter-spacing:0; }
@@ -83,33 +81,42 @@
      light, so the word "white" would be a lie half the time. */
   .legend i::before { content:""; width:8px; height:8px; border-radius:2px; background:var(--sw, var(--faint)); flex:none; }
 
-  /* ── cost ───────────────────────────────────────────────────────────── */
-  .bar { display:grid; grid-template-columns:150px 1fr; gap:14px; align-items:center; margin-top:12px; }
-  .bar:first-of-type { margin-top:0; }
-  .bar .bl { font-size:11px; color:var(--muted); letter-spacing:0; line-height:1.4; }
-  .bar .bl b { display:block; color:var(--text); font-weight:600; font-size:11.5px; }
-  .track { position:relative; height:30px; background:var(--panel-2); border:1px solid var(--line-soft); border-radius:6px; overflow:hidden; }
-  /* Widths in CSS, never in script: the bars are the argument. */
-  .fill { height:100%; border-radius:5px 0 0 5px; display:flex; align-items:center; padding:0 10px; font-size:11px; white-space:nowrap; }
-  .fill.thru { width:100%; background:color-mix(in oklab, var(--warn) 26%, transparent);
-    border-right:1px solid color-mix(in oklab, var(--warn) 60%, transparent); color:var(--warn); }
-  /* Drawn at the NARROWEST of the four gaps this corpus produces, not the widest. */
-  .fill.two { width:15.3%; background:color-mix(in oklab, var(--ok) 26%, transparent);
-    border-right:1px solid color-mix(in oklab, var(--ok) 60%, transparent); color:var(--ok); }
-  .fill.two span { position:absolute; left:calc(15.3% + 10px); color:var(--ok); }
+  /* ── cost ─────────────────────────────────────────────────────────────
+     Drawn as documents rather than bars: a document is the thing that
+     actually enters a model's context, so eight pages against eight strips
+     needs no reading. Counts are the narrowest of the four gaps this
+     corpus's own demo questions produce. */
+  .cost { min-width:900px; }
   .foot { font-size:10.5px; color:var(--faint); letter-spacing:0; margin:14px 0 0; }
   .foot code { color:var(--lex); }
 
-  /* ── services on one substrate ──────────────────────────────────────── */
-  .svcs { display:grid; grid-template-columns:repeat(auto-fit, minmax(206px, 1fr)); gap:9px; }
-  .svc { background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:11px 12px 12px;
-    display:flex; flex-direction:column; gap:6px; transition:border-color .15s, transform .15s; }
+  /* ── services on one substrate ──────────────────────────────────────────
+     Each tile shows WHICH indexed data it reads, as lit badges. Built vs
+     proposed is carried by the border — solid or dashed — so the state is
+     visible without a word of text on every card. */
+  .srckey { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin:0 2px 12px;
+    font-size:10.5px; color:var(--muted); letter-spacing:0; }
+  .srckey span { color:var(--faint); }
+  .srckey .dim { margin-left:6px; }
+  .s { display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border-radius:5px;
+    font-size:9.5px; font-weight:700; letter-spacing:0; flex:none;
+    background:var(--panel-2); border:1px solid var(--line); color:var(--faint); opacity:.4; }
+  .s.on { opacity:1; }
+  .s.wiki.on { color:var(--lex); border-color:color-mix(in oklab, var(--lex) 50%, var(--line));
+    background:color-mix(in oklab, var(--lex) 14%, transparent); }
+  .s.jira.on { color:var(--vec); border-color:color-mix(in oklab, var(--vec) 50%, var(--line));
+    background:color-mix(in oklab, var(--vec) 14%, transparent); }
+  .s.code.on { color:var(--ok); border-color:color-mix(in oklab, var(--ok) 50%, var(--line));
+    background:color-mix(in oklab, var(--ok) 14%, transparent); }
+  .s.logs.on { color:var(--muted); border-color:var(--muted); background:var(--panel-2); }
+
+  .svcs { display:grid; grid-template-columns:repeat(auto-fit, minmax(238px, 1fr)); gap:9px; }
+  .svc { background:var(--panel); border:1px dashed var(--line); border-radius:9px; padding:12px;
+    display:flex; flex-direction:column; gap:10px; transition:border-color .15s, transform .15s; }
+  .svc.is-built { border-style:solid; border-color:color-mix(in oklab, var(--ok) 38%, var(--line)); }
   .svc:hover { border-color:var(--muted); transform:translateY(-2px); }
   .svc h3 { margin:0; font-size:12px; font-weight:600; color:var(--text); }
-  .svc p { margin:0; font-size:10.5px; color:var(--muted); letter-spacing:0; line-height:1.5; font-style:italic; }
-  .chipl { font-size:9px; letter-spacing:0.09em; text-transform:uppercase; color:var(--faint); align-self:flex-start;
-    border:1px solid var(--line); border-radius:20px; padding:1px 7px; }
-  .chipl.built { color:var(--ok); border-color:color-mix(in oklab, var(--ok) 42%, var(--line)); }
+  .svc .srcs { display:flex; gap:5px; margin-top:auto; }
   .base { margin-top:9px; border:1px solid color-mix(in oklab, var(--lex) 34%, var(--line)); border-radius:9px;
     background:linear-gradient(180deg, color-mix(in oklab, var(--lex) 9%, var(--panel)), var(--panel));
     padding:13px 14px 14px; position:relative; }
@@ -122,20 +129,9 @@
     border-radius:6px; padding:4px 8px; letter-spacing:0; }
   .part b { color:var(--text); font-weight:600; }
 
-  .note { margin-top:22px; border-left:2px solid color-mix(in oklab, var(--warn) 55%, var(--line));
-    padding:2px 0 2px 13px; font-size:10.5px; color:var(--faint); letter-spacing:0; line-height:1.65; }
-  .note b { color:var(--muted); font-weight:600; }
-
   footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line-soft);
     display:flex; justify-content:space-between; gap:14px; flex-wrap:wrap; font-size:10.5px; color:var(--faint); }
 
-  @media (max-width: 560px) {
-    .bar { grid-template-columns:1fr; gap:6px; }
-    .track { overflow:visible; margin-bottom:20px; }
-    .fill { overflow:hidden; border-radius:5px; }
-    .fill.two { overflow:visible; }
-    .fill.two span { left:0; top:calc(100% + 5px); }
-  }
   @media (prefers-reduced-motion: reduce) { .svc { transition:none; } .svc:hover { transform:none; } }
 </style>
 </head>
@@ -268,44 +264,107 @@
     </p>
   </section>
 
-  <!-- ── cost ───────────────────────────────────────────────────────────── -->
+  <!-- ── cost: drawn as documents, because documents are what enter a model ── -->
   <section class="band">
-    <h2>Why the next one is cheap<span class="sub">measured, per match</span></h2>
-    <div class="bar">
-      <div class="bl"><b>Hand over the pages</b>every match, in full</div>
-      <div class="track"><div class="fill thru"><span>1,700 – 3,000 characters</span></div></div>
+    <h2>What reaches the model<span class="sub">one question · 8 matches</span></h2>
+    <div class="scroll">
+      <svg class="flow cost" viewBox="0 0 1060 196" fill="none" role="img"
+           aria-label="A pass-through sends all eight matched documents in full, about 21,700 characters. Two-phase sends eight one-line previews plus the single document the agent opened, about 7,400 characters.">
+        <defs>
+          <!-- one document: a page with lines on it -->
+          <g id="doc">
+            <rect width="42" height="54" rx="3" fill="var(--panel-2)" stroke="currentColor" opacity=".9"/>
+            <g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".55">
+              <path d="M7 12h28M7 20h28M7 28h28M7 36h22M7 44h26"/>
+            </g>
+          </g>
+          <g id="strip">
+            <rect width="42" height="10" rx="2" fill="var(--panel-2)" stroke="currentColor" opacity=".9"/>
+            <path d="M7 5h24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
+          </g>
+        </defs>
+
+        <!-- pass-through -->
+        <text class="t-hd" x="20" y="34">Hand over the pages</text>
+        <text class="t-xs" x="20" y="48">all 8 matches, in full</text>
+        <g color="var(--warn)">
+          <use href="#doc" x="250" y="14"/><use href="#doc" x="304" y="14"/><use href="#doc" x="358" y="14"/>
+          <use href="#doc" x="412" y="14"/><use href="#doc" x="466" y="14"/><use href="#doc" x="520" y="14"/>
+          <use href="#doc" x="574" y="14"/><use href="#doc" x="628" y="14"/>
+        </g>
+        <text x="700" y="38" font-size="15" font-weight="700" fill="var(--warn)" font-family="var(--mono)">21,700</text>
+        <text class="t-xs" x="700" y="52">characters</text>
+
+        <!-- two-phase -->
+        <text class="t-hd" x="20" y="130">Search, then fetch</text>
+        <text class="t-xs" x="20" y="144">8 previews · 1 document</text>
+        <g color="var(--muted)">
+          <use href="#strip" x="250" y="108"/><use href="#strip" x="304" y="108"/><use href="#strip" x="358" y="108"/>
+          <use href="#strip" x="412" y="108"/><use href="#strip" x="466" y="108"/><use href="#strip" x="520" y="108"/>
+          <use href="#strip" x="574" y="108"/><use href="#strip" x="628" y="108"/>
+        </g>
+        <text class="t-xs" x="250" y="103">① search_docs — ids + snippets</text>
+        <g color="var(--ok)"><use href="#doc" x="250" y="126"/></g>
+        <text class="t-xs" x="302" y="146" fill="var(--ok)">② get_doc</text>
+        <text class="t-xs" x="302" y="158">the one it opened</text>
+        <text x="700" y="132" font-size="15" font-weight="700" fill="var(--ok)" font-family="var(--mono)">7,400</text>
+        <text class="t-xs" x="700" y="146">characters</text>
+
+        <!-- the gap, stated once -->
+        <path d="M812 20 v152" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 4"/>
+        <text x="840" y="84" font-size="22" font-weight="700" fill="var(--fuse)" font-family="var(--mono)">6.5–10×</text>
+        <text class="t-xs" x="840" y="102">less context, per match</text>
+        <text class="t-xs" x="840" y="118">retrieval itself spends nothing —</text>
+        <text class="t-xs" x="840" y="130">it is a query, not a completion</text>
+      </svg>
     </div>
-    <div class="bar">
-      <div class="bl"><b>Search, then fetch</b>previews, then one document</div>
-      <div class="track"><div class="fill two"><span>~270 · between 6.5× and 10× less</span></div></div>
-    </div>
-    <p class="foot">
-      Drawn to scale from this repo's corpus, at the narrowest of the four gaps its own demo questions
-      produce. Retrieval spends nothing — it is a query, not a completion. Your number:
-      <code>eil context-cost "&lt;question&gt;"</code>
-    </p>
+    <p class="foot">Your own number: <code>eil context-cost "&lt;question&gt;"</code></p>
   </section>
 
   <!-- ── what runs on it ────────────────────────────────────────────────── -->
   <section class="band">
     <h2>What runs on it<span class="sub">thin things, one thick base</span></h2>
+    <p class="srckey">
+      <span>reads:</span>
+      <b class="s wiki on">W</b> wiki
+      <b class="s jira on">J</b> tickets
+      <b class="s code on">C</b> code
+      <b class="s logs on">L</b> logs
+      <span class="dim">· solid = built · dashed = proposed</span>
+    </p>
     <div class="svcs">
-      <article class="svc"><span class="chipl built">Built</span><h3>Ask across everything</h3>
-        <p>"Where's the auth logic, and what did we agree about it?"</p></article>
-      <article class="svc"><span class="chipl built">Built</span><h3>Requirements gate</h3>
-        <p>"Is this ticket ready to build, and who says so?"</p></article>
-      <article class="svc"><span class="chipl">Proposed</span><h3>One search box for the org</h3>
-        <p>"Where is anything about the settlement rewrite?"</p></article>
-      <article class="svc"><span class="chipl">Proposed</span><h3>Onboarding answers</h3>
-        <p>"How do I get a limit changed? Who approves it?"</p></article>
-      <article class="svc"><span class="chipl">Proposed</span><h3>Incident context</h3>
-        <p>"Has this fired before, and what did we do?"</p></article>
-      <article class="svc"><span class="chipl">Proposed</span><h3>Review context</h3>
-        <p>"What was this change meant to do, and what constrains it?"</p></article>
-      <article class="svc"><span class="chipl">Proposed</span><h3>Control evidence</h3>
-        <p>"Show me the rule, the code that applies it, and when."</p></article>
-      <article class="svc"><span class="chipl">Proposed</span><h3>Documentation health</h3>
-        <p>"What do people keep asking that we can't answer?"</p></article>
+      <article class="svc is-built">
+        <h3>Ask across everything</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
+      </article>
+      <article class="svc is-built">
+        <h3>Requirements gate</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
+      </article>
+      <article class="svc">
+        <h3>One search box for the org</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
+      </article>
+      <article class="svc">
+        <h3>Onboarding answers</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code">C</b><b class="s logs">L</b></div>
+      </article>
+      <article class="svc">
+        <h3>Incident context</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code">C</b><b class="s logs on">L</b></div>
+      </article>
+      <article class="svc">
+        <h3>Review context</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code on">C</b><b class="s logs">L</b></div>
+      </article>
+      <article class="svc">
+        <h3>Control evidence</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira">J</b><b class="s code on">C</b><b class="s logs on">L</b></div>
+      </article>
+      <article class="svc">
+        <h3>Documentation health</h3>
+        <div class="srcs"><b class="s wiki on">W</b><b class="s jira on">J</b><b class="s code">C</b><b class="s logs">L</b></div>
+      </article>
     </div>
 
     <div class="base">
@@ -320,11 +379,6 @@
       </div>
     </div>
 
-    <p class="note">
-      <b>Built</b> means demonstrable in this repo. <b>Proposed</b> means paper — no code, no estimate.<br>
-      Two live limits: no connector stamps groups yet, so a real Confluence sync is owner-visibility only;
-      and logs are proxied, not indexed.
-    </p>
   </section>
 
   <footer>

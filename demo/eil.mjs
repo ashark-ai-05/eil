@@ -44,6 +44,7 @@ Options:
   --keep           do not wipe --data first (resume a part-built run)
   --skip-embed     skip the local embedding model; search runs lexical-only
   --pause          wait for Enter between steps, so you control the pace
+  --no-colour      plain output, no ANSI (also honours NO_COLOR)
 
 The whole run is local. No network, no credentials, no Atlassian instance.
 `);
@@ -71,6 +72,28 @@ const SENSITIVE = "what is CPTY-ALPHA presettlement limit";
 const env = { ...process.env, EIL_DATABASE_URL: `pglite://${DATA}` };
 let stepNo = 0;
 
+/**
+ * Colour is off when stdout is not a terminal, when NO_COLOR is set, or on
+ * --no-colour. A demo that emits escape codes into a pipe or a CI log is a
+ * demo somebody screenshots looking broken.
+ */
+const COLOUR =
+  process.stdout.isTTY && !process.env.NO_COLOR && !has("no-colour") && !has("no-color");
+const sgr = (code) => (s) => (COLOUR ? `\x1b[${code}m${s}\x1b[0m` : s);
+const c = {
+  bold: sgr(1),
+  dim: sgr(2),
+  cyan: sgr(36),
+  amber: sgr(33),
+  green: sgr(32),
+  red: sgr(31),
+  grey: sgr(90),
+};
+
+/** Reverse-video chip, so the step number reads as a marker and not as text. */
+const badge = (s) => (COLOUR ? `\x1b[46m\x1b[30m\x1b[1m${s}\x1b[0m` : `[${s.trim()}]`);
+const RULE = "─".repeat(74);
+
 function pause() {
   if (!has("pause")) return;
   spawnSync("bash", ["-c", 'read -r -p "  ↵ " _ < /dev/tty'], { stdio: "inherit" });
@@ -79,17 +102,21 @@ function pause() {
 /**
  * One heading, one or more commands beneath it.
  *
- * `say` is the line to deliver while it runs — kept here rather than only in
- * the narration file so that a presenter reading the terminal is never without
- * the point of the step they are looking at.
+ * `say` is the line to deliver while it runs. `watch` is the more useful one:
+ * it names the thing in the output that the step exists to show, in amber,
+ * BEFORE the output scrolls past. Without it a room watches a wall of JSON go
+ * by and takes nothing from it — the presenter knows what mattered and nobody
+ * else does.
  */
-function step(title, say, cmds, { optional = false, extraEnv = {} } = {}) {
+function step(title, say, cmds, { optional = false, extraEnv = {}, watch = null } = {}) {
   stepNo += 1;
-  console.log(`\n\x1b[1m── ${stepNo}. ${title}\x1b[0m`);
-  console.log(`   \x1b[3m${say}\x1b[0m`);
+  console.log(`\n${c.grey(RULE)}`);
+  console.log(`${badge(` ${String(stepNo).padStart(2)} `)} ${c.bold(title)}`);
+  console.log(`    ${c.dim(say)}`);
+  if (watch) console.log(`    ${c.amber("▸ look for:")} ${c.amber(watch)}`);
   let ok = true;
   for (const { show, bin, argv, env: cmdEnv } of cmds) {
-    console.log(`   \x1b[2m$ ${show}\x1b[0m\n`);
+    console.log(`\n    ${c.green("$")} ${c.green(show)}\n`);
     const r = spawnSync(bin[0], [...bin.slice(1), ...argv], {
       stdio: "inherit",
       env: { ...env, ...extraEnv, ...(cmdEnv ?? {}) },
@@ -97,9 +124,10 @@ function step(title, say, cmds, { optional = false, extraEnv = {} } = {}) {
     if (r.status === 0) continue;
     ok = false;
     if (!optional) {
-      console.error("\nStep failed. Fix it and re-run, or pass --keep to resume from here.");
+      console.error(`\n${c.red("Step failed.")} Fix it and re-run, or pass --keep to resume here.`);
       process.exit(r.status ?? 1);
     }
+    console.log(`    ${c.amber("(optional step skipped — the run continues)")}`);
   }
   pause();
   return ok;
@@ -119,9 +147,13 @@ const run = (title, say, argv, opts) => step(title, say, [eil(argv)], opts);
 if (existsSync(".eil-repos")) rmSync(".eil-repos", { recursive: true, force: true });
 if (!has("keep") && existsSync(DATA)) rmSync(DATA, { recursive: true, force: true });
 
-console.log(`\x1b[1mEIL — the knowledge plane\x1b[0m`);
-console.log(`backend: PGlite at ${DATA}. No server, no Docker, no admin rights.`);
-console.log("corpus:  demo/fixtures/ + demo/repo/. Nothing in this run touches the network.\n");
+console.log(`\n${c.cyan(c.bold("EIL — the knowledge plane"))}`);
+console.log(c.dim(`backend  PGlite at ${DATA} · no server, no Docker, no admin rights`));
+console.log(c.dim("corpus   demo/fixtures/ + demo/repo/ · nothing here touches the network"));
+console.log(
+  `\n${c.amber("▸ look for")} lines mark what each step is actually demonstrating.` +
+    `\n  ${c.dim("--pause steps through it · --no-colour for a plain log")}`,
+);
 
 // ── 2. Ingestion ───────────────────────────────────────────────────────────
 // Deliberately BEFORE the opening question, because there has to be an index
@@ -133,7 +165,7 @@ run(
   "Create the catalog",
   "Nineteen migrations into a Postgres running inside this Node process. The same schema runs unchanged against a real cluster.",
   ["db", "migrate"],
-);
+  { watch: "applied: [...19 files] — nineteen migrations, no server was installed" });
 
 const FIXTURES = "demo/fixtures";
 const files = readdirSync(FIXTURES)
@@ -150,7 +182,7 @@ step(
       join(FIXTURES, f),
     ]),
   ),
-);
+  { watch: "\"1 seen, 1 changed\" on each — thirteen documents entering the index" });
 
 run(
   "Ingest the repository",
@@ -168,18 +200,19 @@ run(
     "--acl-group",
     ENG,
   ],
-);
+  { watch: "\"10 upserted\" and the commit SHA it stopped at" });
 
 run("Compute the statistics", "Document frequency, N and average length — the ranking groundwork.", [
   "stats:refresh",
-]);
+],
+  { watch: "the ranking groundwork — nothing to see, it just has to have happened" });
 
 if (!has("skip-embed")) {
   run(
     "Embed, locally",
     "A vendored ONNX model, on this laptop. Nothing is sent anywhere and no per-query cost is incurred. If the model is missing this step is skipped and search runs lexical-only.",
     ["embed", "backfill"],
-    { optional: true },
+    { optional: true, watch: "\"embedded 49/49\" and the provider name — local, so nothing left this laptop" },
   );
 }
 
@@ -208,7 +241,7 @@ step(
       ENG,
     ]),
   ],
-);
+  { watch: "\"0 changed\" and \"up to date (<sha>)\" — THIS is the step. Nothing was re-read." });
 
 // ── 4. What is in there, and what scores it ────────────────────────────────
 
@@ -216,7 +249,7 @@ run(
   "Look at the index",
   "Unit-normalized float4[], so cosine is a plain dot product Postgres computes itself. The extension list is read out of pg_extension and it is empty. There is no vector database here.",
   ["index:stats"],
-);
+  { watch: "\"extensions: none installed\" and \"unit-normalized\" — no vector database anywhere" });
 
 // ── 5. The opening question — one system at a time, then all of them ───────
 
@@ -224,25 +257,25 @@ run(
   "Ask it of Confluence alone",
   "This is the shape of asking today. You get the rule — a control that cannot be evaluated has not passed — and nothing else. It is correct, and it is not an answer.",
   ["search", QUESTION, "--source", "confluence", "--limit", "3"],
-);
+  { watch: "one page: the rule. No number, no ticket, no code. Correct, and not an answer." });
 
 run(
   "Ask it of Jira alone",
   "The ticket where the threshold was agreed. Again true, again partial.",
   ["search", QUESTION, "--source", "jira", "--limit", "3"],
-);
+  { watch: "PTR-415 — the number somebody agreed. Also true, also partial." });
 
 run(
   "Now ask all of it",
   "Four lexical arms — strict and loose, over prose and over code — plus a vector arm, fused by reciprocal rank. The rule, the agreed number, and the line that enforces it. Point at `executor`: those are the arms that actually contributed. No model ran.",
   ["search", QUESTION, "--limit", "6"],
-);
+  { watch: "\"executor\" — the arms that ran; and three sources in the top four" });
 
 run(
   "Ask it again",
   "Same query, same corpus, same order. Every time. There is no model in the retrieval path to have a bad day.",
   ["search", QUESTION, "--limit", "6"],
-);
+  { watch: "the same ids in the same order. Byte for byte." });
 
 // ── 6. Cost ────────────────────────────────────────────────────────────────
 
@@ -250,7 +283,7 @@ run(
   "Count what it would have cost",
   "Characters that really would have crossed into a model's context, measured from this corpus. Quote the per-match pair, not the headline ratio: the ratio moves with how many documents matched, the per-match figure does not.",
   ["context-cost", QUESTION],
-);
+  { watch: "\"Per match:\" — quote THAT pair, not the headline ratio" });
 
 // ── 7. Governance ──────────────────────────────────────────────────────────
 
@@ -263,7 +296,7 @@ step(
       EIL_USER_GROUPS: ENG,
     }),
   ],
-);
+  { watch: "six useful results, and ptrd-7 is not among them. No error. Nothing to notice." });
 
 step(
   "Now ask as Risk Ops",
@@ -274,19 +307,19 @@ step(
       EIL_USER_GROUPS: `${ENG},${RISK}`,
     }),
   ],
-);
+  { watch: "ptrd-7 at the top, with a 250m credit line in the snippet" });
 
 run(
   "Try to retrieve a credential",
   "One page in this corpus contains an AWS key and a database password. It was never chunked, so the credential is absent from the full-text index, the embeddings and every snippet. There is nothing to redact on the way out, because it never went in.",
   ["quarantine", "list"],
-);
+  { watch: "one quarantined page — it was never chunked" });
 
 run(
   "Search for it anyway",
   "The page does not come back and the key appears nowhere in the response. Then say the harder half out loud: on a real codebase this also flags test fixtures and documentation that legitimately contain key-shaped strings, and `quarantine clear` accepts those — keyed on the value, so a different credential in the same file is caught again.",
   ["search", "AKIA aws access key deployment credentials", "--limit", "4"],
-);
+  { watch: "the page is absent and AKIA appears nowhere in the response" });
 
 // ── 8. Observability ───────────────────────────────────────────────────────
 
@@ -294,22 +327,19 @@ run(
   "Everything you just watched, as rows",
   "Metrics are SQL views over the facts — the vw_* views ARE the definitions, not a dashboard's reading of them. Then look at the model-spend table, and note that it is empty. That is not missing instrumentation.",
   ["report", "--out", "demo/eil-metrics.html"],
-);
+  { watch: "the report is written — open it and look at vw_zero_results" });
 
 run("Check the catalog's own integrity", "Read-only. `\"ok\": true` is an assertion, not a summary.", [
   "audit",
-]);
+],
+  { watch: "\"ok\": true — an assertion, not a summary" });
 
-console.log(`
-\x1b[1mDone.\x1b[0m
-
-  Metrics report:  demo/eil-metrics.html
-  Everything lived in ${DATA}/ — nothing was installed and nothing outside this
-  repo was touched.
-
-  To hand the whole thing to an agent:
-      claude mcp add eil -- pnpm -s --dir "$PWD" eil serve
-
-  Reset:
-      rm -rf ${DATA} .eil-repos demo/eil-metrics.html
-`);
+console.log(`\n${c.grey(RULE)}`);
+console.log(`${COLOUR ? "\x1b[42m\x1b[30m\x1b[1m ✓ \x1b[0m" : "[done]"} ${c.bold("Done.")} ${stepNo} steps.\n`);
+console.log(`    ${c.bold("The three to remember")}`);
+console.log(`      ${c.amber("1.")} One question, three sources — no single pipe answered it.`);
+console.log(`      ${c.amber("2.")} The contractor got six results and could not tell one was withheld.`);
+console.log(`      ${c.amber("3.")} ${c.bold("The model-spend table is empty.")} That is the architecture, not a gap.\n`);
+console.log(`    ${c.dim("report")}   demo/eil-metrics.html`);
+console.log(`    ${c.dim("to agent")} claude mcp add eil -- pnpm -s --dir "$PWD" eil serve`);
+console.log(`    ${c.dim("reset")}    rm -rf ${DATA} .eil-repos demo/eil-metrics.html\n`);

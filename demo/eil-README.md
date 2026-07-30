@@ -29,6 +29,12 @@ loaded out of `node_modules`, and the embedding model is vendored in the repo.
 | `--keep` | do not wipe the data directory first — resume a part-built run |
 | `--skip-embed` | skip the local model; search runs lexical-only (17 steps) |
 | `--data <dir>` | PGlite directory (default `.eil-demo`) |
+| `--no-colour` | plain output, no ANSI — also honours `NO_COLOR` |
+
+Every step prints an amber **`▸ look for:`** line naming the thing in the output
+that step exists to demonstrate, before the output scrolls past. Read it aloud;
+it is the difference between a room watching JSON go by and a room seeing the
+point.
 
 ---
 
