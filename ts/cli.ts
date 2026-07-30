@@ -862,6 +862,74 @@ reqs
     if (refused) await exitWith(1);
   });
 
+const DELIVERY_KINDS = ["ui", "backend", "migration", "mixed"] as const;
+const DELIVERY_TECH = ["new", "legacy"] as const;
+
+reqs
+  .command("elaborate <work-item>")
+  .description("Elaborate a work item into a reqs.json — the artefact is written even when refused")
+  .option("--out <path>", "output file (default: <work-item>.reqs.json)")
+  .option("--kind <kind>", `delivery kind: ${DELIVERY_KINDS.join(" | ")}`, "backend")
+  .option("--tech <tech>", `delivery technology: ${DELIVERY_TECH.join(" | ")}`, "legacy")
+  .option("--ask <name>", "the human named on every escalated clarification")
+  .action(async (workItem: string, opts) => {
+    // Declared facts about the delivery, not model judgments — so they are
+    // options with defaults rather than another thing to ask a model.
+    if (!(DELIVERY_KINDS as readonly string[]).includes(opts.kind)) {
+      console.log(`--kind must be one of ${DELIVERY_KINDS.join(", ")} (got '${opts.kind}')`);
+      process.exit(1);
+    }
+    if (!(DELIVERY_TECH as readonly string[]).includes(opts.tech)) {
+      console.log(`--tech must be one of ${DELIVERY_TECH.join(", ")} (got '${opts.tech}')`);
+      process.exit(1);
+    }
+    const { elaborate } = await import("./reqs/elaborate.js");
+    const { localViewer } = await import("./search.js");
+    const { makeDocResolver } = await import("./reqs/io.js");
+    const out: string = opts.out ?? `${workItem}.reqs.json`;
+    // Unlike `check` and `render`, this command CANNOT degrade to no catalog:
+    // with no knowledge plane every unknown escalates and the run says nothing.
+    const client = await connect();
+    try {
+      const viewer = localViewer();
+      const body = await elaborate(workItem, {
+        client,
+        viewer,
+        out,
+        // The same resolver the gate uses, so a citation this run recorded is
+        // verified against exactly the document the gate will re-read.
+        resolveDoc: makeDocResolver(client, viewer),
+        deliveryType: {
+          kind: opts.kind as (typeof DELIVERY_KINDS)[number],
+          tech: opts.tech as (typeof DELIVERY_TECH)[number],
+        },
+        ...(opts.ask ? { escalateTo: opts.ask } : {}),
+      });
+      const findings = body.analysis?.findings ?? [];
+      const errors = findings.filter((f) => f.severity === "error");
+      const cov = body.coverage;
+      console.log(`wrote ${out}`);
+      if (cov)
+        console.log(
+          `  ${cov.leaves} leaves · ${cov.acs} ACs · ${cov.grounded} grounded · ` +
+            `${cov.escalated} escalated · corpus ${body.metadata.corpusMode}\n`,
+        );
+      printFindings(findings);
+      const named = [...new Set(errors.map((f) => f.id))].join(", ");
+      // The artefact was produced, so this exits 0. The GATE is `eil reqs
+      // check`, which exits 1 — a generator that refuses to emit its own output
+      // would defeat the one property this command exists to hold.
+      console.log(
+        `\n  ${body.analysis?.checksRun ?? 0} checks run   ${errors.length} errors   ` +
+          `${findings.length - errors.length} warnings   ` +
+          `${errors.length === 0 ? "PASSED" : `REFUSED by ${named}`}`,
+      );
+      if (errors.length > 0) console.log("  run `eil reqs check` for the gate's exit code");
+    } finally {
+      await client.end();
+    }
+  });
+
 reqs
   .command("render <file>")
   .description("Project a reqs.json as a self-contained HTML page (or markdown)")

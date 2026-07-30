@@ -1,11 +1,23 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { FixtureProvider, getProvider } from "../llm/index.js";
+import type { Db } from "../db.js";
+import { FixtureProvider, type Provider, getProvider } from "../llm/index.js";
+import { analyse } from "../reqs/analyse.js";
 import { REGISTERED_CONSTANTS as K } from "../reqs/constants.js";
+import { type ElaborateDeps, detectCorpusMode, elaborate } from "../reqs/elaborate.js";
 import { type Judgment, type SearchDocsPayload, resolveUnknown } from "../reqs/ground.js";
+import {
+  AC_PROMPT,
+  CHILDREN_PROMPT,
+  JUDGE_PROMPT,
+  QUESTION_PROMPT,
+  SCORE_PROMPT,
+} from "../reqs/prompt.js";
+import { walk } from "../reqs/schema.js";
+import { magnitude, recommendAction } from "../reqs/scoring.js";
 
 /**
  * The unknown the demo actually lands on. It is deliberately the one PTR-420 is
@@ -389,5 +401,210 @@ describe("FixtureProvider", () => {
       if (previous === undefined) delete process.env.EIL_LLM_FIXTURE;
       else process.env.EIL_LLM_FIXTURE = previous;
     }
+  });
+});
+
+/**
+ * The elaboration loop. Every one of these runs with a `FixtureProvider`, so
+ * there is no live model anywhere in the suite; the wrapper below only decides
+ * WHICH recorded reply the fixture replays, by looking for the instruction block
+ * `prompt.ts` exports. That routing is itself an assertion: if a builder ever
+ * stopped embedding its own instructions, every one of these tests would fail.
+ */
+type Scripted = Partial<Record<"score" | "children" | "question" | "criteria" | "judge", string>>;
+
+function scriptedProvider(replies: Scripted, seen: string[] = []): Provider {
+  const pick = (prompt: string): string | undefined => {
+    if (prompt.includes(AC_PROMPT)) return replies.criteria;
+    if (prompt.includes(CHILDREN_PROMPT)) return replies.children;
+    if (prompt.includes(QUESTION_PROMPT)) return replies.question;
+    if (prompt.includes(JUDGE_PROMPT)) return replies.judge;
+    if (prompt.includes(SCORE_PROMPT)) return replies.score;
+    return undefined;
+  };
+  return {
+    name: "fixture",
+    async complete(prompt, opts) {
+      seen.push(prompt);
+      const reply = pick(prompt);
+      if (reply === undefined)
+        throw new Error(`no scripted reply for prompt: ${prompt.slice(0, 60)}`);
+      // The replay itself is FixtureProvider's, keyed by the prompt hash exactly
+      // as a recorded fixture file would be.
+      return new FixtureProvider({ default: reply }).complete(prompt, opts);
+    },
+  };
+}
+
+/** Records every statement written to llm_calls, and answers the corpus probe. */
+function recordingClient(
+  corpus: { total: number; synthetic: number } = { total: 0, synthetic: 0 },
+) {
+  const calls: { text: string; params: any[] }[] = [];
+  const client: Db = {
+    async query(text: string, params: any[] = []) {
+      calls.push({ text, params });
+      if (/from documents/i.test(text)) return { rows: [corpus] };
+      return { rows: [] };
+    },
+    async end() {},
+  };
+  return {
+    client,
+    calls,
+    logged: () => calls.filter((c) => /insert into llm_calls/i.test(c.text)),
+  };
+}
+
+/** A cascade that always escalates: nothing in the corpus scores above the floor. */
+const NOTHING_FOUND = () => ({
+  search: async () => searchPayload({ results: [], top_score: 0, score_gap: 0 }),
+  fetchDoc: async () => null,
+});
+
+const BASE_REPLIES: Scripted = {
+  score:
+    '{"unknowns": 8, "complexity": 2, "magnitude": 1, "decision": "leaf", "rationale": "the amendment path is undecided"}',
+  children:
+    '{"children": ["Apply an approved amendment to the live limit picture", "Reject orders while the amended limit is not yet in force"]}',
+  question:
+    '{"question": "What happens to in-flight orders when a counterparty limit is reduced?"}',
+  criteria:
+    '{"criteria": [{"stakeholder": "Risk Ops", "given": "an approved amendment", "when": "the gateway receives the publish", "then": ["the snapshot records the new limit within 250ms"]}]}',
+  judge:
+    '{"answers": false, "quote": "", "rationale": "the corpus is about the question and does not answer it"}',
+};
+
+function deps(over: Partial<ElaborateDeps> = {}): ElaborateDeps {
+  return {
+    provider: scriptedProvider(BASE_REPLIES),
+    title: "Intraday PSR limit amendment",
+    brief: "A counterparty limit change made today only takes effect tomorrow.",
+    corpusMode: "fixtures",
+    escalateTo: "d.mercer",
+    now: () => new Date("2026-07-30T09:00:00.000Z"),
+    ...NOTHING_FOUND(),
+    ...over,
+  };
+}
+
+describe("elaborate", () => {
+  it("computes magnitude and decision itself, ignoring anything the model offers", async () => {
+    const body = await elaborate("PTR-401", deps());
+
+    // The reply claimed magnitude 1 and decision "leaf" alongside unknowns 8.
+    // Both claims are discarded: magnitude is max(8, 2) and the decision comes
+    // from recommendAction, which cannot return "leaf" in the must_break_down
+    // zone. Nothing the model said about either survives into the artefact.
+    expect(body.tree.score.unknowns).toBe(8);
+    expect(body.tree.score.complexity).toBe(2);
+    expect(body.tree.score.magnitude).toBe(8);
+    expect(body.tree.score.magnitude).toBe(magnitude(8, 2));
+    expect(body.tree.score.decision).not.toBe("leaf");
+    expect(body.tree.score.decision).toBe(recommendAction(8, 2));
+    expect(body.tree.decision).toBe("decompose");
+    expect(body.tree.isLeaf).toBe(false);
+    // …and the same for every node the loop produced, not only the root.
+    for (const { node } of walk(body.tree)) {
+      expect(node.score.magnitude).toBe(magnitude(node.score.unknowns, node.score.complexity));
+      expect(node.score.decision).not.toBe("leaf");
+      for (const pass of node.scoreHistory)
+        expect(pass.magnitude).toBe(magnitude(pass.unknowns, pass.complexity));
+    }
+    // The whole reply is not smuggled in under another key either.
+    expect(JSON.stringify(body)).not.toContain('"decision":"leaf"');
+  });
+
+  it("records an open clarification when the cascade reaches a human, and the gate says so", async () => {
+    const body = await elaborate("PTR-401", deps());
+
+    expect(body.clarifications.length).toBeGreaterThan(0);
+    for (const c of body.clarifications) {
+      // Open: no answer at all, and no citation pretending there was one.
+      expect(c.answer).toBeUndefined();
+      expect(c.grounding).toEqual([]);
+      expect(c.resolvedFrom).toBeUndefined();
+      // …but the human who has to answer it is named.
+      expect(c.answeredBy).toEqual({ kind: "human", name: "d.mercer" });
+      expect(c.question).toContain("in-flight orders");
+    }
+    // Every node that recorded a clarify pass is named by a clarification,
+    // which is CLARIFY-001's rule — so the refusal below is CLARIFY-002's alone.
+    const asked = [...walk(body.tree)].filter((n) =>
+      n.node.scoreHistory.some((p) => p.decision === "clarify"),
+    );
+    expect(asked.length).toBe(body.clarifications.length);
+
+    const result = await analyse(body);
+    expect(result.ok).toBe(false);
+    expect(result.findings.filter((f) => f.id === "CLARIFY-002").length).toBe(
+      body.clarifications.length,
+    );
+    expect(result.findings.some((f) => f.id === "CLARIFY-001")).toBe(false);
+  });
+
+  it("writes the artefact even when the gate refuses it", async () => {
+    const dir = await repoWith({});
+    const out = join(dir, "PTR-401.reqs.json");
+    const body = await elaborate("PTR-401", deps({ out }));
+
+    // Refused, and written anyway: a refused artefact plus its findings is the
+    // honest output, and suppressing it would hide the only thing worth showing.
+    expect(body.analysis).toBeDefined();
+    expect(body.analysis?.findings.length).toBeGreaterThan(0);
+    expect(body.analysis?.findings.some((f) => f.severity === "error")).toBe(true);
+    const onDisk = JSON.parse(await readFile(out, "utf-8"));
+    expect(onDisk).toEqual(JSON.parse(JSON.stringify(body)));
+    // The written file is a body the analyser can read back and refuse again.
+    const reread = await analyse(onDisk);
+    expect(reread.ok).toBe(false);
+    expect(reread.findings.map((f) => f.id).sort()).toEqual(
+      (body.analysis?.findings ?? []).map((f) => f.id).sort(),
+    );
+  });
+
+  it("never emits a sign-off", async () => {
+    const body = await elaborate("PTR-401", deps());
+    // Sign-off is human-only and out of band. The loop has no code path to it.
+    expect(body.signoff).toBeUndefined();
+    expect("signoff" in body).toBe(false);
+    expect(JSON.stringify(body)).not.toContain("signoff");
+  });
+
+  it("logs every model call to llm_calls as reqs-elaborate, with no invented token counts", async () => {
+    const seen: string[] = [];
+    const rec = recordingClient();
+    await elaborate(
+      "PTR-401",
+      deps({ provider: scriptedProvider(BASE_REPLIES, seen), client: rec.client }),
+    );
+
+    const logged = rec.logged();
+    // One row per model call, and not one more.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(logged.length).toBe(seen.length);
+    for (const row of logged) {
+      expect(row.text).toContain("llm_calls");
+      expect(row.params[0]).toBe("fixture"); // provider
+      expect(row.params[2]).toBe("reqs-elaborate"); // caller
+      // CliProvider reports no usage, so counts stay null rather than invented.
+      expect(row.params[3]).toBeNull();
+      expect(row.params[4]).toBeNull();
+      expect(row.params[6]).toBe(true); // ok
+    }
+  });
+
+  it("stamps corpusMode from the catalog it actually read, not from a flag", async () => {
+    const fixtures = recordingClient({ total: 13, synthetic: 13 });
+    const live = recordingClient({ total: 13, synthetic: 4 });
+
+    expect(await detectCorpusMode(fixtures.client)).toBe("fixtures");
+    expect(await detectCorpusMode(live.client)).toBe("live");
+
+    const body = await elaborate(
+      "PTR-401",
+      deps({ client: live.client, corpusMode: undefined, title: "Intraday PSR limit amendment" }),
+    );
+    expect(body.metadata.corpusMode).toBe("live");
   });
 });
