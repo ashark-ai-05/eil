@@ -1,4 +1,4 @@
-# Demo — your org's data, nothing installed
+# Demo — nothing installed, nothing on the network
 
 Runs on **PGlite**: real Postgres compiled to WASM, loaded out of `node_modules`.
 No Docker, no Postgres server, no admin rights. The embedding model is vendored
@@ -8,135 +8,502 @@ Every step below corresponds to a node in **[docs/system-map.html](../docs/syste
 open it alongside and walk the diagram as you go.
 
 ```sh
-node demo/run.mjs --repo /path/to/your/repo --space ENG --project PAY
+node demo/run.mjs
 ```
+
+That is the whole invocation. The corpus is the local fixture set in
+`demo/fixtures/`, so the run needs no VPN, no corporate proxy and no
+credentials.
+
+**The same pages also exist in Confluence and Jira, for the audience to look
+at.** They are visual props: you can put a citation on screen and then show the
+room the page it names. The demo itself never fetches them — it reads its own
+indexed copy of the same text, ingested from the fixture. Nothing in the run
+depends on the network being there.
 
 ---
 
-## Setup (once)
+## Before you are standing in front of anyone
+
+```sh
+eil demo:preflight
+```
+
+It checks the backend, the model and the clone cache, and prints the fix for
+anything wrong. It is read-only, so run it as often as you like.
+
+It also probes both connectors, which the fixture run does not need. With
+`EIL_CONFLUENCE_URL` and `EIL_JIRA_URL` unset it reports them as `--` /
+*"this source will be skipped"* and that is the expected line. If they **are**
+set in your shell it will try to reach them, and a `FAIL` there is not a
+problem for this demo — unset them before rehearsing if you would rather not
+look at it.
+
+Add `--repo /path/to/your/repo` only if you are also indexing a repository; it
+then catches two things that otherwise surface as raw git errors mid-demo:
+
+- a **stale `.eil-repos/`** — `git clone` into a non-empty directory just fails
+- your repo's **actual branch**; the default is `main` and plenty of repos are `master`
+
+<details>
+<summary><strong>Optional — pointing this at a real Atlassian instance</strong> (not used for the demo)</summary>
+
+The live connectors are real, and this is how you use them. None of it is needed
+for `node demo/run.mjs`.
 
 ```sh
 export EIL_CONFLUENCE_URL=https://confluence.your.org   # base URL, no /wiki, no trailing path
 export EIL_JIRA_URL=https://jira.your.org
 eil auth login confluence      # PAT goes to the OS keychain, never to disk
 eil auth login jira
+
+node demo/run.mjs --repo /path/to/your/repo --space ENG --project PAY
 ```
 
-Then, **before you are standing in front of anyone**:
-
-```sh
-eil demo:preflight --repo /path/to/your/repo
-```
-
-It checks the backend, the model, both connectors, and the repo — and prints the
-fix for anything wrong. It is read-only, so run it as often as you like. Two
-things it catches that otherwise surface as raw git or HTTP errors mid-demo:
-
-- a **stale `.eil-repos/`** — `git clone` into a non-empty directory just fails
-- your repo's **actual branch**; the default is `main` and plenty of repos are `master`
-
-## Scoping — read this before pointing it at a real instance
-
-`--space` and `--project` are **required** for the live sources. An unscoped
-Confluence sync pulls the entire instance, which is a poor first impression and
-an unkind thing to do to your org's API from a laptop. Start with one space and
-one project.
+**Always scope the sync.** `--space` and `--project` are required by
+`eil ingest confluence` / `eil ingest jira` for a reason: an unscoped Confluence
+sync pulls the entire instance, which is a poor first impression and an unkind
+thing to do to your org's API from a laptop. Start with one space and one
+project.
 
 Connectors run on **your** personal token: you can only index what you could
 already read.
 
+</details>
+
 ---
 
-## The walk
+# The narration — seven beats
+
+`node demo/run.mjs` walks all of these in order. Drive them by hand if you want
+to control the pace; the commands below are exactly what the runner runs.
+
+Rehearse the whole thing from clean first — it takes a couple of minutes:
+
+```sh
+rm -rf .eil-demo .eil-repos
+export EIL_DATABASE_URL=pglite://.eil-demo
+node demo/run.mjs
+```
+
+### Beat 1 — there is no server
+
+```sh
+pnpm eil db migrate
+```
+
+**Say:** nineteen migrations into a Postgres that is running inside this Node
+process. Nothing was installed, no Docker, no admin rights, and this same schema
+runs unchanged against a real cluster.
+
+### Beat 2 — the corpus goes in
+
+```sh
+for f in demo/fixtures/*.json; do
+  case "$f" in *ptrd-*) pnpm eil ingest confluence --fixture "$f";; *) pnpm eil ingest jira --fixture "$f";; esac
+done
+pnpm eil stats:refresh
+```
+
+Eight Confluence pages and five Jira tickets, read off disk. Ingestion
+normalises a fixture and a live sync into the same canonical document, so
+everything downstream is the code path that runs in production.
+
+**Say:** these are the pages you can see in Confluence — this is reading its own
+indexed copy of them. Issue links and labels become graph edges. Ingest is
+incremental from a stored cursor and hash-gated, so re-running costs nothing.
+
+Optionally, on your own estate — not part of this demo:
+
+```sh
+pnpm eil ingest confluence --space ENG      # your personal token; only what you could already read
+pnpm eil ingest jira --project PAY
+pnpm eil ingest repo /path/to/repo --branch main --name repo --include '**/*.*'
+```
+
+Commit dates become recency; imports and ticket keys become edges.
+
+### Beat 3 — retrieval, with no LLM in the loop
+
+```sh
+pnpm eil search "how do we handle a limit reduction"
+```
+
+**Say:** four lexical arms — strict and loose full-text over prose, strict and
+loose over the code index — plus a vector arm when the local model is available,
+all fused by reciprocal rank. Point at `arms_contributing` and `top_score` in the
+JSON; `arms_contributing` counts the arms that actually returned something, so
+expect 3 to 5. Same query, same corpus, same order, every time. Nothing here
+spends a token.
+
+If the embedding model is present, this is the one to slow down on:
+
+```sh
+pnpm eil ivf build
+```
+
+It prints two sweeps and then a decision. The first is measured with **every**
+cluster probed, so the only loss is what quantization discarded; the second then
+varies clusters at that oversample. The two error sources are separated, not
+confounded. On a small corpus it often ends with *"No PARTIAL probe reached
+recall@10 >= 0.98, so IVF is not adopted"* — **that is the demo working.** The
+gate refused an optimisation that would have cost recall, and said so.
+
+### Beat 4 — the credential that cannot be retrieved
+
+```sh
+pnpm eil quarantine list
+pnpm eil search "deploying the payment service"
+```
+
+**Say:** `demo/secret-page.json` contains an AWS key and a database password. It
+was never chunked, so the credential is absent from the tsvector, the embeddings,
+`ts_headline` and every snippet — the search returns nothing. Then show the other
+half, which is the interesting one: on a real codebase the scanner also flags
+test fixtures and docs that legitimately contain key-shaped strings.
+
+```sh
+pnpm eil quarantine clear <id>     # accept a false positive; it is re-chunked
+```
+
+Acceptance is keyed on the **value**, not the file, so if that file later gains a
+*different* credential it is quarantined again. Accepting one finding cannot
+silently accept the next.
+
+### Beat 5 — the gate
+
+```sh
+export EIL_DATABASE_URL=pglite://.eil-demo    # if it is not already set
+pnpm eil reqs check demo/PTR-401.reqs.json
+```
+
+`CLARIFY-005` re-reads every cited document out of the catalog, so this command
+needs one. Point it somewhere unmigrated and it refuses the *clean* artefact —
+correctly, since it cannot verify the citations, but it reads like the gate
+failing. `demo/run.mjs` and `demo/tamper.mjs` set the variable themselves; a
+command typed by hand does not.
+
+The artefact was produced by `eil reqs elaborate`, replaying a recorded model
+run — see [Record and replay](#record-and-replay) below, and say so out loud.
+
+**Say:** this is a requirements artefact an agent produced. Forty-six checks.
+Every derived field — the magnitude bands, the leaf flags, the traceability index
+— is recomputed from the body and compared, and every cited quote is re-read out
+of the catalog through the same audited tool path an agent would use. It says
+`46 checks run   0 errors   PASSED`.
+
+### Beat 6 — tamper with it
+
+**This is the beat.** Everything before it is setup.
+
+```sh
+node demo/tamper.mjs
+```
+
+Six copies of that artefact, one single-field edit each, the real CLI run over
+each one. Six refusals, and each names the check that caught it:
+
+| # | The edit | Refused by |
+|---|----------|-----------|
+| 1 | a stored score changed from 2 to 21 | `SCORE-001` |
+| 2 | `" Effective timing TBD."` appended to the top-level requirement | `DEFER-001` |
+| 3 | a recorded question deleted, its "we asked" record left behind | `CLARIFY-001` |
+| 4 | one word changed inside a quoted citation | `CLARIFY-005` |
+| 5 | the first approver changed from human to agent | `GATE-006` |
+| 6 | the traceability index emptied | `META-002`, `TRACE-001` |
+
+Run one on its own if someone asks:
+
+```sh
+node demo/tamper.mjs --tamper 4
+```
+
+**Say:** number 4 is the one that leaves the artefact. The gate re-reads the
+cited document out of the catalog and greps for the quote character for
+character — the same audited tool path an agent would use. A fabricated citation
+is not merely implausible here — it is mechanically detectable. And number 5 is
+the line the whole phase exists to draw: an agent may draft, score, ground and
+analyse a requirement set. It may never approve one.
+
+The script asserts **46 checks ran** on every single invocation. `CLARIFY-005`
+does not fail when the catalog is unreachable — it *disappears*, and the count
+drops to 45. Without that assertion, beat 6 would look identical while proving
+nothing.
+
+### Beat 7 — all of it is a row
+
+```sh
+pnpm eil audit
+pnpm eil reqs render demo/PTR-401.reqs.json --out demo/PTR-401.html
+pnpm eil report --out demo/metrics.html
+pnpm eil eval:mine
+```
+
+**Say:** `"ok": true` is the assertion, not the summary. Every tool call the demo
+made landed as an audited row with a trace id; `eval:mine` promotes those real
+queries into a labelled set, which is the answer to *"how do you know retrieval
+got better?"* — and to why hand-maintained golden-query files stay empty. Open
+the rendered artefact and show that a refused one is stamped **REFUSED** rather
+than projected as a clean document.
+
+Then point an agent at the whole thing:
+
+```sh
+claude mcp add eil -- pnpm -s --dir "$PWD" eil serve
+```
+
+---
+
+## Record and replay
+
+A live model in front of executives is the highest-variance thing in the room,
+and on a laptop with no working model CLI it is not available at all. So the
+demo replays a **recorded** run.
+
+```sh
+# record: wrap whichever provider is selected, and write the pack as it goes
+pnpm eil reqs elaborate PTR-401 --record demo/PTR-401.replay.json
+
+# replay: any command that calls a model picks the pack up from the environment
+EIL_LLM_FIXTURE=demo/PTR-401.replay.json pnpm eil reqs elaborate PTR-401
+```
+
+A pack is a JSON file with a provenance block and one entry per prompt:
+
+```json
+{
+  "recordedAt": "2026-07-30T19:25:58.038Z",
+  "provider": "hand-authored-during-build",
+  "model": null,
+  "note": "why this pack exists, and anything a reader must not mistake",
+  "replies": { "<sha256 prefix of the prompt>": { "text": "…", "latencyMs": 1840 } }
+}
+```
+
+Four things worth knowing:
+
+- **Only the model's own judgments are replayed.** Retrieval, the confidence
+  arithmetic, the resolution cascade, the re-reading of every cited quote out of
+  the catalog, the assembler and all 46 checks run live against the ingested
+  corpus, on every run.
+- **The artefact says it was replayed.** `metadata.generator.provenance` is
+  `"replay"`, it is a **required** schema field, and both projections carry a
+  line in plain words — `judgments: replayed from a recorded run (…)`. An
+  artefact that cannot say where its judgments came from does not validate.
+- **`agent` and `model` name what produced the recording**, not the machinery
+  that read it back, so `llm_calls` records what actually produced each reply.
+  The replay itself lands on the `caller` column as `reqs-elaborate (replay)` —
+  a replayed call cost nothing and must not be summed into model spend.
+- **Replay keeps the run's rhythm.** Each reply carries the latency the recorded
+  call really took, and the replay sleeps it. The demo takes about twenty
+  seconds over the elaboration rather than finishing before the room has read
+  the first line.
+
+Rebuild the whole artefact — elaboration, human pass, projection — with:
+
+```sh
+pnpm demo:reqs                  # replay the committed pack
+pnpm demo:reqs --rebuild-pack   # re-author the recorded run first
+```
+
+Rebuild the pack whenever `ts/reqs/prompt.ts` changes: replies are keyed by the
+sha256 of the exact prompt, so a reworded instruction block retires the pack.
+
+### Why the artefact needs a human pass
+
+`eil reqs elaborate` alone produces a **refused** artefact, and correctly so:
+
+```
+UNCERT-001   REQ-ROOT.2.2.residualRef   a review-zone leaf must reference an accepted residual
+CLARIFY-002  clarifications.2.answer    CL-3 carries no answer at all
+```
+
+That refusal is a worklist, and it is work only people can do. The elaboration
+loop cannot write a sign-off — there is no code in it that can — it cannot accept
+a residual, because a residual is only ever carried on a named human's authority,
+and it cannot answer an escalation, because the point of escalating is that
+nothing in the corpus answers it. `scripts/build-demo-reqs.ts` records those
+three human acts: d.mercer answers the in-flight-order question, s.iyer accepts
+the residual on the hedged 250ms citation, and the three roles sign — in that
+order, because `GATE-002` refuses an artefact signed while its own analysis still
+holds errors.
+
+---
+
+## The walk, against the system map
+
+What `node demo/run.mjs` actually does, in order:
 
 | # | Step | The map node it demonstrates |
 |---|---|---|
-| 1 | `db migrate` | *Zero-install backend* — 19 migrations, no server |
-| 2 | `ingest confluence --space` | *Only the spaces you name* |
-| 3 | `ingest jira --project` | *Projects scoped by* — issue links and labels become edges |
-| 4 | `ingest repo` | *Clone, walk* — commit dates become recency |
-| 5 | `embed backfill` | *Meaning, embedded* — local ONNX, no per-query cost |
-| 6 | `ivf build` | The system **measuring its own recall** and choosing a parameter |
-| 7 | `search` | *Two arms* fused by rank, plus tier and freshness |
-| 8 | `search retryHandler` | *Exact terms, identifiers* — the code index, not the prose arm |
-| 9 | quarantine | *Visibility lives on the document* |
-| 10 | `audit` | *Every tool call lands as a row* |
-| 11 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
-| 12 | `serve` over MCP | *Connected over MCP* — an agent pulls ranked, ACL-filtered context |
+| 1 | `demo:preflight` | Backend and model checked before anyone is watching |
+| 2 | `db migrate` | *Zero-install backend* — 19 migrations, no server |
+| 3 | `ingest --fixture demo/fixtures/*` | The PTR-DEMO corpus, read off disk — the pages and tickets the gate re-reads citations from; issue links and labels become edges |
+| 4 | `stats:refresh` | Document frequency, N and avgdl — the BM25 groundwork |
+| 5 | `ingest --fixture demo/secret-page.json` | *Visibility lives on the document* — the planted credential page, quarantined at ingest |
+| 6 | `embed backfill` | *Meaning, embedded* — local ONNX, no per-query cost |
+| 7 | `ivf build` | The system **measuring its own recall** and choosing a parameter |
+| 8 | `search` | *Four lexical arms* (strict and loose, prose and code) plus a vector arm when the local model is available, fused by rank, plus tier and freshness |
+| 9 | `search "deploying the payment service"` | The quarantined credential is not retrievable — absent from tsv, embeddings and snippets |
+| 10 | `reqs elaborate PTR-401` | The elaboration loop, replaying the recorded model run — real retrieval, real cascade, real citation verification. Comes out **REFUSED**, which is the honest output |
+| 11 | `reqs check` | The gate — generated fields recomputed, citations re-read |
+| 12 | `demo/tamper.mjs` | Six edits, six refusals, each naming itself |
+| 13 | `audit` | *Every tool call lands as a row* |
+| 14 | `eval:mine` | *Recall trend decides what gets built next* — the loop back over the top |
+| 15 | `report --out demo/metrics.html` | The fact tables, as a self-contained page |
+| 16 | `serve` over MCP | *Connected over MCP* — an agent pulls ranked, ACL-filtered context |
 
-### 6 — the one to slow down on
-
-`eil ivf build` prints two sweeps and then a decision:
-
-```
-  oversample   recall@10   (full probe: quantization loss only)
-          4x   0.9367
-          8x   0.9800
-  -> oversample 8
-
-  nprobe   recall@10   scanned/query
-       1   0.4833           26
-       8   0.9633          199
-      23   0.9800          552
-```
-
-The first sweep is measured with **every** cluster probed, so there is no cluster
-loss — whatever is missing is purely what binary quantization discarded. The
-second then varies clusters at that oversample. **The two error sources are
-separated, not confounded.**
-
-On a small corpus it will often end with:
-
-> No PARTIAL probe reached recall@10 >= 0.98, so IVF is not adopted and queries
-> keep the exact scan.
-
-**That is the demo working, not failing.** The gate refused an optimisation that
-would have cost recall, and said so. Re-run as the corpus grows.
-
-### 9 — quarantine, and the review step
-
-The planted `demo/secret-page.json` contains an AWS key and a database password.
-After ingest it is **not chunked at all**, so the credential never reaches the
-tsvector, the embeddings, `ts_headline`, or a snippet — searching for its text
-returns nothing.
-
-On a real codebase the scanner will also flag **test fixtures and documentation**
-that legitimately contain key-shaped strings. That is the interesting half:
-
-```sh
-eil quarantine list                    # rule and a 4-char hint, never the secret
-eil quarantine clear <id>              # accept a false positive; it is re-chunked
-```
-
-Acceptance is keyed on the *value*, not the file — so if that file later gains a
-**different** credential, it is quarantined again. Accepting one finding cannot
-silently accept the next.
-
-### 11 — why the eval loop exists
-
-Every search in the demo was audited. `eval:mine` promotes them into a labelled
-set, `eval:judge` pools and grades them. This is the answer to "how do you know
-retrieval got better?" — and to why hand-maintained golden-query files stay
-empty: nothing was producing usable usage records until the audit log did.
+Passing the optional flags adds steps rather than changing any of these:
+`--repo` adds `ingest repo` (*Clone, walk* — commit dates become recency) and
+`search retryHandler` (*Exact terms, identifiers* — the code index, not the
+prose arm); `--space` and `--project` add the live `ingest confluence --space`
+and `ingest jira --project` (*Only the spaces you name*).
 
 ---
 
 ## Honest caveats — volunteer these
 
+Say these before someone asks. Every one of them is a thing a sharp person in
+the room will find in ten minutes, and volunteering it is what makes the rest
+of the demo credible.
+
+**The PTR-DEMO corpus is synthetic.** Every Confluence page and Jira ticket the
+gate re-reads citations from was written for this demonstration — the pre-trade
+risk platform, the limit-reduction argument, the contradictory gateway notes.
+Each page carries a `SYNTHETIC DEMO CONTENT` banner in its own body saying so:
+illustrative only, not a production reference, not to be cited in design or
+change documentation. The same pages have been created in Confluence and Jira so
+the room can look at them, but the demo does not read them from there: it reads
+its own indexed copy, ingested from the fixture. Ingestion normalises a fixture
+and a live sync into the same canonical document, so the pipeline does not know
+the difference. Say this while the gate is on screen re-reading those citations;
+it is the first thing a sharp person in the room will wonder about the
+plausible-looking pages.
+
+**The group-level ACL in this run is real, and it is fixture-fed.** Visibility
+is stamped on the document and every read fails closed. It works here because
+the fixture carries `acl_groups`: `ptrd-7` is restricted to `grp-risk-ops`, so a
+caller is granted that page by group membership, and a caller who is neither the
+owner nor in the group gets no trace of it — no title, no snippet, no count.
+That is the real enforcement path in `ts/search.ts`, not a demo shim. The gap is
+upstream of it: **no connector stamps groups yet**, so a live Confluence sync
+would give you owner-level visibility only — `acl_groups: []` with `ingested_by`
+as the only grant, and on a shared server every document owned by the service
+account. That is a known gap, and it is in the connectors, not in the
+enforcement. Say it plainly if asked; do not claim live multi-user visibility.
+
+**The model's judgments are a recording, and the recording was written by
+hand.** `demo/PTR-401.replay.json` is a replay pack: the model's own bounded
+judgments — two scoring bands, one question, the child statements, the acceptance
+criteria, and the answers/quote rulings — replayed rather than called. They were
+**authored during the build of this demo**, because `amp` is non-functional and
+`copilot` is not installed on the machine it was built on. No model produced
+them, which is why the pack's `model` is `null` and its `provider` says
+`hand-authored-during-build` in the file itself. It is not a captured run of a
+production model and must never be described as one. What is **not** replayed is
+everything that does the checking: retrieval, the confidence arithmetic, the
+resolution cascade, the re-reading of every cited quote out of the catalog, the
+assembler and all 46 checks — those run live on every invocation, and the
+artefact stamps itself `provenance: replay` so the projection cannot be mistaken
+for a live run. Recording and replay are a real feature of the pipeline
+(`--record`, `EIL_LLM_FIXTURE`), not demo scaffolding; a run against a live
+provider records a pack of exactly the same shape.
+
+**This is phase 1 of 4.** What you just watched is elaboration and gating —
+turning a work item into a scored, grounded, refusable requirements artefact.
+Design, decomposition into tasks, and implementation are phases 2, 3 and 4. The
+schema carries `updatedAt` as a staleness pin precisely so a later phase can
+detect that it is working from a body that has moved.
+
+**BM25 is schema and statistics only.** Migration 0017 adds the tables and
+`stats:refresh` computes document frequency, N and avgdl — but the ranking in the
+retrieval path is still `ts_rank`. Nothing is scored by BM25 yet. The groundwork
+is real; the ranking change is not done.
+
+**Code search is exact-equality and unranked.** `search_code` matches
+`ci.value = $4` and orders by path and line number. It is an index lookup, not a
+ranked search: excellent for "where is this identifier", useless for "find me
+code that does roughly this". Zoekt-style ranking and symbol routes are future
+work; the router today only steers arm weights.
+
 **~87% of chunks exceed the embedding model's window.** `eil audit` reports
-`chunks_over_embed_window`. MiniLM stops at ~1024 characters and chunks are
-3200, so the vector arm reads roughly the first third of most chunks. Retrieval
-still works; the ceiling is real and the fix (matching chunk size to the model,
-or a longer-context model) is gated on the eval set existing.
+`chunks_over_embed_window`. MiniLM stops at ~1024 characters and chunks are 3200,
+so the vector arm reads roughly the first third of most chunks. Retrieval still
+works; the ceiling is real, and the fix — matching chunk size to the model, or a
+longer-context model — is gated on the eval set existing.
 
-**The ACL is owner-only in practice.** `ingested_by` is the OS user and every
-connector stamps `acl_groups` empty, so on a shared server every document would
-be owned by the service account. Fail-closed, and currently delivering less than
-"fail-closed ACL" implies. Fine for a single-operator demo; do not claim
-multi-user visibility.
+**There is no cost-in-dollars reporting.** The `llm_calls` table has existed
+since migration 0002 but has only just gained its first writer, and the provider
+this pipeline actually runs on (`CliProvider`, wrapping headless Amp and Copilot)
+reports no token counts at all. So you get call counts and latency, not spend. If
+someone asks "what did that cost?", the honest answer is that the row is there
+and the number is not.
 
-**No Grafana.** It needs Docker. `eil report --out demo/metrics.html` produces a
-self-contained HTML report over the same fact tables.
+**No Grafana.** It is provisioned in the repo but it needs Docker and a real
+Postgres backend, and this demo has neither. `eil report --out demo/metrics.html`
+produces a self-contained HTML report over the same fact tables.
+
+---
+
+## If it breaks, say this
+
+Rehearse this section too. Every one of these has happened.
+
+**Someone asks to see it against the real Confluence, live, now.**
+Don't. The run is scoped to fixtures on purpose: it removes the proxy, the VPN
+and the credentials from the risk list, and `corpus_mode` says `fixtures` on
+every artefact so no run can be misrepresented. Say: "the connectors are real
+and scoped — `eil ingest confluence --space ENG` — and I'll show you that on my
+machine afterwards. What's on screen now is the same pipeline, because ingestion
+normalises a fixture and a live sync into the same canonical document." Then
+switch to the browser and show the page in Confluence, which is what they
+actually want to see. Do not spend stage time on a network.
+
+**Someone asks whether it is really reading anything.**
+Show the citation, then open that page in Confluence in the browser. The text
+matches character for character — that is the point of `CLARIFY-005`. Be clear
+that the tool read its own indexed copy: it is the same content, ingested from
+the fixture, and nothing in this run went out to the network.
+
+**The embedding model is unavailable.**
+`@huggingface/transformers` is an optional dependency and may simply not be
+there. Both embedding steps are optional in the runner and it prints
+`embeddings unavailable — running lexical arms only`. Say exactly that. The four
+lexical arms are complete without it and beats 4 through 7 are unaffected.
+
+**Never** set `EIL_EMBED_PROVIDER=fake` to make the vector arm appear. It emits
+deterministic pseudo-random vectors; the results would be noise dressed as
+meaning. And with the model absent, do not call what you are showing *semantic*
+search — it is lexical search, and it is good.
+
+**The analyser refuses something mid-demo.**
+Read the check id out loud and explain what it caught. **That is the product
+working.** A gate that only ever passes is not a gate. The refusal names itself,
+states the observed value and the expected one, and points at the exact path in
+the artefact — which is the whole argument for building it this way.
+
+The one refusal that is genuinely an accident is `CLARIFY-005` on the *clean*
+artefact: it means the artefact's citations and the ingested corpus have drifted
+apart. `demo/tamper.mjs` checks the clean baseline first and stops with that
+explanation rather than running six confusing tampers on top of it. Fix it by
+re-ingesting the corpus:
+
+```sh
+for f in demo/fixtures/*.json; do
+  case "$f" in *ptrd-*) pnpm eil ingest confluence --fixture "$f";; *) pnpm eil ingest jira --fixture "$f";; esac
+done
+```
+
+**`demo/tamper.mjs` says only 45 of 46 checks ran.**
+The catalog is not reachable, so the one check that leaves the artefact was
+skipped. Check `EIL_DATABASE_URL`, then `pnpm eil db migrate`, then re-ingest as
+above. The script refuses to run the drill in this state on purpose — a tamper
+that silently does not run is worse than one that fails.
+
+**Someone asks for Grafana.**
+It is not shown: it needs Docker and a Postgres backend. Run
+`pnpm eil report --out demo/metrics.html` and open that instead — same fact
+tables, same numbers, no infrastructure.
 
 ---
 
@@ -145,6 +512,11 @@ self-contained HTML report over the same fact tables.
 ```sh
 rm -rf .eil-demo .eil-repos demo/metrics.html demo/judgments.md
 ```
+
+`demo/PTR-401.reqs.json`, `demo/PTR-401.html` and `demo/PTR-401.replay.json` are
+committed, so the gate and the tamper drill work on a fresh clone with nothing
+generated. Rebuild them with `pnpm demo:reqs` if you change the corpus or the
+prompts.
 
 Everything lived in `.eil-demo/`. Nothing was installed, and nothing outside the
 repo was touched.

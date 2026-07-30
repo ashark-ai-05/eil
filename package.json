@@ -16,6 +16,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check ts scripts",
     "lint:fix": "biome check --write ts scripts",
+    "corpus:build": "tsx scripts/build-corpus.ts",
+    "corpus:check": "tsx scripts/build-corpus.ts --check",
+    "pack:build": "tsx scripts/build-replay-pack.ts",
+    "demo:reqs": "tsx scripts/build-demo-reqs.ts",
     "map:build": "tsx scripts/build-map.ts",
     "map:check": "tsx scripts/build-map.ts --check"
   },

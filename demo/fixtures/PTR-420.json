@@ -1,0 +1,26 @@
+{
+  "key": "PTR-420",
+  "url": "https://jira.example.com/browse/PTR-420",
+  "fields": {
+    "summary": "Decide in-flight order treatment on limit reduction",
+    "status": "Open",
+    "issuetype": "Task",
+    "project": "PTR",
+    "reporter": "s.iyer",
+    "created": "2026-07-14T08:20:00+00:00",
+    "updated": "2026-07-24T09:00:00+00:00",
+    "description": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nWhen a counterparty limit is reduced, we have no agreed answer for orders that\nare already working at the venue. It is written down nowhere, and today's\nbehaviour is whatever the code happens to do rather than anything anyone chose.\nThis wants a decision from risk and compliance together — it is not engineering's\nto make. Blocking question for PTR-401.\n",
+    "issue_links": [
+      {
+        "type": "relates to",
+        "key": "PTR-401"
+      }
+    ],
+    "comments": [
+      {
+        "author": "s.iyer",
+        "body": "Raised at the risk forum, no decision yet. I will carry it again next month."
+      }
+    ]
+  }
+}

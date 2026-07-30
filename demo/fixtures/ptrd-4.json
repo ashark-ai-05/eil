@@ -1,0 +1,14 @@
+{
+  "id": "ptrd-4",
+  "title": "Market Access Controls — Regulatory Obligations",
+  "url": "https://confluence.example.com/display/PTR-DEMO/ptrd-4",
+  "author": "s.iyer",
+  "created": "2024-08-14T11:00:00+00:00",
+  "updated": "2026-06-22T10:12:00+00:00",
+  "ancestors": [
+    "PTR-DEMO",
+    "Compliance"
+  ],
+  "acl_groups": [],
+  "body": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nWe are required to operate pre-trade risk controls on every order that reaches a\ntrading venue under our market access arrangements, and to be able to\ndemonstrate afterwards that those controls were applied to that order. Two\nconsequences come up in design discussions often enough to write down, and\nneither is negotiable.\n\nFirst: a control that cannot be evaluated has not passed. If a pre-trade check\ncannot be completed — reference data missing, the service unavailable, the\ncredit exposure view too old to be relied on — the order must be rejected.\nFail closed is the only defensible behaviour, and letting the order through to\nreconcile afterwards is not something we can put in front of a regulator. (The\nolder control inventory in the market access self-assessment pack sets the same\nthing out at more length, though several of the service names in it have\nchanged since.)\n\nSecond: there is no bypass. Not for a desk head, not for the on-call engineer,\nnot for a client go-live date. There is no manual override and there must never\nbe one built. The kill switch is a different mechanism and should not be\nconfused with a bypass: it withdraws our flow, it does not admit flow that has\nfailed a control.\n\nCompliance holds the mapping from the market access rules our venue memberships\nare subject to onto the individual controls in ptc-gateway. Their list, as sent\nover after the last review:\n\n- order size / max order value — ptc-gateway, sync path\n- price collar — ptc-gateway\n- restricted instrument list — ptc-gateway, list owned by Compliance\n- presettlement credit check — ptc-gateway, out of psr-cache\n- kill switch — session level, withdrawal of flow, not an order control\n- duplicate / erroneous order detection — believed to be covered upstream in\n  the client OMS, nobody has confirmed this, leaving it here as a question\n\nAsk Compliance for the current citation before you put one in a design\ndocument.\n"
+}

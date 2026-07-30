@@ -1,0 +1,34 @@
+{
+  "key": "PTR-401",
+  "url": "https://jira.example.com/browse/PTR-401",
+  "fields": {
+    "summary": "Intraday PSR limit amendment",
+    "status": "To Do",
+    "issuetype": "Story",
+    "project": "PTR",
+    "reporter": "d.mercer",
+    "created": "2026-07-06T09:12:00+00:00",
+    "updated": "2026-07-28T15:44:00+00:00",
+    "description": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nA counterparty limit change made today only takes effect tomorrow, and that\ncauses us two problems. Collateral a client posts during the day sits there doing\nnothing until the overnight cycle, so a counterparty who funded at nine in the\nmorning is still trading against yesterday's number and rings the desk to say so.\nAnd when credit deteriorates during the day — a downgrade, a name in the news, a\nmargin call that does not turn up — Risk Ops has no mechanism to bring a line\ndown before the next business day. Both directions need to be possible on the\nday.\n\nShould cover both increases and decreases.\n",
+    "issue_links": [
+      {
+        "type": "relates to",
+        "key": "PTR-392"
+      },
+      {
+        "type": "relates to",
+        "key": "PTR-415"
+      },
+      {
+        "type": "relates to",
+        "key": "PTR-420"
+      }
+    ],
+    "comments": [
+      {
+        "author": "d.mercer",
+        "body": "The October collateral cycle is the case I actually care about — is that in scope here, or are we only talking about the ordinary daily posting? Please don't scope it out without speaking to me first."
+      }
+    ]
+  }
+}

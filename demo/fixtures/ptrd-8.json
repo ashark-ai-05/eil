@@ -1,0 +1,13 @@
+{
+  "id": "ptrd-8",
+  "title": "PSR Cache Refresh Design",
+  "url": "https://confluence.example.com/display/PTR-DEMO/ptrd-8",
+  "author": "n.okafor",
+  "created": "2026-02-12T17:30:00+00:00",
+  "updated": "2026-02-13T09:05:00+00:00",
+  "ancestors": [
+    "PTR-DEMO"
+  ],
+  "acl_groups": [],
+  "body": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nNotes from the cache refresh session on 12 Feb. s.iyer (chair), a.whitfield,\nd.mercer, me. Written up off the whiteboard, so correct anything I have got\nwrong.\n\nAgreed shape: psr-limits publishes a record per counterparty, and each gateway\nreplaces its entry for that counterparty in place. The snapshot is keyed per\ncounterparty, so a publish is a single overwrite and there is no merge to get\nwrong. I asked what happens when two publishes for the same counterparty arrive\nout of order — the answer was that the record carries a version and the gateway\ndrops anything older than what it already holds. Nobody has written that rule\ndown.\n\nEach record carries its publish timestamp so a gateway can work out how old its\nview is. d.mercer asked how Risk Ops would ever find out that a gateway had\nquietly stopped being fed, and there was no answer to that in the room. Raised as\nPTR-415.\n\na.whitfield pointed out that the refresh path is the same one the add-on factors\nride on, and that we have never load tested both moving at the same time.\n\nActions: s.iyer to write up the version rule. Me to get a staleness case into the\nregression pack. d.mercer to come back on who Risk Ops wants alerted.\n\nNothing on this page was re-checked after the session.\n"
+}

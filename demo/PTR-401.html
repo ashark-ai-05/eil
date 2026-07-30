@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTR-401 — PTR-401: Intraday PSR limit amendment</title>
+<style>
+  :root {
+    --ink:#090e18; --panel:#10192b; --line:#223148; --line-soft:#1a2740;
+    --text:#cbd7e9; --muted:#6f819e; --faint:#46587a; --lex:#5cc2ef; --vec:#efab54; --ok:#5ccb8e; --warn:#ef7d6b;
+    --shadow: 0 1px 0 #ffffff08, 0 12px 34px -20px #000000cc;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ink:#eef1f6; --panel:#ffffff; --line:#cbd4e2; --line-soft:#dbe2ec;
+      --text:#16202f; --muted:#5d6c85; --faint:#8794a8; --lex:#1f8fc7; --vec:#c07914; --ok:#1f9d63; --warn:#c0442f;
+      --shadow: 0 1px 0 #ffffff, 0 10px 26px -20px #23324a55; color-scheme:light; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--ink); color:var(--text); font-family:var(--mono); font-size:15px; line-height:1.55;
+    -webkit-font-smoothing:antialiased; letter-spacing:-0.01em;
+    background-image: radial-gradient(110% 70% at 88% -8%, color-mix(in oklab, var(--lex) 8%, transparent), transparent 60%),
+      radial-gradient(110% 70% at 6% 108%, color-mix(in oklab, var(--vec) 7%, transparent), transparent 55%);
+    background-attachment:fixed; }
+  .wrap { max-width:960px; margin:0 auto; padding:clamp(20px,4vw,44px) clamp(16px,4vw,36px) 60px; }
+  h1 { font-size:20px; margin:0 0 4px; letter-spacing:0.01em; }
+  h2 { font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:var(--faint); font-weight:700;
+    margin:34px 0 12px; padding-top:18px; border-top:1px solid var(--line-soft); }
+  h2:first-of-type { border-top:0; padding-top:0; }
+  .sub { color:var(--muted); font-size:13px; margin:0; }
+  .banner-refused { border:2px solid var(--warn); border-radius:10px; background:color-mix(in oklab, var(--warn) 12%, var(--panel));
+    box-shadow:var(--shadow); padding:20px 22px; margin:18px 0 30px; }
+  .banner-refused .title { font-size:23px; font-weight:800; letter-spacing:0.06em; color:var(--warn); text-transform:uppercase; }
+  .banner-refused ul { margin:12px 0 0; padding-left:20px; }
+  .banner-refused li { color:var(--text); font-size:13.5px; margin:5px 0; }
+  .banner-refused code { color:var(--warn); }
+  .meta { display:grid; grid-template-columns:auto 1fr; gap:4px 16px; font-size:13px; color:var(--muted); }
+  .corpus { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; letter-spacing:0.06em;
+    text-transform:uppercase; font-weight:700; }
+  .corpus.fixtures { color:var(--vec); background:color-mix(in oklab, var(--vec) 16%, transparent); border:1px solid color-mix(in oklab, var(--vec) 40%, var(--line)); }
+  .corpus.live { color:var(--ok); background:color-mix(in oklab, var(--ok) 16%, transparent); border:1px solid color-mix(in oklab, var(--ok) 40%, var(--line)); }
+  .node-card { border:1px solid var(--line); border-radius:9px; background:var(--panel); box-shadow:var(--shadow);
+    padding:12px 15px; margin:0 0 10px; }
+  .node-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .node-id { color:var(--lex); font-weight:700; font-size:12.5px; }
+  .node-decision { margin-left:auto; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--faint);
+    border:1px solid var(--line); border-radius:6px; padding:2px 8px; }
+  .node-decision.leaf { color:var(--ok); border-color:color-mix(in oklab, var(--ok) 40%, var(--line)); }
+  .node-decision.decompose { color:var(--lex); border-color:color-mix(in oklab, var(--lex) 40%, var(--line)); }
+  .node-decision.clarify { color:var(--warn); border-color:color-mix(in oklab, var(--warn) 40%, var(--line)); }
+  .node-stmt { margin:6px 0 4px; color:var(--text); }
+  .node-score { font-size:12px; color:var(--muted); }
+  .node-score b { color:var(--text); }
+  .ac { border-left:2px solid var(--line); margin:8px 0 0 4px; padding:2px 0 2px 12px; font-size:12.5px; color:var(--muted); }
+  .ac .acid { color:var(--vec); font-weight:600; }
+  .ac .gwt b { color:var(--faint); text-transform:uppercase; font-size:10.5px; letter-spacing:0.06em; margin-right:6px; }
+  .ac .gwt { margin:2px 0; }
+  .ac .not-observable { color:var(--warn); font-size:11px; margin-left:6px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; margin:6px 0 0; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+  th { color:var(--faint); font-weight:600; font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; }
+  td.quote { color:var(--text); max-width:34ch; }
+  .hedged { color:var(--warn); font-size:11px; font-weight:700; letter-spacing:0.04em; }
+  .ledger-grp { margin:10px 0 18px; }
+  .ledger-grp h3 { font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin:0 0 6px; }
+  .residual { border-left:2px solid var(--warn); padding:4px 0 4px 12px; margin:0 0 8px; font-size:12.5px; }
+  .residual b { color:var(--text); }
+  .residual .who { color:var(--muted); font-size:11.5px; }
+  .clarification { border-left:2px solid var(--warn); padding:4px 0 4px 12px; margin:0 0 8px; font-size:12.5px; }
+  .clarification b { color:var(--text); }
+  .clarification .who { color:var(--muted); font-size:11.5px; }
+  .signoff { display:flex; gap:24px; flex-wrap:wrap; font-size:13px; }
+  .signoff .result { font-weight:700; }
+  .approver { color:var(--muted); font-size:12.5px; }
+  .approver b { color:var(--text); }
+  .empty { color:var(--faint); font-size:12.5px; font-style:italic; }
+  .foot { margin-top:36px; padding-top:16px; border-top:1px solid var(--line-soft); font-size:11px; color:var(--faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  
+  <h1>PTR-401 — PTR-401: Intraday PSR limit amendment</h1>
+  <p class="sub">backend / legacy · generated by eil reqs elaborate via hand-authored-during-build 0.2.0</p>
+
+  <h2>Metadata</h2>
+  <div class="meta">
+    <div>corpus mode</div><div><span class="corpus fixtures">fixtures</span></div>
+    <div>judgments</div><div>replayed from a recorded run (hand-authored-during-build)</div>
+    <div>created</div><div>2026-07-30T19:34:56.763Z</div>
+    <div>updated</div><div>2026-07-30T19:35:17.967Z</div>
+    <div>execution profile</div><div>full</div>
+    <div>coverage</div><div>6 leaves · 6 ACs · 2 grounded · 1 escalated · 1 carried</div>
+  </div>
+
+  <h2>Requirement tree</h2>
+  <div class="node-card" style="margin-left:0px">
+      <div class="node-head"><span class="node-id">REQ-ROOT</span>
+        <span class="node-score"><b>8×8→8</b></span>
+        <span class="node-decision decompose">decompose</span></div>
+      <p class="node-stmt">PTR-401: Intraday PSR limit amendment</p>
+      </div><div class="node-card" style="margin-left:18px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.1</span>
+        <span class="node-score"><b>2×2→2</b></span>
+        <span class="node-decision leaf">leaf</span></div>
+      <p class="node-stmt">Risk Ops can raise and approve a counterparty limit amendment that takes effect the same day.</p>
+      <div class="ac"><span class="acid">AC-1</span> · Risk Ops
+        <div class="gwt"><b>Given</b>an amendment raised in credit-admin by one Risk Ops user</div>
+        <div class="gwt"><b>When</b>a second, different Risk Ops user approves it</div>
+        <div class="gwt"><b>Then</b><div>credit-admin records the amendment as approved and hands it to psr-limits the same day</div><div>the approve action is refused with a separation-of-duties reason code when the approver is the user who raised it</div></div></div></div><div class="node-card" style="margin-left:18px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.2</span>
+        <span class="node-score"><b>5×5→5</b></span>
+        <span class="node-decision decompose">decompose</span></div>
+      <p class="node-stmt">An approved amendment reaches every gateway's limit snapshot on the day it is approved.</p>
+      </div><div class="node-card" style="margin-left:36px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.2.1</span>
+        <span class="node-score"><b>2×2→2</b></span>
+        <span class="node-decision leaf">leaf</span></div>
+      <p class="node-stmt">psr-limits publishes each amended counterparty record and every gateway replaces its entry in place.</p>
+      <div class="ac"><span class="acid">AC-2</span> · Platform on-call
+        <div class="gwt"><b>Given</b>an approved amendment for one counterparty</div>
+        <div class="gwt"><b>When</b>psr-limits publishes the amended record</div>
+        <div class="gwt"><b>Then</b><div>every gateway snapshot holds the new limit for that counterparty and no other counterparty's entry changes</div><div>a publish older than the record already held is dropped, and the snapshot version does not go backwards</div></div></div></div><div class="node-card" style="margin-left:36px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.2.2</span>
+        <span class="node-score"><b>3×2→3</b></span>
+        <span class="node-decision leaf">leaf</span></div>
+      <p class="node-stmt">The gateway acts on an amended limit inside the agreed end-to-end refresh time.</p>
+      <div class="ac"><span class="acid">AC-3</span> · Risk Ops
+        <div class="gwt"><b>Given</b>an amendment approved in credit-admin</div>
+        <div class="gwt"><b>When</b>psr-limits publishes it to the gateways</div>
+        <div class="gwt"><b>Then</b><div>the gateway evaluates the next order for that counterparty against the amended limit within 250ms of approval</div><div>the age of each gateway's snapshot is exported as a metric</div></div></div></div><div class="node-card" style="margin-left:36px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.2.3</span>
+        <span class="node-score"><b>3×5→5</b></span>
+        <span class="node-decision decompose">decompose</span></div>
+      <p class="node-stmt">Intraday utilisation is measured against the amended limit without waiting for the overnight netting cycle.</p>
+      </div><div class="node-card" style="margin-left:54px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.2.3.1</span>
+        <span class="node-score"><b>2×2→2</b></span>
+        <span class="node-decision leaf">leaf</span></div>
+      <p class="node-stmt">Utilisation accumulated intraday is released only by the overnight netting cycle.</p>
+      <div class="ac"><span class="acid">AC-4</span> · Risk Ops
+        <div class="gwt"><b>Given</b>a counterparty whose utilisation has accumulated during the day</div>
+        <div class="gwt"><b>When</b>a closing trade for that counterparty is executed before the overnight batch</div>
+        <div class="gwt"><b>Then</b><div>the utilisation counter for that counterparty does not decrease</div><div>the headroom returned to the desk is unchanged by the closing trade</div></div></div></div><div class="node-card" style="margin-left:54px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.2.3.2</span>
+        <span class="node-score"><b>1×2→2</b></span>
+        <span class="node-decision leaf">leaf</span></div>
+      <p class="node-stmt">An increased limit gives the counterparty headroom as soon as the amendment is approved.</p>
+      <div class="ac"><span class="acid">AC-5</span> · Front office
+        <div class="gwt"><b>Given</b>a counterparty sitting at its current limit</div>
+        <div class="gwt"><b>When</b>an increase is approved and published</div>
+        <div class="gwt"><b>Then</b><div>an order rejected for credit a moment earlier is accepted once the gateway holds the increased limit</div><div>the rejection and the acceptance are both logged with the limit version each was evaluated against</div></div></div></div><div class="node-card" style="margin-left:18px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.3</span>
+        <span class="node-score"><b>8×5→8</b></span>
+        <span class="node-decision clarify">clarify</span></div>
+      <p class="node-stmt">Orders already working at the venue are treated according to an agreed rule when a limit is reduced.</p>
+      </div><div class="node-card" style="margin-left:18px">
+      <div class="node-head"><span class="node-id">REQ-ROOT.4</span>
+        <span class="node-score"><b>2×2→2</b></span>
+        <span class="node-decision leaf">leaf</span></div>
+      <p class="node-stmt">A presettlement credit check that cannot be evaluated during an amendment rejects the order.</p>
+      <div class="ac"><span class="acid">AC-6</span> · Compliance
+        <div class="gwt"><b>Given</b>a gateway that cannot evaluate the presettlement credit check while an amendment is being applied</div>
+        <div class="gwt"><b>When</b>an order arrives for that counterparty</div>
+        <div class="gwt"><b>Then</b><div>the order is rejected with a credit-unavailable reason code</div><div>the rejection records which control could not be evaluated</div></div></div></div>
+
+  <h2>Grounding</h2>
+  <table><thead><tr><th>Document</th><th>Title</th><th>Quote</th><th></th></tr></thead><tbody><tr><td>confluence:page:ptrd-2</td><td>Gateway Notes</td><td class="quote">Was aiming for 250ms end to end from the change landing in credit-admin to the gateway acting on it, and I think we got roughly there, but I haven't measured recently.</td>
+        <td><span class="hedged">HEDGED</span></td></tr><tr><td>confluence:page:ptrd-3</td><td>PSR limit model - notes</td><td class="quote">Netting is applied end of day only, never intraday. Intraday, utilisation only goes up: every order adds its contribution and nothing comes off until the overnight batch has run.</td>
+        <td></td></tr></tbody></table>
+
+  <h2>Clarification ledger</h2>
+  <div class="ledger-grp"><h3>Resolved from knowledge base</h3><div class="clarification"><b>CL-1</b> — What end to end time was the refresh aiming for? <span class="who">(knowledge_base · confluence:page:ptrd-2)</span></div><div class="clarification"><b>CL-2</b> — Is netting applied intraday, or does utilisation only accumulate until the overnight batch has run? <span class="who">(knowledge_base · confluence:page:ptrd-3)</span></div></div>
+    <div class="ledger-grp"><h3>Escalated to a human</h3><div class="clarification"><b>CL-3</b> — What happens to orders already working at the venue when a counterparty limit is reduced? <span class="who">(human · d.mercer)</span></div></div>
+
+  <h2>Residuals</h2>
+  <div class="residual"><b>RU-1</b> [ResidualUncertainty] — The 250ms end-to-end refresh target is carried on a page of working notes whose author wrote, in the same sentence, that he thinks it was met and has not measured it recently. Nothing else in the corpus states a measured figure, so the build starts against a target nobody has confirmed.
+          <div class="who">accepted by s.iyer at 2026-07-30T19:35:17.967Z</div></div>
+
+  <h2>Sign-off</h2>
+  <div class="signoff"><span class="result">partial</span><span class="approver"><b>d.mercer</b> · PO · human · 2026-07-30T19:35:17.967Z</span><span class="approver"><b>s.iyer</b> · TechLead · human · 2026-07-30T19:35:17.967Z</span><span class="approver"><b>n.okafor</b> · QA · human · 2026-07-30T19:35:17.967Z</span></div>
+
+  <div class="foot">reqs · schema 1.0</div>
+</div>
+</body>
+</html>

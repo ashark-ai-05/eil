@@ -36,6 +36,9 @@ jobs:
       - run: pnpm typecheck
       # fails if docs/system-map.html no longer matches the code it describes
       - run: pnpm map:check
+      # fails if demo/corpus + demo/fixtures no longer match ts/corpus/psr.ts,
+      # which is what keeps the live and offline demo modes identical
+      - run: pnpm corpus:check
       - run: pnpm test
       - name: migrations + fixture ingest + search + eval smoke
         run: |

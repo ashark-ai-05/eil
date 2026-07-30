@@ -57,15 +57,24 @@ describe("off by default, and free when off", () => {
     ).rejects.toThrow("inner");
   });
 
-  it("stays disabled — and does not throw — when the SDK is not installed", async () => {
+  it("reports the SDK's availability honestly, and never throws either way", async () => {
+    // @opentelemetry/* are optionalDependencies, so whether they resolve is a
+    // property of the checkout, not of the code. Asserting one branch pins the
+    // test to whichever machine wrote it — this one ran green for months only
+    // because the deps had never been materialised. Telemetry is an observation
+    // of the system, not part of it: a missing exporter must never break a
+    // search, and a present one must not be silently ignored.
+    const sdkName = "@opentelemetry/sdk-node";
+    const installed = await import(sdkName).then(
+      () => true,
+      () => false,
+    );
+
     __resetTelemetry();
     const saved = process.env.EIL_OTEL;
     process.env.EIL_OTEL = "1";
     try {
-      // @opentelemetry/* are optionalDependencies and absent here. Telemetry is
-      // an observation of the system, not part of it: a missing exporter must
-      // never break a search.
-      expect(await initTelemetry()).toBe(false);
+      expect(await initTelemetry()).toBe(installed);
     } finally {
       if (saved === undefined) delete process.env.EIL_OTEL;
       else process.env.EIL_OTEL = saved;

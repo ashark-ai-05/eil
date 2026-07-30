@@ -1,0 +1,26 @@
+{
+  "key": "PTR-415",
+  "url": "https://jira.example.com/browse/PTR-415",
+  "fields": {
+    "summary": "psr-cache staleness alerting",
+    "status": "In Progress",
+    "issuetype": "Task",
+    "project": "PTR",
+    "reporter": "s.iyer",
+    "created": "2026-02-13T09:30:00+00:00",
+    "updated": "2026-07-20T11:15:00+00:00",
+    "description": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nNothing tells us when a gateway has stopped receiving snapshot publishes. Each\nrecord already carries its publish timestamp, so a gateway can work out the age\nof what it is holding; we want that exported as a metric and alerted on.\nThreshold agreed at 1s — if a gateway's view is more than a second old we want to\nknow about it well before it turns into a rejection. Design context is on the PSR\nCache Refresh Design page.\n",
+    "issue_links": [
+      {
+        "type": "relates to",
+        "key": "PTR-401"
+      }
+    ],
+    "comments": [
+      {
+        "author": "s.iyer",
+        "body": "Metric is out in the current gateway build. Alert rule still to do, and we have not agreed who it pages — Risk Ops or the platform on-call. d.mercer was going to come back on that."
+      }
+    ]
+  }
+}

@@ -5,9 +5,10 @@ import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type pg from "pg";
-import { connect, migrate } from "./db.js";
+import { type Db, connect, migrate } from "./db.js";
 import { ingestDocs, runReconcile } from "./ingest/pipeline.js";
 import { promptHidden } from "./prompt.js";
+import type { Finding, ReqsBody } from "./reqs/schema.js";
 
 const program = new Command("eil").description("Enterprise Intelligence Layer CLI");
 
@@ -720,6 +721,266 @@ program
       if (opts.strict && !(report.integrity as { ok: boolean }).ok) process.exit(2);
     } finally {
       await client.end();
+    }
+  });
+
+const reqs = program
+  .command("reqs")
+  .description("Gated requirements artefacts: run the gate, project them for humans");
+
+/**
+ * Open the catalog so citation verification (CLARIFY-005) can re-read every
+ * cited document through the audited tool path.
+ *
+ * A presenter whose database is not up must still get a usable refusal, so a
+ * catalog that cannot be reached degrades to running WITHOUT a resolver:
+ * CLARIFY-005 is then SKIPPED rather than passed — it drops out of `checksRun`,
+ * so the count itself records the omission — and the omission is announced on
+ * stderr, where it cannot be mistaken for a finding on stdout.
+ *
+ * The readiness probe reads no document: it only asks whether the catalog's
+ * schema exists. Every actual document fetch goes through callTool.
+ */
+async function openReqsCatalog(): Promise<{
+  client: Db | null;
+  resolveOpt: { resolveDoc?: (docId: string) => Promise<string | null> };
+}> {
+  let client: Db | null = null;
+  try {
+    client = await connect();
+    await client.query("SELECT 1 FROM documents LIMIT 1");
+    const { localViewer } = await import("./search.js");
+    const { makeDocResolver } = await import("./reqs/io.js");
+    return { client, resolveOpt: { resolveDoc: makeDocResolver(client, localViewer()) } };
+  } catch (err: any) {
+    if (client) await client.end().catch(() => {});
+    const cause = String(err?.message ?? err).split("\n")[0];
+    const skipped = "SKIPPED: no cited quote was re-read from a document on this run";
+    console.error(`no catalog (${cause}) — CLARIFY-005 ${skipped}`);
+    return { client: null, resolveOpt: {} };
+  }
+}
+
+/**
+ * Exit with a code that SURVIVES.
+ *
+ * `process.exitCode = 1` and a natural exit is not enough: the PGlite (WASM)
+ * backend resets the pending exit code when it closes, so `reqs check` printed
+ * REFUSED and exited 0 on the zero-install demo path — a gate that reports
+ * failure and returns success is worse than no gate at all. And a bare
+ * `process.exit()` is not enough either: stdout to a pipe is asynchronous in
+ * Node, so the refusal it just printed can be truncated. Flush, then exit.
+ */
+async function exitWith(code: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    process.stdout.write("", () => resolve());
+  });
+  process.exit(code);
+}
+
+/** Greedy word wrap — findings messages are sentences, and a sentence that runs
+ * off the right edge of a projector is a sentence nobody reads. */
+function wrapWords(text: string, width: number): string[] {
+  const out: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/)) {
+    if (line === "") line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      out.push(line);
+      line = word;
+    }
+  }
+  out.push(line);
+  return out;
+}
+
+/** One line per finding, columns aligned, the check id first and loudest. A
+ * message too long for the line wraps with a hanging indent to the message
+ * column, so the grid survives and the ids stay scannable down the left edge. */
+function printFindings(findings: Finding[]): void {
+  if (findings.length === 0) return;
+  const idW = Math.max(11, ...findings.map((f) => f.id.length + 2));
+  const sevW = 10;
+  const pathW = Math.min(38, Math.max(14, ...findings.map((f) => f.path.length + 2)));
+  const gutter = 2 + idW + sevW + pathW;
+  const width = Math.max(60, Math.min(process.stdout.columns ?? 110, 130));
+  console.log(
+    `  ${"CHECK".padEnd(idW)}${"SEVERITY".padEnd(sevW)}${"PATH".padEnd(pathW)}WHAT IS WRONG`,
+  );
+  for (const f of findings) {
+    const head = `  ${f.id.padEnd(idW)}${(f.severity === "error" ? "ERROR" : "warn").padEnd(sevW)}${f.path.padEnd(pathW)}`;
+    const lines = wrapWords(f.message, Math.max(28, width - gutter));
+    console.log(`${head}${lines[0] ?? ""}`);
+    for (const l of lines.slice(1)) console.log(`${" ".repeat(gutter)}${l}`);
+  }
+}
+
+reqs
+  .command("check <file>")
+  .description("Run the gate over a reqs.json — exits 1 when the artefact is refused")
+  .option("--mode <mode>", "exit (the gate) | lint (GATE family downgraded to warnings)", "exit")
+  .option("--json", "print the whole analyser result as JSON instead")
+  .action(async (file: string, opts) => {
+    if (opts.mode !== "exit" && opts.mode !== "lint") {
+      console.log(`--mode must be exit or lint (got '${opts.mode}')`);
+      process.exit(1);
+    }
+    const { analyse } = await import("./reqs/analyse.js");
+    const { loadRawReqs } = await import("./reqs/io.js");
+    // Read BEFORE opening a connection: a typo in the path should not cost a
+    // database round trip, and the error should arrive first.
+    let raw: unknown;
+    try {
+      raw = await loadRawReqs(file);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
+    const { client, resolveOpt } = await openReqsCatalog();
+    let refused = false;
+    try {
+      const result = await analyse(raw, { mode: opts.mode, ...resolveOpt });
+      refused = !result.ok;
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const errors = result.findings.filter((f) => f.severity === "error");
+        const warnings = result.findings.length - errors.length;
+        const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+        printFindings(result.findings);
+        const named = [...new Set(errors.map((f) => f.id))].join(", ");
+        console.log(
+          `\n  ${plural(result.checksRun, "check")} run   ${plural(errors.length, "error")}   ` +
+            `${plural(warnings, "warning")}   ${result.ok ? "PASSED" : `REFUSED by ${named}`}`,
+        );
+      }
+    } finally {
+      if (client) await client.end();
+    }
+    // After the connection is closed, so the exit code cannot be clobbered.
+    if (refused) await exitWith(1);
+  });
+
+const DELIVERY_KINDS = ["ui", "backend", "migration", "mixed"] as const;
+const DELIVERY_TECH = ["new", "legacy"] as const;
+
+reqs
+  .command("elaborate <work-item>")
+  .description("Elaborate a work item into a reqs.json — the artefact is written even when refused")
+  .option("--out <path>", "output file (default: <work-item>.reqs.json)")
+  .option("--kind <kind>", `delivery kind: ${DELIVERY_KINDS.join(" | ")}`, "backend")
+  .option("--tech <tech>", `delivery technology: ${DELIVERY_TECH.join(" | ")}`, "legacy")
+  .option("--ask <name>", "the human named on every escalated clarification")
+  .option(
+    "--record <path>",
+    "write a replay pack of this run (prompt hash, reply, measured latency) — " +
+      "replay it later with EIL_LLM_FIXTURE=<path>",
+  )
+  .option("--record-note <text>", "free text stored in the recorded pack's provenance block")
+  .action(async (workItem: string, opts) => {
+    // Declared facts about the delivery, not model judgments — so they are
+    // options with defaults rather than another thing to ask a model.
+    if (!(DELIVERY_KINDS as readonly string[]).includes(opts.kind)) {
+      console.log(`--kind must be one of ${DELIVERY_KINDS.join(", ")} (got '${opts.kind}')`);
+      process.exit(1);
+    }
+    if (!(DELIVERY_TECH as readonly string[]).includes(opts.tech)) {
+      console.log(`--tech must be one of ${DELIVERY_TECH.join(", ")} (got '${opts.tech}')`);
+      process.exit(1);
+    }
+    const { elaborate } = await import("./reqs/elaborate.js");
+    const { localViewer } = await import("./search.js");
+    const { makeDocResolver } = await import("./reqs/io.js");
+    const out: string = opts.out ?? `${workItem}.reqs.json`;
+    // Unlike `check` and `render`, this command CANNOT degrade to no catalog:
+    // with no knowledge plane every unknown escalates and the run says nothing.
+    const client = await connect();
+    try {
+      const viewer = localViewer();
+      const body = await elaborate(workItem, {
+        client,
+        viewer,
+        out,
+        // The same resolver the gate uses, so a citation this run recorded is
+        // verified against exactly the document the gate will re-read.
+        resolveDoc: makeDocResolver(client, viewer),
+        deliveryType: {
+          kind: opts.kind as (typeof DELIVERY_KINDS)[number],
+          tech: opts.tech as (typeof DELIVERY_TECH)[number],
+        },
+        ...(opts.ask ? { escalateTo: opts.ask } : {}),
+        ...(opts.record ? { record: opts.record } : {}),
+        ...(opts.recordNote ? { recordNote: opts.recordNote } : {}),
+      });
+      const findings = body.analysis?.findings ?? [];
+      const errors = findings.filter((f) => f.severity === "error");
+      const cov = body.coverage;
+      console.log(`wrote ${out}`);
+      // Said on every run, not only on a replay: "which of these two was this?"
+      // must never be a question the operator has to work out afterwards.
+      const { judgmentsLine } = await import("./reqs/render.js");
+      console.log(`  judgments: ${judgmentsLine(body.metadata.generator)}`);
+      if (opts.record) console.log(`  recorded the run to ${opts.record}`);
+      if (cov)
+        console.log(
+          `  ${cov.leaves} leaves · ${cov.acs} ACs · ${cov.grounded} grounded · ` +
+            `${cov.escalated} escalated · corpus ${body.metadata.corpusMode}\n`,
+        );
+      printFindings(findings);
+      const named = [...new Set(errors.map((f) => f.id))].join(", ");
+      // The artefact was produced, so this exits 0. The GATE is `eil reqs
+      // check`, which exits 1 — a generator that refuses to emit its own output
+      // would defeat the one property this command exists to hold.
+      console.log(
+        `\n  ${body.analysis?.checksRun ?? 0} checks run   ${errors.length} errors   ` +
+          `${findings.length - errors.length} warnings   ` +
+          `${errors.length === 0 ? "PASSED" : `REFUSED by ${named}`}`,
+      );
+      if (errors.length > 0) console.log("  run `eil reqs check` for the gate's exit code");
+    } finally {
+      await client.end();
+    }
+  });
+
+reqs
+  .command("render <file>")
+  .description("Project a reqs.json as a self-contained HTML page (or markdown)")
+  .option("--out <path>", "output file (default: the input path with .html)")
+  .option("--markdown", "render markdown instead of HTML")
+  .action(async (file: string, opts) => {
+    const { analyse } = await import("./reqs/analyse.js");
+    const { loadReqs } = await import("./reqs/io.js");
+    const { renderHtml, renderMarkdown } = await import("./reqs/render.js");
+    let body: ReqsBody;
+    try {
+      body = await loadReqs(file);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
+    const { client, resolveOpt } = await openReqsCatalog();
+    try {
+      // The gate runs FIRST and its findings go into the page: a refused
+      // artefact must project as refused, not as a clean document.
+      const result = await analyse(body, resolveOpt);
+      const ext = opts.markdown ? ".md" : ".html";
+      const out: string = opts.out ?? `${file.replace(/\.[^./\\]+$/, "")}${ext}`;
+      mkdirSync(dirname(out), { recursive: true });
+      writeFileSync(
+        out,
+        opts.markdown ? renderMarkdown(body, result.findings) : renderHtml(body, result.findings),
+      );
+      const errors = result.findings.filter((f) => f.severity === "error");
+      console.log(`wrote ${out}`);
+      if (errors.length > 0) {
+        const named = [...new Set(errors.map((f) => f.id))].join(", ");
+        // Both projections carry the stamp: the file itself has to be the record,
+        // because the console line does not travel with it.
+        console.log(`  stamped REFUSED by ${named}`);
+      }
+    } finally {
+      if (client) await client.end();
     }
   });
 

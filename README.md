@@ -65,13 +65,34 @@ could already read. Syncs are incremental from a stored cursor and hash-gated,
 so re-running is free. Scoping flags, deletions, code ingestion, and OS-keychain
 token storage: **[docs/ingestion.md](docs/ingestion.md)**.
 
+## Gating what an agent produces
+
+```sh
+# The gate re-reads every cited document out of the catalog, so point at one:
+export EIL_DATABASE_URL=pglite://.eil-demo
+
+pnpm eil reqs check demo/PTR-401.reqs.json          # the gate: 46 checks, exit 1 on refusal
+pnpm eil reqs check demo/PTR-401.reqs.json --json   # the same result as machine-readable JSON
+pnpm eil reqs check demo/PTR-401.reqs.json --mode lint   # GATE family downgraded, for mid-loop use
+pnpm eil reqs render demo/PTR-401.reqs.json         # project it as self-contained HTML
+pnpm eil reqs render demo/PTR-401.reqs.json --markdown
+```
+
+A `reqs.json` is a requirements artefact with every derived field generated
+rather than authored, so editing one is detectable: `check` recomputes them all,
+re-reads every cited quote out of the catalog, and refuses by name. `render`
+stamps a refused artefact **REFUSED** rather than projecting it as a clean
+document. `node demo/tamper.mjs` demonstrates six single-field edits and the six
+checks that catch them.
+
 ## What you get
 
 - **Fail-closed ACL on every read.** Visibility is stamped on the document, not
   asked of the query. An unstamped doc is owner-only, so a bug fails *closed*.
-- **Deterministic.** Two arms — Postgres full-text and a local vector model —
-  fused with reciprocal-rank fusion. Same query, same corpus, same order. No
-  LLM in the retrieval path.
+- **Deterministic.** Four lexical arms — strict and loose Postgres full-text,
+  over prose and over the code index — plus a vector arm when the local model is
+  available, fused with reciprocal-rank fusion. Same query, same corpus, same
+  order. No LLM in the retrieval path.
 - **Incremental.** Cursor sync, content hashing, and delete-tombstones, so
   results can't outlive their source.
 - **One Postgres, no extension.** PGlite, embedded PG, system PG, or an org

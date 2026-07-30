@@ -1,0 +1,116 @@
+{
+  "recordedAt": "2026-07-30T19:25:58.038Z",
+  "provider": "hand-authored-during-build",
+  "model": null,
+  "note": "Hand-authored during the build of this demo, not a captured run of a production model. No model produced these replies — `amp` was non-functional and `copilot` was not installed on the machine this was built on — which is why `model` is null and `provider` says what it says. Only the five bounded judgments the loop asks for are authored here: two scoring bands, one question, the child statements, the acceptance criteria, and the answers/quote ruling. Retrieval, the confidence arithmetic, quote verification against the ingested corpus, the assembler and all 46 gate checks ran for real. The recorded latencies are the authoring step's own measured think time, kept so a replay has the rhythm of a run; they are not any model's response times.",
+  "replies": {
+    "59fa15a3f80efe9f": {
+      "text": "{\"unknowns\":8,\"complexity\":8,\"rationale\":\"nobody has decided what happens to an order already working at the venue when the limit comes down\"}",
+      "latencyMs": 501
+    },
+    "143143b7abb37897": {
+      "text": "{\"children\":[\"Risk Ops can raise and approve a counterparty limit amendment that takes effect the same day.\",\"An approved amendment reaches every gateway's limit snapshot on the day it is approved.\",\"Orders already working at the venue are treated according to an agreed rule when a limit is reduced.\",\"A presettlement credit check that cannot be evaluated during an amendment rejects the order.\"]}",
+      "latencyMs": 1000
+    },
+    "c9f9d5773a67f269": {
+      "text": "{\"unknowns\":2,\"complexity\":2,\"rationale\":\"the two-person amendment path is written down and credit-admin enforces it, so almost nothing here is open\"}",
+      "latencyMs": 501
+    },
+    "1988ea869a9ef847": {
+      "text": "{\"criteria\":[{\"stakeholder\":\"Risk Ops\",\"given\":\"an amendment raised in credit-admin by one Risk Ops user\",\"when\":\"a second, different Risk Ops user approves it\",\"then\":[\"credit-admin records the amendment as approved and hands it to psr-limits the same day\",\"the approve action is refused with a separation-of-duties reason code when the approver is the user who raised it\"]}]}",
+      "latencyMs": 1201
+    },
+    "3bb7b23eca042ecd": {
+      "text": "{\"unknowns\":5,\"complexity\":5,\"rationale\":\"the refresh path is described in somebody's working notes rather than a design, and its timing is unmeasured\"}",
+      "latencyMs": 501
+    },
+    "4ecc8107438d0f1c": {
+      "text": "{\"children\":[\"psr-limits publishes each amended counterparty record and every gateway replaces its entry in place.\",\"The gateway acts on an amended limit inside the agreed end-to-end refresh time.\",\"Intraday utilisation is measured against the amended limit without waiting for the overnight netting cycle.\"]}",
+      "latencyMs": 1002
+    },
+    "7349a53f366ed920": {
+      "text": "{\"unknowns\":2,\"complexity\":2,\"rationale\":\"the per-counterparty publish and in-place replace is agreed and recorded, leaving only the ordering rule\"}",
+      "latencyMs": 501
+    },
+    "5ea504b70c4418fb": {
+      "text": "{\"criteria\":[{\"stakeholder\":\"Platform on-call\",\"given\":\"an approved amendment for one counterparty\",\"when\":\"psr-limits publishes the amended record\",\"then\":[\"every gateway snapshot holds the new limit for that counterparty and no other counterparty's entry changes\",\"a publish older than the record already held is dropped, and the snapshot version does not go backwards\"]}]}",
+      "latencyMs": 1201
+    },
+    "5980ea2bcd945cb3": {
+      "text": "{\"unknowns\":5,\"complexity\":2,\"rationale\":\"the end-to-end refresh time is the largest unknown: the only figure anyone has written hedges itself\"}",
+      "latencyMs": 501
+    },
+    "92b91463301c6758": {
+      "text": "{\"question\":\"What end to end time was the refresh aiming for?\"}",
+      "latencyMs": 451
+    },
+    "4e9384b9f9d9981f": {
+      "text": "{\"answers\":true,\"quote\":\"Was aiming for 250ms end to end from the change landing in credit-admin to the gateway acting on it, and I think we got roughly there, but I haven't measured recently.\",\"rationale\":\"one page states a target end-to-end refresh time and hedges it in the same sentence\"}",
+      "latencyMs": 901
+    },
+    "a33cdb6a99e4ce32": {
+      "text": "{\"unknowns\":3,\"complexity\":2,\"rationale\":\"a 250ms target now exists, but its own author records that he never measured it, so it is a target and not a fact\"}",
+      "latencyMs": 501
+    },
+    "7c11fba0efb0f349": {
+      "text": "{\"criteria\":[{\"stakeholder\":\"Risk Ops\",\"given\":\"an amendment approved in credit-admin\",\"when\":\"psr-limits publishes it to the gateways\",\"then\":[\"the gateway evaluates the next order for that counterparty against the amended limit within 250ms of approval\",\"the age of each gateway's snapshot is exported as a metric\"]}]}",
+      "latencyMs": 1202
+    },
+    "a93e5a6b9c18fb29": {
+      "text": "{\"unknowns\":5,\"complexity\":5,\"rationale\":\"whether intraday utilisation can come down at all before the overnight cycle is not settled anywhere\"}",
+      "latencyMs": 501
+    },
+    "f2b0cc391e137e67": {
+      "text": "{\"question\":\"Is netting applied intraday, or does utilisation only accumulate until the overnight batch has run?\"}",
+      "latencyMs": 451
+    },
+    "cee764d288ca5e85": {
+      "text": "{\"answers\":true,\"quote\":\"Netting is applied end of day only, never intraday. Intraday, utilisation only goes up: every order adds its contribution and nothing comes off until the overnight batch has run.\",\"rationale\":\"the limit model notes state plainly that netting is end of day only\"}",
+      "latencyMs": 901
+    },
+    "98c528c6f26741e4": {
+      "text": "{\"unknowns\":3,\"complexity\":5,\"rationale\":\"netting is settled — end of day only — so what is left is the accumulate-only behaviour and the increase case\"}",
+      "latencyMs": 501
+    },
+    "98a42a73df79d832": {
+      "text": "{\"children\":[\"Utilisation accumulated intraday is released only by the overnight netting cycle.\",\"An increased limit gives the counterparty headroom as soon as the amendment is approved.\"]}",
+      "latencyMs": 1000
+    },
+    "98713f1f8325c2f3": {
+      "text": "{\"unknowns\":2,\"complexity\":2,\"rationale\":\"the accumulate-only behaviour is now stated plainly and the only work is holding the desk to it\"}",
+      "latencyMs": 501
+    },
+    "ab8875119e6a6ba3": {
+      "text": "{\"criteria\":[{\"stakeholder\":\"Risk Ops\",\"given\":\"a counterparty whose utilisation has accumulated during the day\",\"when\":\"a closing trade for that counterparty is executed before the overnight batch\",\"then\":[\"the utilisation counter for that counterparty does not decrease\",\"the headroom returned to the desk is unchanged by the closing trade\"]}]}",
+      "latencyMs": 1201
+    },
+    "569cd47bff559cab": {
+      "text": "{\"unknowns\":1,\"complexity\":2,\"rationale\":\"an increase simply raises the number the check compares against, and the publish path is the same one\"}",
+      "latencyMs": 501
+    },
+    "567508f941b9d4f6": {
+      "text": "{\"criteria\":[{\"stakeholder\":\"Front office\",\"given\":\"a counterparty sitting at its current limit\",\"when\":\"an increase is approved and published\",\"then\":[\"an order rejected for credit a moment earlier is accepted once the gateway holds the increased limit\",\"the rejection and the acceptance are both logged with the limit version each was evaluated against\"]}]}",
+      "latencyMs": 1201
+    },
+    "938d415bbf75e1e3": {
+      "text": "{\"unknowns\":8,\"complexity\":5,\"rationale\":\"no source states what becomes of an order already at the venue when its counterparty's limit is reduced\"}",
+      "latencyMs": 501
+    },
+    "8b774def83937243": {
+      "text": "{\"question\":\"What happens to orders already working at the venue when a counterparty limit is reduced?\"}",
+      "latencyMs": 451
+    },
+    "335e76730f9e087f": {
+      "text": "{\"answers\":false,\"quote\":\"\",\"rationale\":\"the only document on this is a ticket that records the question as undecided, which is being about it rather than answering it\"}",
+      "latencyMs": 901
+    },
+    "9bc294976e9c4aff": {
+      "text": "{\"unknowns\":2,\"complexity\":2,\"rationale\":\"fail closed on an unevaluated control is stated as non-negotiable, so the behaviour is not in doubt\"}",
+      "latencyMs": 501
+    },
+    "d3022477e3c63fb2": {
+      "text": "{\"criteria\":[{\"stakeholder\":\"Compliance\",\"given\":\"a gateway that cannot evaluate the presettlement credit check while an amendment is being applied\",\"when\":\"an order arrives for that counterparty\",\"then\":[\"the order is rejected with a credit-unavailable reason code\",\"the rejection records which control could not be evaluated\"]}]}",
+      "latencyMs": 1201
+    }
+  }
+}
