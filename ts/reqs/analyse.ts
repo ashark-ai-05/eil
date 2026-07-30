@@ -8,6 +8,8 @@
  * `mode: "lint"` downgrades ONLY the GATE family, for mid-loop use.
  */
 import { assemble } from "./assemble.js";
+import { CONTENT_CHECKS } from "./checks/content.js";
+import { PROVENANCE_CHECKS } from "./checks/provenance.js";
 import { SCORING_CHECKS } from "./checks/scoring.js";
 import { STRUCTURAL_CHECKS, schemaIssueFindings } from "./checks/structural.js";
 import type { Finding, ReqsBody } from "./schema.js";
@@ -34,7 +36,7 @@ export interface AnalyseResult {
 }
 
 export function allChecks(): Check[] {
-  return [...STRUCTURAL_CHECKS, ...SCORING_CHECKS];
+  return [...STRUCTURAL_CHECKS, ...SCORING_CHECKS, ...CONTENT_CHECKS, ...PROVENANCE_CHECKS];
 }
 
 export async function analyse(

@@ -181,9 +181,18 @@ const UNCERT_001: Check = {
           id: "UNCERT-001",
           severity: "error",
           path: `${path}.residualRef`,
-          message: `a review-zone leaf (M=${m}) must reference an accepted residual; found ${
-            node.residualRef ?? "none"
-          }, expected one of ${residualIds.size === 0 ? "(no residuals are recorded)" : [...residualIds].join(", ")}`,
+          // The whole sentence branches, not just the noun phrase: with no
+          // residuals recorded the old wording read "expected one of (no
+          // residuals are recorded)", which is not a sentence anyone can say
+          // out loud.
+          message:
+            residualIds.size === 0
+              ? `a review-zone leaf (M=${m}) must reference an accepted residual; found ${
+                  node.residualRef ?? "none"
+                } and the body records no residuals at all, so expected one to be accepted by a named human and referenced here`
+              : `a review-zone leaf (M=${m}) must reference an accepted residual; found ${
+                  node.residualRef ?? "none"
+                }, expected one of ${[...residualIds].join(", ")}`,
         });
     }
     return out;

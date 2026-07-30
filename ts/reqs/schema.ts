@@ -61,9 +61,27 @@ export const AcceptanceCriterion = z.object({
 });
 export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterion>;
 
+/**
+ * Runtime-loose, statically `Fib`. Any number parses, so tampering `unknowns`
+ * to 4 refuses as SCORE-002 — "unknowns 4 is not a Fibonacci band; expected one
+ * of 1, 2, 3, 5, 8, 13, 21" — rather than as SCHEMA-001 carrying zod's
+ * "Invalid input". The bands are the subject matter of the whole artefact and
+ * they have to refuse in the most legible way available, so SCORE-002 owns this
+ * verdict exactly as GATE-006 owns `approver.kind` and GATE-001 owns
+ * `signoff.result`.
+ *
+ * The STATIC type stays `Fib` because `magnitude(u: Fib, c: Fib)` and the
+ * assembler are entitled to assume a parsed body's bands are bands — SCORE-002
+ * is the check that makes that assumption true, and it runs before any
+ * consumer acts on the body.
+ */
+const LooseFib = z.number() as unknown as z.ZodType<z.infer<typeof Fib>, z.ZodTypeDef, unknown>;
+
 export const ScorePass = z.object({
-  unknowns: Fib,
-  complexity: Fib,
+  /** deliberately loose — SCORE-002 owns "the bands are Fibonacci or nothing" */
+  unknowns: LooseFib,
+  /** deliberately loose — SCORE-002 owns "the bands are Fibonacci or nothing" */
+  complexity: LooseFib,
   /** [G] — deliberately accepts a WRONG band so SCORE-001 owns the verdict */
   magnitude: Fib,
   decision: z.enum(DECISIONS),
