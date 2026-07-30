@@ -45,6 +45,7 @@ Options:
   --skip-embed     skip the local embedding model; search runs lexical-only
   --pause          wait for Enter between steps, so you control the pace
   --no-colour      plain output, no ANSI (also honours NO_COLOR)
+  --colour         force ANSI even when piped (also honours FORCE_COLOR)
 
 The whole run is local. No network, no credentials, no Atlassian instance.
 `);
@@ -74,11 +75,17 @@ let stepNo = 0;
 
 /**
  * Colour is off when stdout is not a terminal, when NO_COLOR is set, or on
- * --no-colour. A demo that emits escape codes into a pipe or a CI log is a
- * demo somebody screenshots looking broken.
+ * --no-colour: a demo that sprays escape codes into a pipe or a CI log is one
+ * somebody screenshots looking broken.
+ *
+ * FORCE_COLOR / --colour override that, for the legitimate cases where stdout
+ * is not a tty but the consumer still renders ANSI — `| less -R`, `tee` to a
+ * file you will `cat` later, most CI log viewers.
  */
+const FORCED = has("colour") || has("color") || !!process.env.FORCE_COLOR;
 const COLOUR =
-  process.stdout.isTTY && !process.env.NO_COLOR && !has("no-colour") && !has("no-color");
+  FORCED ||
+  (process.stdout.isTTY && !process.env.NO_COLOR && !has("no-colour") && !has("no-color"));
 const sgr = (code) => (s) => (COLOUR ? `\x1b[${code}m${s}\x1b[0m` : s);
 const c = {
   bold: sgr(1),
