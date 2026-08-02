@@ -526,6 +526,13 @@ After Task 2 every `sig` and `cluster_id` is NULL, so `vecArm` falls back to an 
 - Consumes: `chunk_vectors` from Task 2.
 - Produces: no new exports — the existing signatures of `backfillSignatures`, `buildCentroids`, `assignClusters`, `calibrate`, and `chosenNprobe` are unchanged.
 
+**Carried finding from Task 2's review (must be addressed here).** `vecArm`'s candidate budget is now denominated in WINDOWS, not chunks. `ts/search.ts:586` still reads `LIMIT CASE WHEN $7::int[] IS NULL THEN $9::bigint ELSE $10::bigint END` with `$10 = limit * OVERSAMPLE`, but at ~4 windows per 3200-char chunk that survivor set now covers roughly a quarter as many distinct documents as it did when one row meant one chunk. This is harmless today only because `$7` is always NULL and the funnel runs as a full exact scan — the moment this task restores cluster probing, `$10` becomes live and recall silently drops. Two consequences to handle:
+
+- Re-examine `OVERSAMPLE` in `ts/embed/ivf.ts` against the new row grain. The calibration in `calibrate()` measures recall@10 empirically and picks the smallest `nprobe` clearing `RECALL_GATE`, so the gate itself will catch a bad choice — but only if you re-run it. Step 9 below is therefore not optional.
+- The performance comment at `ts/search.ts:568-572` quotes "1.30 us/chunk" and "0.17 us/chunk". Those figures are now per WINDOW. Update the units in that comment; do not invent new numbers, just say which unit they are in and that the row count per chunk is now ~4x.
+
+**Also fix here (deferred from Task 2's review):** `ts/cli.ts:505-509` (`eil ivf status`) counts `chunks WHERE embedding IS NOT NULL` and will report `embedded 0` on a working corpus. Repoint it at `chunk_vectors`.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `ts/tests/ivf-windows.test.ts`:
@@ -717,22 +724,44 @@ The query top-up further down still reads `text FROM chunks` — leave it. Text 
 Run: `pnpm test ts/tests/ivf-windows.test.ts`
 Expected: PASS, 2 tests.
 
-- [ ] **Step 8: Run the full suite, typecheck, lint**
+- [ ] **Step 8: Repair the three sanctioned failures and the stale CLI counter**
+
+Task 2 deliberately left three tests failing, because it moved the vectors and this task moves the index that reads them. They are:
+
+```
+ts/tests/ivf.test.ts > the funnel against a real database > signs every embedded chunk and is resumable
+ts/tests/ivf.test.ts > the funnel against a real database > clusters every embedded chunk and records the assignment counts
+ts/tests/ivf.test.ts > the funnel against a real database > calibrates, persists the whole curve, and picks the smallest passing nprobe
+```
+
+All three call `backfillSignatures` / `buildCentroids` / `calibrate` and then assert against `chunks`. Repoint each assertion at `chunk_vectors`, keyed by `(tenant, doc_id, seq, ord)`. **Move the assertions; do not weaken or delete them** — the two tests in that file that already pass (`returns the SAME results as the exact scan once calibrated`, `degrades to the exact scan when the index is absent`) are the ones proving the funnel is still equivalent to brute force, and they must keep passing untouched.
+
+Then repoint `ts/cli.ts:505-509` (`eil ivf status`), which counts `chunks WHERE embedding IS NOT NULL` and would report `embedded 0` on a fully embedded corpus.
+
+- [ ] **Step 9: Recalibrate and confirm the recall gate still clears**
+
+Restoring cluster probing makes `$10 = limit * OVERSAMPLE` live for the first time since the row grain changed from chunks to windows. `calibrate()` measures recall@10 against a full exact scan and only adopts an `nprobe` that clears `RECALL_GATE`, so it is the check that catches a now-undersized oversample. Run it against the test corpus the `ivf.test.ts` calibration test builds, and report in your task report: the chosen `nprobe`, the chosen `oversample`, and the recall@10 at each point on the curve.
+
+If no `nprobe` below `nlist` clears the gate, that is a real finding, not a test to adjust — say so in the report rather than lowering the gate or hand-picking a value. The correct response is a larger `OVERSAMPLE`, and the calibration output is the evidence for choosing it.
+
+- [ ] **Step 10: Run the full suite, typecheck, lint**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
-Expected: all clean. `ts/tests/ivf.test.ts` (if present) may assert against `chunks`; update it to `chunk_vectors` rather than deleting the assertion.
+Expected: the suite fully green — including the three tests Task 2 left failing. Lint will still show three pre-existing errors in `ts/cli.ts` and `ts/db.ts` that predate this work; if your `ivf status` edit lets you clear the `cli.ts` ones for free, do it, otherwise leave them.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add ts/embed/buildivf.ts ts/tests/ivf-windows.test.ts
+git add ts/embed/buildivf.ts ts/embed/ivf.ts ts/cli.ts ts/search.ts ts/tests
 git commit -m "feat: build the coarse index over window vectors
 
 Signatures and clusters follow the vectors onto chunk_vectors; the key
-gains ord. Recalibration is required: eil ivf build && eil ivf calibrate."
+gains ord. The candidate budget is now denominated in windows rather than
+chunks, so recalibration is required, not optional:
+eil ivf build && eil ivf calibrate."
 ```
 
-- [ ] **Step 10: Record the operator step**
+- [ ] **Step 12: Record the operator step**
 
 Add to `README.md`, under whichever section documents `eil embed backfill` (grep for `ivf calibrate` to find it), the sentence:
 
@@ -771,13 +800,28 @@ Create `ts/tests/snippet.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { SNIPPET_OPTS, searchDocs } from "../search.js";
+import { searchDocs } from "../search.js";
 import { openTestDb, seedDoc, testViewer } from "./helpers/db.js";
 
 describe("snippets", () => {
-  it("asks Postgres for an agent-sized extract, not a headline", () => {
-    expect(SNIPPET_OPTS).toContain("MaxWords=90");
-    expect(SNIPPET_OPTS).toContain("MaxFragments=2");
+  // NOTE: an earlier draft of this plan opened with
+  // `expect(SNIPPET_OPTS).toContain("MaxWords=90")`. That asserts a constant's
+  // spelling rather than any behaviour — it cannot fail for any reason that
+  // matters and it pins the implementation instead of the contract. Deleted
+  // deliberately; the two tests below cover the behaviour that the wider
+  // snippet is FOR. Do not reinstate it.
+
+  it("returns an extract long enough to answer from", async () => {
+    const db = await openTestDb();
+    await seedDoc(db, {
+      id: "conf:long",
+      text: "The retry policy uses exponential backoff. ".repeat(80),
+      headingPath: "Retry",
+    });
+    const out: any = await searchDocs(db, testViewer(), "retry backoff policy", 5);
+    // The old MaxWords=40 produced ~200 characters, below the point where an
+    // extract can answer anything, so the agent fetched the whole document.
+    expect(out.results[0].snippet.replaceAll("**", "").length).toBeGreaterThan(300);
   });
 
   it("marks a snippet that does not cover the whole chunk", async () => {
