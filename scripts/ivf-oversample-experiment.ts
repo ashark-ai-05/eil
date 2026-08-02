@@ -26,17 +26,34 @@
  *      nprobe curves.
  *
  * Usage:
- *   pnpm tsx scripts/ivf-oversample-experiment.ts [--docs=N] [--out=path]
+ *   pnpm tsx scripts/ivf-oversample-experiment.ts [--docs=N] [--topics=N] [--out=path]
  *
- *   --docs   documents in the WINDOWED corpus (default 500; ~4 windows/doc,
- *            so ~2000 chunk_vectors rows — 3x the 640-row binding threshold).
- *            The control corpus's doc count is not a flag: it is set to
- *            match the windowed corpus's MEASURED total row count exactly,
- *            after backfill, whatever that turns out to be.
- *   --out    append results here as each corpus finishes, so a disconnect
- *            mid-run costs only the remaining corpus, not the whole run.
- *            Default: a timestamped file next to this script's cwd, printed
- *            at startup. Not committed — pass a scratchpad path.
+ *   --docs    documents in the WINDOWED corpus (default 500; ~4 windows/doc,
+ *             so ~2000 chunk_vectors rows — 3x the 640-row binding threshold).
+ *             The control corpus's doc count is not a flag: it is set to
+ *             match the windowed corpus's MEASURED total row count exactly,
+ *             after backfill, whatever that turns out to be.
+ *   --topics  ground-truth topic count (default 60, i.e. ~sqrt(4000), see the
+ *             note below the CONFOUND WARNING before changing this alongside
+ *             --docs).
+ *   --out     append results here as each corpus finishes, so a disconnect
+ *             mid-run costs only the remaining corpus, not the whole run.
+ *             Default: a timestamped file next to this script's cwd, printed
+ *             at startup. Not committed — pass a scratchpad path.
+ *
+ * CONFOUND WARNING, found in a fix-round-2 review of an earlier run of this
+ * script: with `--topics` fixed and only `--docs` swept, rows and
+ * rows-per-topic (rows / nTopics) scale together, so a sweep over --docs
+ * alone cannot tell you which one actually drives the required oversample.
+ * Holding rows FIXED and varying only nTopics (60 vs 240) showed the required
+ * oversample tracks rows-per-topic, not total corpus size — e.g. 16,000 rows
+ * needed oversample=32 at nTopics=60 (~267 rows/topic) but only oversample=8
+ * at nTopics=240 (~67 rows/topic). All prior results from this script (both
+ * the windowed-vs-control finding and the corpus-size-scaling table in
+ * ts/embed/ivf.ts's history) are consistent with "cap must exceed rows per
+ * cluster," not "cap must exceed a fraction of total corpus rows." Do not
+ * sweep --docs alone and draw a corpus-size conclusion from it; hold rows
+ * (docs * ~4) fixed and vary --topics if that is the question, or vice versa.
  */
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,12 +68,13 @@ import {
 } from "../ts/embed/buildivf.js";
 import type { Embedder } from "../ts/embed/index.js";
 
-function parseArgs(argv: string[]): { docs: number; out: string } {
+function parseArgs(argv: string[]): { docs: number; topics: number; out: string } {
   const get = (name: string, fallback: string) =>
     argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
   const docs = Number(get("docs", "500"));
+  const topics = Number(get("topics", "60"));
   const out = get("out", join(process.cwd(), `ivf-oversample-experiment-${Date.now()}.log`));
-  return { docs, out };
+  return { docs, topics, out };
 }
 
 // A first attempt used a char-code-sum-mod-dim hash embedder. At corpus sizes
@@ -244,24 +262,23 @@ async function runCorpus(opts: {
 }
 
 async function main() {
-  const { docs, out } = parseArgs(process.argv.slice(2));
+  const { docs, topics: NTOPICS, out } = parseArgs(process.argv.slice(2));
   writeFileSync(out, "");
   const log = (s: string) => {
     console.log(s);
     appendFileSync(out, `${s}\n`);
   };
   log(`log file: ${out}`);
-  log(`args: --docs=${docs}`);
+  log(`args: --docs=${docs} --topics=${NTOPICS}`);
 
   const dir = mkdtempSync(join(tmpdir(), "eil-ivf-oversample-"));
   process.env.EIL_DATABASE_URL = `pglite://${dir}`;
   const client = await connect();
   await migrate(client);
 
-  // 60 topics ~ sqrt(4000 target rows), so kmeans has a real chance of
-  // recovering them as clusters — this run is about isolating oversample
-  // (quantization) loss from cluster loss, not re-testing k-means itself.
-  const NTOPICS = 60;
+  // Default 60 topics ~ sqrt(4000 default-docs rows), so kmeans has a real
+  // chance of recovering them as clusters. See the CONFOUND WARNING in this
+  // file's header before sweeping --docs and --topics independently.
   const DIM = 64;
   const CHUNK_NOISE = 0.35; // docs within one topic are related but distinct
   const WINDOW_NOISE = 0.1; // windows within one chunk are near-duplicates
