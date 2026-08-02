@@ -20,14 +20,14 @@ export interface IntegrityReport {
   docs_html_residue: number; // storage-format leaked through the converter
   chunks_null_tsv: number; // FTS index hole — always a bug
   docs_quarantined: number; // secrets found: invisible to reads, awaiting remediation
-  chunks_over_embed_window: number; // tail silently dropped by the embedder
+  chunks_unembedded: number; // no vector under the current model — aborted/never-run backfill
   links_dangling_dst: number; // informational: by-design "worth ingesting" markers
   stale_sources: string[]; // cursor age > 24h — connector rot tripwire
 }
 
 export async function integrity(client: Db): Promise<IntegrityReport> {
-  const one = async (sql: string): Promise<number> =>
-    Number((await client.query(sql)).rows[0]?.n ?? 0);
+  const one = async (sql: string, params?: any[]): Promise<number> =>
+    Number((await client.query(sql, params)).rows[0]?.n ?? 0);
 
   const docsTotal = await one("SELECT count(*)::int AS n FROM documents");
   // Tenant must be part of the correlation since migration 0009. Without it a
@@ -62,19 +62,21 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
   const quarantined = await one(
     "SELECT count(*)::int AS n FROM documents WHERE quarantined_at IS NOT NULL",
   );
-  // Chunks longer than the embedder's window are SILENTLY truncated: no error,
-  // just a vector that ignores the tail. Measured against the vendored MiniLM,
-  // two 3200-char texts differing only past ~1600 chars embed to cosine
-  // 1.000000. That is invisible from the outside, so count it here — the number
-  // is the fraction of the corpus the vector arm is not actually reading.
+  // Chunks used to be embedded whole and silently truncated at the embedder's
+  // window; migration 0020 splits them, so the old over-window count is
+  // structurally zero. What can still go wrong is a chunk with NO vector at all —
+  // an aborted or never-run backfill — which is invisible from the outside
+  // because the vector arm just quietly returns fewer candidates.
   const { getEmbedder } = await import("./embed/index.js");
-  let overWindow = 0;
+  let unembedded = 0;
   try {
-    const w = getEmbedder().windowChars;
-    if (Number.isFinite(w))
-      overWindow = await one(
-        `SELECT count(*)::int AS n FROM chunks WHERE length(heading_path) + length(text) > ${Math.floor(w)}`,
-      );
+    const model = getEmbedder().id;
+    unembedded = await one(
+      "SELECT count(*)::int AS n FROM chunks c WHERE NOT EXISTS (" +
+        " SELECT 1 FROM chunk_vectors v WHERE v.tenant = c.tenant" +
+        " AND v.doc_id = c.doc_id AND v.seq = c.seq AND v.embed_model = $1)",
+      [model],
+    );
   } catch {
     /* embedder unavailable: not an integrity fault */
   }
@@ -95,7 +97,7 @@ export async function integrity(client: Db): Promise<IntegrityReport> {
     docs_html_residue: htmlResidue,
     chunks_null_tsv: nullTsv,
     docs_quarantined: quarantined,
-    chunks_over_embed_window: overWindow,
+    chunks_unembedded: unembedded,
     links_dangling_dst: danglingDst,
     stale_sources: stale.rows.map((r) => r.source as string),
   };

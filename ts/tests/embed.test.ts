@@ -135,8 +135,10 @@ describe("backfill", () => {
     try {
       const first = await backfill(c, stub, {});
       expect(first.embedded).toBeGreaterThan(0);
+      // Vectors now live in chunk_vectors, one row per window — not on
+      // chunks.embedding, which backfill() no longer writes (migration 0020).
       const row = await c.query(
-        "SELECT embedding, embed_model FROM chunks WHERE doc_id = 'jira:issue:PAY-1' ORDER BY seq LIMIT 1",
+        "SELECT embedding, embed_model FROM chunk_vectors WHERE doc_id = 'jira:issue:PAY-1' ORDER BY seq, ord LIMIT 1",
       );
       expect(row.rows[0].embedding).not.toBeNull();
       expect(row.rows[0].embed_model).toBe("stub:v1");
@@ -262,7 +264,11 @@ describe("vec arm fusion", () => {
       // actually invoked. Without this the test could pass vacuously via the
       // guard early-return, never reaching the catch path.
       await backfill(c, stub, {}); // stub.id === "stub:v1" === throwing.id
-      const embedded = await c.query("SELECT 1 FROM chunks WHERE embedding IS NOT NULL LIMIT 1");
+      // chunk_vectors.embedding is NOT NULL by schema (every row IS a vector),
+      // so the guard-passing signal is a row under THIS model, not non-null-ness.
+      const embedded = await c.query(
+        "SELECT 1 FROM chunk_vectors WHERE embed_model = 'stub:v1' LIMIT 1",
+      );
       expect(embedded.rows.length).toBeGreaterThan(0); // sanity: guard will pass
 
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});

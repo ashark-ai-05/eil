@@ -537,7 +537,7 @@ async function vecArm(
   // embedded still pay for a query-embedding call on every single search,
   // because some OTHER tenant had embeddings.
   const has = await client.query(
-    "SELECT 1 FROM chunks WHERE tenant = $2 AND embedding IS NOT NULL AND embed_model = $1 LIMIT 1",
+    "SELECT 1 FROM chunk_vectors WHERE tenant = $2 AND embed_model = $1 LIMIT 1",
     [emb.id, viewer.tenant],
   );
   if (has.rows.length === 0) return null; // nothing embedded with this model -> pure FTS
@@ -575,14 +575,14 @@ async function vecArm(
     // exactly the previous full exact scan — correct, just slow. The index is an
     // optimisation, never a correctness dependency.
     `WITH cand AS (
-       SELECT c.doc_id, c.seq, c.embedding
-         FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id
-        WHERE c.embedding IS NOT NULL AND c.embed_model = $5 AND ${visibleSql(1, 2, 3)}
-          AND ($7::int[] IS NULL OR c.cluster_id = ANY($7::int[]))
+       SELECT v.doc_id, v.seq, v.ord, v.embedding
+         FROM chunk_vectors v JOIN documents d ON d.tenant = v.tenant AND d.id = v.doc_id
+        WHERE v.embed_model = $5 AND ${visibleSql(1, 2, 3)}
+          AND ($7::int[] IS NULL OR v.cluster_id = ANY($7::int[]))
           AND ($11::text[] IS NULL OR d.source = ANY($11::text[]))
-        ORDER BY CASE WHEN $8::varbit IS NULL OR c.sig IS NULL THEN 0
-                      ELSE bit_count(c.sig # $8::varbit) END,
-                 c.doc_id, c.seq
+        ORDER BY CASE WHEN $8::varbit IS NULL OR v.sig IS NULL THEN 0
+                      ELSE bit_count(v.sig # $8::varbit) END,
+                 v.doc_id, v.seq, v.ord
         LIMIT CASE WHEN $7::int[] IS NULL THEN $9::bigint ELSE $10::bigint END
      ), scored AS (
        SELECT c.doc_id, c.seq,

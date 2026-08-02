@@ -28,9 +28,7 @@ describe("window-grained embeddings", () => {
       "SELECT ord FROM chunk_vectors WHERE doc_id = $1 AND seq = 0 ORDER BY ord",
       ["conf:1"],
     );
-    expect(r.rows.map((x: any) => Number(x.ord))).toEqual(
-      r.rows.map((_: unknown, i: number) => i),
-    );
+    expect(r.rows.map((x: any) => Number(x.ord))).toEqual(r.rows.map((_: unknown, i: number) => i));
   });
 
   it("distinguishes texts that differ only in their tail", async () => {

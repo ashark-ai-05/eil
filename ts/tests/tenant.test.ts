@@ -136,16 +136,19 @@ describe("tenant-scoped catalog identity", () => {
   it("writes embeddings only to the owning tenant's chunk", async () => {
     const { FakeEmbedder } = await import("../embed/index.js");
     const { backfill } = await import("../embed/backfill.js");
-    await backfill(client, new FakeEmbedder(8), {});
+    const emb = new FakeEmbedder(8);
+    await backfill(client, emb, {});
+    // Vectors now live in chunk_vectors (migration 0020), one row per window —
+    // not on chunks.embedding, which backfill() no longer writes.
     const rows = await client.query(
-      "SELECT c.tenant, c.embedding IS NOT NULL AS has FROM chunks c" +
-        " WHERE c.doc_id = $1 ORDER BY c.tenant",
-      ["confluence:page:12345"],
+      "SELECT tenant, count(*)::int AS n FROM chunk_vectors" +
+        " WHERE doc_id = $1 AND embed_model = $2 GROUP BY tenant ORDER BY tenant",
+      ["confluence:page:12345", emb.id],
     );
-    expect(rows.rows.map((r: any) => r.has)).toEqual([true, true]);
+    expect(rows.rows.map((r: any) => r.n > 0)).toEqual([true, true]);
     // distinct text per tenant must yield distinct vectors, not one overwriting the other
     const vecs = await client.query(
-      "SELECT tenant, embedding FROM chunks WHERE doc_id = $1 ORDER BY tenant",
+      "SELECT tenant, embedding FROM chunk_vectors WHERE doc_id = $1 ORDER BY tenant",
       ["confluence:page:12345"],
     );
     expect(JSON.stringify(vecs.rows[0].embedding)).not.toBe(JSON.stringify(vecs.rows[1].embedding));

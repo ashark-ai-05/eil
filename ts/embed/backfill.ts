@@ -53,9 +53,17 @@ export async function backfill(
       // Replace, never accumulate: a chunk that got shorter must not keep the
       // vectors of windows that no longer exist, or the vector arm would score
       // text the document no longer contains.
+      //
+      // Scoped by (tenant, doc_id, seq) ALONE, not also embed_model: the PK is
+      // (tenant, doc_id, seq, ord), with no model column, so at most one
+      // model's windows can occupy a given ord at a time — the same
+      // one-vector-per-chunk constraint chunks.embedding always had. Scoping
+      // the delete to only the model being written left a PRIOR model's rows
+      // in place, and inserting ord 0 under the new model then collided with
+      // them: "duplicate key value violates chunk_vectors_pkey".
       await client.query(
-        "DELETE FROM chunk_vectors WHERE tenant = $1 AND doc_id = $2 AND seq = $3 AND embed_model = $4",
-        [row.tenant, row.doc_id, row.seq, embedder.id],
+        "DELETE FROM chunk_vectors WHERE tenant = $1 AND doc_id = $2 AND seq = $3",
+        [row.tenant, row.doc_id, row.seq],
       );
       for (let ord = 0; ord < windows.length; ord++) {
         await client.query(
