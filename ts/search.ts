@@ -14,7 +14,22 @@ import { type Embedder, getEmbedder, toVec } from "./embed/index.js";
 import { OVERSAMPLE, loadCentroids, probeClusters, signature } from "./embed/ivf.js";
 import { ATTR, OP, currentTrace, withSpan } from "./telemetry.js";
 
-export const SNIPPET_OPTS = "StartSel=**, StopSel=**, MaxWords=40, MinWords=10";
+/**
+ * Snippet options, sized for an agent deciding whether to call get_doc — NOT for
+ * a human scanning a page. The old MaxWords=40 was ~200 characters, which is
+ * below the point where an extract can answer anything, so the agent fetched the
+ * whole document and paid for it.
+ *
+ * ~90 words over 2 fragments is ~6 sentences, which is where Provence (ICLR
+ * 2025) measured query-biased extraction holding answer quality while removing
+ * 50-80% of the context, and close to the ~60-token extract that scored best in
+ * "Searching for Best Practices in RAG". Two fragments rather than one because a
+ * question's evidence is frequently split across a document.
+ */
+export const SNIPPET_OPTS =
+  "StartSel=**, StopSel=**, MaxWords=90, MinWords=30, MaxFragments=2, FragmentDelimiter= … ";
+/** ~90 words at ~6 chars/word, matching SNIPPET_OPTS on the lexical arm. */
+export const VEC_SNIPPET_CHARS = 540;
 export const GET_DOC_MAX_CHARS = 8_000;
 export const EXPAND_MAX_EDGES = 50;
 
@@ -119,6 +134,9 @@ export interface SearchResult {
   url: string | null;
   tier: string;
   snippet: string;
+  /** False means the snippet IS the chunk — there is nothing more to fetch.
+   *  An agent that cannot tell these apart fetches defensively, every time. */
+  truncated: boolean;
   score?: number;
 }
 
@@ -244,6 +262,16 @@ async function searchDocsInner(
          FROM best
      )
      SELECT doc_id, source, strict_hit, title, url, quality_tier, updated_at,
+            -- ts_headline drops the run of trailing non-word characters attached
+            -- to the last matched word once MaxFragments >= 1 — measured directly:
+            -- 'Retry uses backoff.' (19 chars) headlined with this file's
+            -- MaxFragments=2 options comes back '**Retry** uses **backoff**', no
+            -- trailing period, even though every word of the chunk is present.
+            -- A plain length(text) would flag that chunk truncated when it is
+            -- not, which is the wrong direction (see the comment below). Strip
+            -- the same trailing run here so text_len matches what ts_headline can
+            -- actually return.
+            length(regexp_replace(text, '\\W+$', '')) AS text_len,
             ts_headline('english', text, (SELECT loose FROM qq), $2) AS snippet
        FROM quota
       WHERE rn <= $3
@@ -261,12 +289,18 @@ async function searchDocsInner(
   };
   for (const row of res.rows) {
     if (byDoc.has(row.doc_id)) continue;
+    const snippet: string = row.snippet;
+    // ts_headline returns the WHOLE text when it fits inside the fragment
+    // budget, so a plain-length comparison is the exact test for "is there more".
+    // The ** markers are the only thing it adds, so strip them before comparing.
+    const covered = snippet.replaceAll("**", "").length >= Number(row.text_len);
     byDoc.set(row.doc_id, {
       id: row.doc_id,
       title: row.title,
       url: row.url,
       tier: row.quality_tier,
-      snippet: row.snippet,
+      snippet,
+      truncated: !covered,
       updated: row.updated_at,
     });
     const cls = row.source === "code" ? "fts_code" : "fts_prose";
@@ -674,12 +708,18 @@ async function vecArm(
   );
   for (const row of res.rows) {
     if (!byDoc.has(row.doc_id)) {
+      const text = String(row.text);
+      // No query terms to bias toward on this arm — the match was semantic — so
+      // this is a leading extract, not a headline. Same budget as the lexical
+      // arm so an agent sees one consistent snippet size.
+      const snippet = text.slice(0, VEC_SNIPPET_CHARS);
       byDoc.set(row.doc_id, {
         id: row.doc_id,
         title: row.title,
         url: row.url,
         tier: row.quality_tier,
-        snippet: String(row.text).slice(0, 240),
+        snippet,
+        truncated: text.length > snippet.length,
         updated: row.updated_at,
       });
     }

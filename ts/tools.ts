@@ -41,7 +41,10 @@ const searchDocsSpec: ToolSpec = {
   description:
     "Search indexed org knowledge (Confluence, Jira, notes). Returns compact " +
     "results: ids, titles, snippets. Use get_doc(id) for full content. Ticket " +
-    "keys (e.g. PAY-981) resolve directly with their linked context.",
+    "keys (e.g. PAY-981) resolve directly with their linked context. Each " +
+    "result's `truncated` says whether its snippet is the whole chunk or a " +
+    "cut of it. Call get_doc only when a result's `truncated` is true and " +
+    "the snippet does not already answer the question.",
   schema: z.object({
     query: z.string(),
     limit: z.number().int().default(8),
@@ -91,7 +94,10 @@ const getDocSpec: ToolSpec = {
   name: "get_doc",
   description:
     "Fetch one document's content by canonical id (from search_docs/expand). " +
-    "Large documents are windowed; pass section=1,2,... for more. This read never refreshes or mutates the catalog.",
+    "Large documents are windowed; pass section=1,2,... for more. This read " +
+    "never refreshes or mutates the catalog. Call get_doc only when a " +
+    "result's `truncated` is true and the snippet does not already answer " +
+    "the question — a result with `truncated: false` already IS the whole chunk.",
   schema: z.object({ id: z.string(), section: z.number().int().default(0) }).strict(),
   requiresEnv: [],
   handler: async (c, v, a) => {
