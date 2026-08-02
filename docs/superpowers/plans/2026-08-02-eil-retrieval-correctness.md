@@ -787,7 +787,7 @@ git commit -m "docs: note the re-embed and recalibration 0020 requires"
 
 **Files:**
 - Modify: `ts/search.ts:17` (`SNIPPET_OPTS`), `:116-123` (`SearchResult`), `:217-278` (the lexical query and result assembly), `:617-628` (the vector-arm snippet)
-- Create: `migrations/0021_fetch_through.sql`
+- Create: `migrations/0022_fetch_through.sql`
 - Test: `ts/tests/snippet.test.ts`
 
 **Interfaces:**
@@ -956,10 +956,10 @@ Expected: PASS, 3 tests.
 
 `metrics.vw_two_phase` already divides `get_doc` calls by `search_docs` calls. That answers "how often does a search lead to a fetch"; it does not answer "what fraction of the results we returned were insufficient", which is the snippet-sufficiency signal. `audit_log.result_count` is already recorded and unused for this.
 
-Create `migrations/0021_fetch_through.sql`:
+Create `migrations/0022_fetch_through.sql`:
 
 ```sql
--- migrations/0021_fetch_through.sql
+-- migrations/0022_fetch_through.sql
 -- Snippet sufficiency, as a number.
 --
 -- vw_two_phase divides get_doc CALLS by search CALLS. That is a useful shape
@@ -1001,7 +1001,7 @@ Expected: all clean. Other suites asserting on snippet length or on `SearchResul
 - [ ] **Step 9: Commit**
 
 ```bash
-git add ts/search.ts ts/mcp-server.ts migrations/0021_fetch_through.sql ts/tests
+git add ts/search.ts ts/mcp-server.ts migrations/0022_fetch_through.sql ts/tests
 git commit -m "feat: snippets an agent can answer from, and a flag when it cannot
 
 MaxWords 40 -> 90 over 2 fragments, plus an explicit truncated flag so
