@@ -10,7 +10,13 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CanonicalDoc } from "../contracts/models.js";
 import { type Db, connect, migrate } from "../db.js";
-import { backfillSignatures, buildCentroids, calibrate, chosenNprobe } from "../embed/buildivf.js";
+import {
+  backfillSignatures,
+  buildCentroids,
+  calibrate,
+  chosenNprobe,
+  chosenOversample,
+} from "../embed/buildivf.js";
 import { FakeEmbedder } from "../embed/index.js";
 import {
   RECALL_GATE,
@@ -148,7 +154,66 @@ describe("the funnel against a real database", () => {
       "SELECT nprobe, chosen FROM metrics.ivf_calibration ORDER BY nprobe",
     );
     expect(rows.rows).toHaveLength(3); // the whole curve, not just the winner
-    if (cal.chosen !== null) expect(await chosenNprobe(client, emb.id)).toBe(cal.chosen);
+    if (cal.chosen !== null) {
+      expect(await chosenNprobe(client, emb.id)).toBe(cal.chosen);
+      // Same row: oversample is fixed for the whole calibrate() run, and only
+      // the winning nprobe row is marked chosen.
+      expect(await chosenOversample(client, emb.id)).toBe(cal.oversample);
+    }
+  });
+
+  it("vecArm reads the calibrated oversample, not the compiled-in constant", async () => {
+    // Regression coverage for I-2: vecArm used to bind the OVERSAMPLE constant
+    // (8) into every query, ignoring the per-corpus oversample calibrate()
+    // computes and persists. This test seeds its OWN calibration row rather
+    // than depending on the previous test's emergent `cal.chosen` — on this
+    // coarse nlist=6 corpus, cluster loss alone can keep every nprobe below
+    // RECALL_GATE regardless of oversample, so `cal.chosen` legitimately comes
+    // out null sometimes and this test would prove nothing if it rode on that.
+    // The wiring under test here is independent of whether THIS corpus's own
+    // calibration happens to clear the gate — it only asks: does vecArm read
+    // chosenOversample(), or still the constant?
+    const saved = (await client.query("SELECT id, chosen FROM metrics.ivf_calibration"))
+      .rows as Array<{
+      id: number;
+      chosen: boolean;
+    }>;
+    await client.query("UPDATE metrics.ivf_calibration SET chosen = false");
+    // 17 is off OVERSAMPLE_LADDER and off the reverted OVERSAMPLE constant (8)
+    // — unambiguous evidence of which one the query actually used.
+    const inserted = await client.query(
+      "INSERT INTO metrics.ivf_calibration" +
+        " (embed_model, n_chunks, nlist, nprobe, oversample, recall_10, queries, chosen)" +
+        " VALUES ($1, 60, 6, 1, 17, 1.0000, 30, true) RETURNING id",
+      [emb.id],
+    );
+    try {
+      const calls: Array<{ text: string; params: any[] }> = [];
+      const spy: Db = {
+        query: async (text: string, params: any[] = []) => {
+          calls.push({ text, params });
+          return client.query(text, params);
+        },
+        end: () => client.end(),
+      };
+      await searchDocs(spy, VIEWER, "retry backoff dunning", 10, emb);
+      const funnel = calls.find((c) => c.text.includes("chunk_vectors v JOIN documents d"));
+      expect(funnel).toBeDefined();
+      // Bind order in vecArm's query (ts/search.ts): $10 = limit * oversample,
+      // i.e. params[9] zero-indexed. limit is 10 here (searchDocs' 4th arg).
+      expect(funnel!.params[9]).toBe(10 * 17);
+    } finally {
+      // Leave calibration state exactly as this test found it.
+      await client.query("DELETE FROM metrics.ivf_calibration WHERE id = $1", [
+        inserted.rows[0].id,
+      ]);
+      for (const row of saved) {
+        await client.query("UPDATE metrics.ivf_calibration SET chosen = $1 WHERE id = $2", [
+          row.chosen,
+          row.id,
+        ]);
+      }
+    }
   });
 
   it("returns the SAME results as the exact scan once calibrated", async () => {

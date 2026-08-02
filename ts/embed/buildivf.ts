@@ -347,4 +347,20 @@ export async function chosenNprobe(client: Db, embedModel: string): Promise<numb
   return res.rows[0] ? Number(res.rows[0].nprobe) : null;
 }
 
+/** The calibrated oversample for this model, or null if never calibrated / gate never
+ *  met. Same row as chosenNprobe() — `oversample` is fixed for the whole calibrate()
+ *  run and only the winning nprobe row is marked `chosen`, so the two are always
+ *  read from the same calibration. Mirrors chosenNprobe() so `vecArm` (ts/search.ts)
+ *  can use the per-corpus measured value instead of the global OVERSAMPLE constant,
+ *  which — until this existed — was a worst-case default baked into every query
+ *  regardless of what a corpus's own calibration actually needed. */
+export async function chosenOversample(client: Db, embedModel: string): Promise<number | null> {
+  const res = await client.query(
+    "SELECT oversample FROM metrics.ivf_calibration WHERE embed_model = $1 AND chosen" +
+      " ORDER BY at DESC LIMIT 1",
+    [embedModel],
+  );
+  return res.rows[0] ? Number(res.rows[0].oversample) : null;
+}
+
 export const defaultEmbedder = (): Embedder => getEmbedder();

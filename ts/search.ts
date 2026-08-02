@@ -549,13 +549,25 @@ async function vecArm(
   // never a constant here — it is whatever the calibration run chose against the
   // recall gate, so a corpus whose geometry does not suit IVF simply keeps the
   // exact scan rather than silently losing recall.
+  //
+  // oversample rides along with it: it is calibrated in the SAME run and
+  // persisted in the SAME metrics.ivf_calibration row (chosenOversample() reads
+  // the `oversample` column off the row `chosen` marks), so using the constant
+  // here once `chosenNprobe` had already gone dynamic was a worst-case default
+  // baked into every query regardless of what THIS corpus's calibration found.
+  // It only matters when probes is non-null: oversample bounds `cand` only in
+  // the CASE branch that fires when $7 (probes) is non-null (see the query
+  // below), so an uncalibrated corpus never reads it.
   let probes: number[] | null = null;
+  let oversample = OVERSAMPLE;
   try {
-    const { chosenNprobe } = await import("./embed/buildivf.js");
+    const { chosenNprobe, chosenOversample } = await import("./embed/buildivf.js");
     const nprobe = await chosenNprobe(client, emb.id);
     if (nprobe) {
       const cents = await loadCentroids(client, emb.id);
       if (cents.length > 0) probes = probeClusters(qv, cents, nprobe);
+      const calibrated = await chosenOversample(client, emb.id);
+      if (calibrated) oversample = calibrated;
     }
   } catch (err: any) {
     console.error(`ivf probe skipped: ${err.message}`); // degrade to exact scan
@@ -614,7 +626,7 @@ async function vecArm(
       probes, // null => no IVF index, scan everything (previous behaviour)
       probes ? signature(qv) : null,
       Number.MAX_SAFE_INTEGER, // unbounded when there is nothing to narrow with
-      limit * OVERSAMPLE, // survivors handed to the exact rescore
+      limit * oversample, // survivors handed to the exact rescore
       sources,
     ],
   );
