@@ -179,8 +179,8 @@ describe("the funnel against a real database", () => {
       chosen: boolean;
     }>;
     await client.query("UPDATE metrics.ivf_calibration SET chosen = false");
-    // 17 is off OVERSAMPLE_LADDER and off the reverted OVERSAMPLE constant (8)
-    // — unambiguous evidence of which one the query actually used.
+    // 17 is off OVERSAMPLE_LADDER and off the OVERSAMPLE constant (8) —
+    // unambiguous evidence of which one the query actually used.
     const inserted = await client.query(
       "INSERT INTO metrics.ivf_calibration" +
         " (embed_model, n_chunks, nlist, nprobe, oversample, recall_10, queries, chosen)" +
@@ -227,6 +227,52 @@ describe("the funnel against a real database", () => {
   it("degrades to the exact scan when the index is absent, rather than failing", async () => {
     await client.query("DELETE FROM ivf_centroids");
     await client.query("UPDATE metrics.ivf_calibration SET chosen = false");
+    const r: any = await searchDocs(client, VIEWER, "refund policy", 10, emb);
+    expect(Array.isArray(r.results)).toBe(true);
+    expect(r.results.length).toBeGreaterThan(0);
+  });
+
+  // Placed last in this describe block: it rebuilds centroids from scratch,
+  // which is disruptive to any test relying on earlier tests' calibration
+  // state (several do — see the "vecArm reads the calibrated oversample" test
+  // above, which saves/restores its own row for exactly this reason).
+  it("supersedes a stale calibration when centroids are rebuilt, so a rebuild cannot leave a stale nprobe/oversample authoritative", async () => {
+    // NEW-4 (fix round 2): buildCentroids() replaces ivf_centroids (DELETE +
+    // re-INSERT) but, before this fix, never touched
+    // metrics.ivf_calibration — an operator who ran `ivf build` again
+    // (fresh embeddings, a different corpus, migration 0020's re-embed) without
+    // also re-running `ivf calibrate` kept an OLD nprobe/oversample bound into
+    // every query against a partitioning that no longer existed.
+    await buildCentroids(client, emb.id, {}); // fresh default-nlist partitioning
+    // Default (unrestricted) probes, not [1,2,6] as elsewhere in this file —
+    // the restricted set used by "calibrates, persists the whole curve" above
+    // never tries nprobe=4 and can legitimately land on cal.chosen === null on
+    // this corpus; this test needs an actual chosen row to prove it gets
+    // superseded, so give calibrate() its full ladder.
+    const cal = await calibrate(client, emb, {});
+    expect(cal.chosen).not.toBeNull(); // must actually calibrate, or this proves nothing
+    expect(await chosenNprobe(client, emb.id)).toBe(cal.chosen);
+    expect(await chosenOversample(client, emb.id)).toBe(cal.oversample);
+
+    await buildCentroids(client, emb.id, {}); // rebuild: a fresh partitioning
+
+    // The stale calibration must stop being authoritative...
+    expect(await chosenNprobe(client, emb.id)).toBeNull();
+    expect(await chosenOversample(client, emb.id)).toBeNull();
+    // ...but stay on the books as history (metrics.ivf_calibration is a
+    // record, not just a cache) rather than being deleted.
+    const row = await client.query(
+      "SELECT superseded_at IS NOT NULL AS superseded FROM metrics.ivf_calibration" +
+        " WHERE embed_model = $1 AND chosen ORDER BY at DESC LIMIT 1",
+      [emb.id],
+    );
+    expect(row.rows[0].superseded).toBe(true);
+
+    // And the live query path actually falls back — searchDocs must not
+    // throw or silently keep using the superseded nprobe/oversample; with
+    // chosenNprobe() null, vecArm's `probes` stays null and it runs the exact
+    // scan (the same fallback path "degrades to the exact scan..." above
+    // exercises directly).
     const r: any = await searchDocs(client, VIEWER, "refund policy", 10, emb);
     expect(Array.isArray(r.results)).toBe(true);
     expect(r.results.length).toBeGreaterThan(0);

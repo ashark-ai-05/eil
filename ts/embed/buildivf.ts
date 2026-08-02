@@ -88,6 +88,15 @@ export async function buildCentroids(
 
   // Replace atomically: a half-migrated partitioning would silently drop
   // whichever clusters had not been reassigned yet out of every query.
+  //
+  // The existing calibration is superseded in the SAME transaction, not a
+  // separate statement after COMMIT: a crash or reader between the two would
+  // otherwise see a NEW partitioning still endorsed by an OLD calibration —
+  // exactly the bug this fixes (chosenNprobe()/chosenOversample() describe a
+  // partitioning that no longer exists). Not a DELETE: metrics.ivf_calibration
+  // is also a history (see calibrate()'s "the whole curve, not just the
+  // winner" below); superseded_at lets a past run stay inspectable while no
+  // longer being authoritative.
   await client.query("BEGIN");
   try {
     await client.query("DELETE FROM ivf_centroids WHERE embed_model = $1", [embedModel]);
@@ -97,6 +106,11 @@ export async function buildCentroids(
         [embedModel, c, Array.from(centroids[c]!)],
       );
     }
+    await client.query(
+      "UPDATE metrics.ivf_calibration SET superseded_at = now()" +
+        " WHERE embed_model = $1 AND superseded_at IS NULL",
+      [embedModel],
+    );
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
@@ -337,10 +351,13 @@ export async function calibrate(
   };
 }
 
-/** The calibrated nprobe for this model, or null if never calibrated / gate never met. */
+/** The calibrated nprobe for this model, or null if never calibrated / gate never met /
+ *  superseded by a later buildCentroids() that replaced the partitioning this
+ *  calibration describes (see the supersede UPDATE in buildCentroids() above). */
 export async function chosenNprobe(client: Db, embedModel: string): Promise<number | null> {
   const res = await client.query(
-    "SELECT nprobe FROM metrics.ivf_calibration WHERE embed_model = $1 AND chosen" +
+    "SELECT nprobe FROM metrics.ivf_calibration" +
+      " WHERE embed_model = $1 AND chosen AND superseded_at IS NULL" +
       " ORDER BY at DESC LIMIT 1",
     [embedModel],
   );
@@ -348,15 +365,17 @@ export async function chosenNprobe(client: Db, embedModel: string): Promise<numb
 }
 
 /** The calibrated oversample for this model, or null if never calibrated / gate never
- *  met. Same row as chosenNprobe() — `oversample` is fixed for the whole calibrate()
- *  run and only the winning nprobe row is marked `chosen`, so the two are always
- *  read from the same calibration. Mirrors chosenNprobe() so `vecArm` (ts/search.ts)
- *  can use the per-corpus measured value instead of the global OVERSAMPLE constant,
- *  which — until this existed — was a worst-case default baked into every query
- *  regardless of what a corpus's own calibration actually needed. */
+ *  met / superseded (see chosenNprobe()). Same row as chosenNprobe() — `oversample`
+ *  is fixed for the whole calibrate() run and only the winning nprobe row is marked
+ *  `chosen`, so the two are always read from the same calibration. Mirrors
+ *  chosenNprobe() so `vecArm` (ts/search.ts) can use the per-corpus measured value
+ *  instead of the global OVERSAMPLE constant, which — until this existed — was a
+ *  worst-case default baked into every query regardless of what a corpus's own
+ *  calibration actually needed. */
 export async function chosenOversample(client: Db, embedModel: string): Promise<number | null> {
   const res = await client.query(
-    "SELECT oversample FROM metrics.ivf_calibration WHERE embed_model = $1 AND chosen" +
+    "SELECT oversample FROM metrics.ivf_calibration" +
+      " WHERE embed_model = $1 AND chosen AND superseded_at IS NULL" +
       " ORDER BY at DESC LIMIT 1",
     [embedModel],
   );

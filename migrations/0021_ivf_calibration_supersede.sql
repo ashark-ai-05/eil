@@ -1,0 +1,19 @@
+-- migrations/0021_ivf_calibration_supersede.sql
+--
+-- buildCentroids() replaces ivf_centroids (a full DELETE + re-INSERT, so a
+-- half-migrated partitioning never drops a cluster out of every query) but,
+-- until this migration, never touched metrics.ivf_calibration — so an
+-- operator who ran `embed backfill --reembed` and `ivf build` but not
+-- `ivf calibrate` kept the OLD calibration's nprobe/oversample bound into
+-- every query against a partitioning that no longer existed. After migration
+-- 0020 this is not a hypothetical: the old calibration was measured at
+-- chunk-grain, and staying authoritative against the new window-grain
+-- partitioning is silently wrong, not just stale.
+--
+-- `superseded_at`, not a DELETE, because metrics.ivf_calibration is also a
+-- history — the whole point of persisting "the whole curve, not just the
+-- winner" (see the calibrate() comment in ts/embed/buildivf.ts) is so a past
+-- run is auditable. chosenNprobe() / chosenOversample() add
+-- `AND superseded_at IS NULL` so a superseded row simply stops being
+-- authoritative; it is still there to look at.
+ALTER TABLE metrics.ivf_calibration ADD COLUMN superseded_at timestamptz;
