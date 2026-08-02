@@ -103,6 +103,11 @@ checks that catch them.
 Semantic search, data-trust auditing, metrics and development workflow:
 **[docs/operations.md](docs/operations.md)**.
 
+Migration 0020 moves embeddings to one vector per embedder window. After
+applying it, run `eil embed backfill --reembed`, then `eil ivf build` and
+`eil ivf calibrate` — the previous calibration was measured against a
+different number of vectors and no longer describes this index.
+
 ## Architecture
 
 **[docs/system-map.html](docs/system-map.html)** — the whole ecosystem in one
