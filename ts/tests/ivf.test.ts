@@ -17,7 +17,7 @@ import {
   chosenNprobe,
   chosenOversample,
 } from "../embed/buildivf.js";
-import { FakeEmbedder } from "../embed/index.js";
+import { type Embedder, FakeEmbedder } from "../embed/index.js";
 import {
   RECALL_GATE,
   hamming,
@@ -232,8 +232,8 @@ describe("the funnel against a real database", () => {
     expect(r.results.length).toBeGreaterThan(0);
   });
 
-  // These last two tests are placed at the end of this describe block
-  // deliberately: both rebuild/invalidate global (embed_model-scoped, not
+  // These last three tests are placed at the end of this describe block
+  // deliberately: each rebuilds/invalidates global (embed_model-scoped, not
   // per-test) state — ivf_centroids and metrics.ivf_calibration — which is
   // disruptive to earlier tests relying on a stable calibration (several do —
   // see the "vecArm reads the calibrated oversample" test above, which
@@ -308,6 +308,64 @@ describe("the funnel against a real database", () => {
     // just shrink the result count (FTS alone could still return results
     // here and mask the bug — checking `executor` is what actually verifies
     // the fix, not just `results.length`).
+    const r: any = await searchDocs(client, VIEWER, "retry backoff dunning", 10, emb);
+    expect(Array.isArray(r.results)).toBe(true);
+    expect(r.results.length).toBeGreaterThan(0);
+    expect(String(r.executor)).toContain("vec");
+  });
+
+  it("refuses to probe when no vector carries a cluster assignment, however the calibration survived", async () => {
+    // Fix round 4, item 1. The two tests above each close ONE door to the same
+    // failure by superseding the calibration from the writer that broke it —
+    // buildCentroids()'s centroid swap, and backfill()'s --reembed. This is the
+    // third door found that way, and the reason the guard moved into the query
+    // path instead of a fourth supersede call: backfill()'s per-chunk DELETE is
+    // scoped by (tenant, doc_id, seq) and NOT by embed_model, deliberately —
+    // chunk_vectors' PK is (tenant, doc_id, seq, ord) with no model column, and
+    // a model-scoped delete leaves a prior model's rows in place so the next
+    // INSERT at ord 0 violates the PK (a real, test-reproduced failure, see the
+    // comment at ts/embed/backfill.ts's DELETE). So a PLAIN, non-reembed
+    // backfill after a model switch rewrites the whole corpus with a NULL
+    // cluster_id, and nothing on that path supersedes anything.
+    await backfillSignatures(client, emb.id);
+    await buildCentroids(client, emb.id, {}); // also assigns clusters
+    const cal = await calibrate(client, emb, {});
+    expect(cal.chosen).not.toBeNull(); // must actually calibrate, or this proves nothing
+    expect(await chosenNprobe(client, emb.id)).toBe(cal.chosen);
+
+    // The operator sequence, run for real rather than simulated with an UPDATE:
+    // switch the embedding model and run `eil embed backfill` (no --reembed),
+    // then switch back and run it again. Each pass sees every chunk as missing
+    // a vector for the current model, so each pass DELETEs whatever is there
+    // and re-INSERTs — leaving, at the end, emb's own vectors freshly written
+    // with cluster_id NULL.
+    const { backfill } = await import("../embed/backfill.js");
+    const other: Embedder = {
+      id: `${emb.id}:alt`, // same geometry, different model identity
+      windowChars: Number.MAX_SAFE_INTEGER,
+      embed: (texts: string[]) => emb.embed(texts),
+    };
+    await backfill(client, other, {});
+    await backfill(client, emb, {});
+
+    // Axis 1: the dangerous state is genuinely reached. Nothing superseded the
+    // calibration (unlike the two tests above, chosenNprobe is still NON-null
+    // and would still be handed to probeClusters), and not one row it describes
+    // carries a cluster assignment any more — `v.cluster_id = ANY($7)` would
+    // match nothing, since NULL = ANY(...) is never true.
+    expect(await chosenNprobe(client, emb.id)).toBe(cal.chosen);
+    const assigned = await client.query(
+      "SELECT count(*) FILTER (WHERE cluster_id IS NOT NULL)::int AS n," +
+        " count(*)::int AS total FROM chunk_vectors WHERE embed_model = $1",
+      [emb.id],
+    );
+    expect(assigned.rows[0].total).toBeGreaterThan(0);
+    expect(assigned.rows[0].n).toBe(0);
+
+    // Axis 2: the vector arm still runs. `executor` names the arms that
+    // contributed, so a regression to silent-zero-results drops "vec" from it
+    // while FTS keeps results.length > 0 — which is exactly why the count alone
+    // cannot be the assertion.
     const r: any = await searchDocs(client, VIEWER, "retry backoff dunning", 10, emb);
     expect(Array.isArray(r.results)).toBe(true);
     expect(r.results.length).toBeGreaterThan(0);

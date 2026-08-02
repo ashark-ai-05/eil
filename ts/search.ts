@@ -536,11 +536,24 @@ async function vecArm(
   // Scoped to the viewer's tenant: an unscoped probe made a tenant with nothing
   // embedded still pay for a query-embedding call on every single search,
   // because some OTHER tenant had embeddings.
-  const has = await client.query(
-    "SELECT 1 FROM chunk_vectors WHERE tenant = $2 AND embed_model = $1 LIMIT 1",
+  // Two existence probes, deliberately in ONE round-trip: "is anything embedded
+  // under this model for this tenant" (below, the pure-FTS short-circuit) and
+  // "does any of it actually carry a cluster assignment" (the probing guard,
+  // further down). The second question has to be answered BEFORE `probes` is
+  // set, and folding it into the round-trip the first one already costs keeps
+  // the hot path at the same number of queries it had before the guard existed.
+  // Both are LIMIT-1 existence checks against chunk_vectors' own indexes
+  // (chunk_vectors_model_idx and chunk_vectors_ivf_idx, migration 0020), not
+  // counts.
+  const state = await client.query(
+    "SELECT EXISTS (SELECT 1 FROM chunk_vectors WHERE tenant = $2 AND embed_model = $1)" +
+      "         AS embedded," +
+      "       EXISTS (SELECT 1 FROM chunk_vectors WHERE tenant = $2 AND embed_model = $1" +
+      "                 AND cluster_id IS NOT NULL) AS clustered",
     [emb.id, viewer.tenant],
   );
-  if (has.rows.length === 0) return null; // nothing embedded with this model -> pure FTS
+  if (!state.rows[0].embedded) return null; // nothing embedded with this model -> pure FTS
+  const clustered = state.rows[0].clustered as boolean;
   // Stored vectors are unit-normalized (migration 0008 / toVec), so normalizing
   // the query too makes a dot product exactly equal to cosine — which is what
   // lets the scoring run in SQL instead of dragging every vector into Node.
@@ -558,19 +571,47 @@ async function vecArm(
   // It only matters when probes is non-null: oversample bounds `cand` only in
   // the CASE branch that fires when $7 (probes) is non-null (see the query
   // below), so an uncalibrated corpus never reads it.
+  //
+  // `clustered` is the structural guard on all of this. The invariant this
+  // function claims about itself — "the index is an optimisation, never a
+  // correctness dependency" — used to be enforced by enumerating the writers
+  // that could break it, and three separate doors to the SAME failure were
+  // found one at a time: buildCentroids() replacing centroids under a live
+  // calibration (closed by superseding inside the swap transaction, fix round
+  // 2), backfill(..., {reembed: true}) rewriting every vector with a NULL
+  // cluster_id (closed by superseding before the writes, fix round 3), and
+  // backfill()'s per-chunk DELETE, which is scoped by (tenant, doc_id, seq)
+  // and NOT by embed_model — deliberately, because chunk_vectors' PK has no
+  // model column and a model-scoped delete collides at ord 0 — so a plain,
+  // non-reembed backfill after a model switch also rewrites the corpus with
+  // NULL cluster_id while leaving that model's calibration and centroids
+  // standing. In every one of those states `probes` came back non-null,
+  // `v.cluster_id = ANY($7)` matched nothing (NULL = ANY(...) is never true),
+  // and the vector arm returned ZERO rows silently: no error, no log, just
+  // `executor` quietly dropping "vec" and search narrowing to FTS-only.
+  //
+  // So the query path now refuses to probe an index the data does not carry,
+  // rather than trusting every writer to have superseded correctly. This is an
+  // EXISTENCE check, not a completeness one: a corpus mid-assignClusters has
+  // some cluster_ids and probing it would still miss the unassigned tail —
+  // that window is covered by the calibration being superseded for its whole
+  // duration (buildCentroids() supersedes, and assignClusters() runs after it
+  // commits), not by this guard.
   let probes: number[] | null = null;
   let oversample = OVERSAMPLE;
-  try {
-    const { chosenNprobe, chosenOversample } = await import("./embed/buildivf.js");
-    const nprobe = await chosenNprobe(client, emb.id);
-    if (nprobe) {
-      const cents = await loadCentroids(client, emb.id);
-      if (cents.length > 0) probes = probeClusters(qv, cents, nprobe);
-      const calibrated = await chosenOversample(client, emb.id);
-      if (calibrated) oversample = calibrated;
+  if (clustered) {
+    try {
+      const { chosenNprobe, chosenOversample } = await import("./embed/buildivf.js");
+      const nprobe = await chosenNprobe(client, emb.id);
+      if (nprobe) {
+        const cents = await loadCentroids(client, emb.id);
+        if (cents.length > 0) probes = probeClusters(qv, cents, nprobe);
+        const calibrated = await chosenOversample(client, emb.id);
+        if (calibrated) oversample = calibrated;
+      }
+    } catch (err: any) {
+      console.error(`ivf probe skipped: ${err.message}`); // degrade to exact scan
     }
-  } catch (err: any) {
-    console.error(`ivf probe skipped: ${err.message}`); // degrade to exact scan
   }
   // Score, reduce to the best chunk per doc, and cut to the candidate count all
   // inside Postgres, so only the winners cross the wire. `text` is deliberately
@@ -587,8 +628,9 @@ async function vecArm(
     // recovers the recall binary quantization loses (63.5% alone, 100% after
     // rescore).
     //
-    // With no centroids or no signatures, $7 is NULL and this degrades to
-    // exactly the previous full exact scan — correct, just slow. The index is an
+    // With no centroids, no calibration, or no cluster assignments (see the
+    // `clustered` guard above), $7 is NULL and this degrades to exactly the
+    // previous full exact scan — correct, just slow. The index is an
     // optimisation, never a correctness dependency.
     `WITH cand AS (
        SELECT v.doc_id, v.seq, v.ord, v.embedding
