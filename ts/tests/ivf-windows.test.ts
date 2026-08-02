@@ -16,19 +16,29 @@ import { narrowEmbedder, openTestDb, seedDoc, testViewer } from "./helpers/db.js
  *  construction: deterministic, no model load, forces windowing. Local to
  *  this one test, which exists to make genuine CLUSTER narrowing (nprobe)
  *  reachable — narrowEmbedder's 8 dimensions give only 256 distinct
- *  signatures, so Hamming ordering there is close to random and a
- *  fix-round-2 review found nothing below the full 64x OVERSAMPLE_LADDER rung
- *  clearing RECALL_GATE on that corpus.
+ *  signatures, so Hamming ordering there is close to random. Re-measured in
+ *  fix round 4 against THIS test's own corpus: narrowEmbedder's full-probe
+ *  oversample ladder is 0.020/0.073/0.150/0.333/0.633 at 4x/8x/16x/32x/64x —
+ *  NOTHING on the ladder clears RECALL_GATE, the top rung included. (An
+ *  earlier draft said "nothing BELOW the full 64x rung cleared", which
+ *  faintly implied 64x did. It does not.)
  *
  *  A fix-round-3 review went further and measured this WIDER embedder's own
  *  ladder on this exact corpus/query/pipeline: at full probe (no cluster
  *  loss), 4x/8x/16x/32x/64x recall was 0.000/0.023/0.100/0.300/0.600 —
- *  NOTHING on OVERSAMPLE_LADDER clears the gate here, including 64x.
+ *  NOTHING on OVERSAMPLE_LADDER clears the gate here, including 64x. (Fix
+ *  round 4 re-ran that sweep and reproduced it digit for digit.)
  *  `cal.oversample` landing at 64 is buildivf.ts's fall-through
  *  ("oversample = o // keep the best so far", :308) when nothing clears, not
- *  a passing measurement. Worse: the only nprobe values whose pooled
- *  candidate count exceeds the resulting LIMIT (10*64=640) are 32 and 34
- *  (this corpus's nlist), and both of THOSE also collapse to 0.600 recall.
+ *  a passing measurement. Worse: the nprobe values whose pooled candidate
+ *  count exceeds the resulting LIMIT (10*64=640) are nprobe >= 16 — measured
+ *  average pools of 805/1172/1185 at nprobe 16/32/34 (this corpus's nlist),
+ *  and 719/1160/1185 for this test's own query — and their recalls are
+ *  0.947/0.600/0.600, none of them clearing the 0.98 gate. (The full measured
+ *  curve, nprobe 1/2/4/8/16/32/34: recall 0.600/0.767/1.000/1.000/0.947/
+ *  0.600/0.600, average pool 74/136/237/467/805/1172/1185. An earlier draft
+ *  of this comment named only 32 and 34 and said both "collapse to 0.600" —
+ *  16 exceeds the cap too, and at 0.947 there is no cliff there, just a miss.)
  *  So on this corpus, "calibration succeeds" (cal.chosen non-null) and "the
  *  oversample-based candidate LIMIT binds" are mutually exclusive outcomes —
  *  no corpus we could construct with a deterministic, no-model-load embedder
