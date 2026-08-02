@@ -1,7 +1,9 @@
-/** Embed chunks for the semantic arm. Embed-once: only NULL/stale rows unless
- *  --reembed. Provider errors abort (no partial-silent). */
+/** Embed chunks for the semantic arm, one vector per EMBEDDER WINDOW.
+ *  Embed-once: only chunks with no current-model vectors unless --reembed.
+ *  Provider errors abort (no partial-silent). */
 import type { Db } from "../db.js";
 import { type Embedder, toVec } from "./index.js";
+import { embedWindows } from "./window.js";
 
 export async function backfill(
   client: Db,
@@ -11,14 +13,18 @@ export async function backfill(
   const batch = opts.batch ?? 64;
   // tenant is part of the chunk identity since migration 0009 — (doc_id, seq) is
   // NO LONGER unique. Selecting and binding it is not cosmetic: the tenant-blind
-  // UPDATE wrote one tenant's vector onto every same-id chunk in every other
-  // tenant, so a query phrased against tenant B's wording could score and surface
-  // tenant A's document. Cross-tenant inference through the ranking channel.
+  // write put one tenant's vector on every same-id chunk in every other tenant,
+  // so a query phrased against tenant B's wording could surface tenant A's
+  // document. Cross-tenant inference through the ranking channel.
   const rows = (
     await client.query(
       opts.reembed
         ? "SELECT tenant, doc_id, seq, heading_path, text FROM chunks ORDER BY tenant, doc_id, seq"
-        : "SELECT tenant, doc_id, seq, heading_path, text FROM chunks WHERE embedding IS NULL OR embed_model IS DISTINCT FROM $1 ORDER BY tenant, doc_id, seq",
+        : "SELECT c.tenant, c.doc_id, c.seq, c.heading_path, c.text FROM chunks c" +
+            " WHERE NOT EXISTS (SELECT 1 FROM chunk_vectors v" +
+            "   WHERE v.tenant = c.tenant AND v.doc_id = c.doc_id AND v.seq = c.seq" +
+            "     AND v.embed_model = $1)" +
+            " ORDER BY c.tenant, c.doc_id, c.seq",
       opts.reembed ? [] : [embedder.id],
     )
   ).rows as Array<{
@@ -32,21 +38,36 @@ export async function backfill(
   let embedded = 0;
   for (let i = 0; i < rows.length; i += batch) {
     const slice = rows.slice(i, i + batch);
-    // Compose the breadcrumb back on for the EMBEDDING only. The prefix is real
-    // context for a vector — it is why a chunk is interpretable in isolation —
-    // but it does not belong in stored text, where it would be charged to every
-    // snippet and would tie every vector to the document's title.
-    const vecs = await embedder.embed(
-      slice.map((r) => (r.heading_path ? `${r.heading_path}\n\n${r.text}` : r.text)),
-    );
+    // The breadcrumb is composed back on for the EMBEDDING only, and onto every
+    // window — it is real context for a vector, and it is why a window is
+    // interpretable in isolation. It does not belong in stored text, where it
+    // would be charged to every snippet.
+    const perChunk = slice.map((r) => embedWindows(r.heading_path, r.text, embedder.windowChars));
+    const flat = perChunk.flat();
+    const vecs = await embedder.embed(flat);
+
+    let k = 0;
     for (let j = 0; j < slice.length; j++) {
+      const row = slice[j]!;
+      const windows = perChunk[j]!;
+      // Replace, never accumulate: a chunk that got shorter must not keep the
+      // vectors of windows that no longer exist, or the vector arm would score
+      // text the document no longer contains.
       await client.query(
-        "UPDATE chunks SET embedding = $1, embed_model = $2 WHERE tenant = $3 AND doc_id = $4 AND seq = $5",
-        [toVec(vecs[j]!), embedder.id, slice[j]!.tenant, slice[j]!.doc_id, slice[j]!.seq],
+        "DELETE FROM chunk_vectors WHERE tenant = $1 AND doc_id = $2 AND seq = $3 AND embed_model = $4",
+        [row.tenant, row.doc_id, row.seq, embedder.id],
       );
+      for (let ord = 0; ord < windows.length; ord++) {
+        await client.query(
+          "INSERT INTO chunk_vectors (tenant, doc_id, seq, ord, embedding, embed_model)" +
+            " VALUES ($1, $2, $3, $4, $5, $6)",
+          [row.tenant, row.doc_id, row.seq, ord, toVec(vecs[k]!), embedder.id],
+        );
+        k += 1;
+      }
       embedded += 1;
     }
-    console.log(`  embedded ${Math.min(i + batch, rows.length)}/${rows.length}`);
+    console.log(`  embedded ${Math.min(i + batch, rows.length)}/${rows.length} chunks`);
   }
   return { embedded };
 }
