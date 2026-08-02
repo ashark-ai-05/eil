@@ -153,21 +153,20 @@ export const RECALL_GATE = 0.98;
  *
  * So oversample IS a knob, it is corpus-dependent, and it is now calibrated
  * alongside nprobe rather than assumed. This value is only the starting point of
- * that sweep — EXCEPT that `vecArm` (ts/search.ts) binds this constant directly
- * into `LIMIT $10 = limit * OVERSAMPLE` and never reads the per-corpus oversample
- * `calibrate()` picks, so this default is also the one live at query time.
+ * that sweep.
  *
- * Raised 8 -> 32 by migration 0020, which moved the row grain from one vector
- * per chunk to one per embedder window (~4 windows per 3200-char chunk). Full
- * Hamming scan on a corpus built at that ratio (60 docs, 4 windows each)
- * measured 4x -> 0.5133, 8x -> 0.8267, 16x -> 0.9167, 32x -> 1.0000: the old
- * default of 8x cleared the OLD chunk-grain gate but sits at 0.8267 — well
- * under RECALL_GATE (0.98) — at the new window grain. More windows per chunk
- * means more near-duplicate candidates competing for the same oversample
- * budget, so quantization loss at a fixed oversample got worse, not just the
- * candidate LIMIT's document coverage.
+ * Migration 0020 moved the row grain from one vector per chunk to one per
+ * embedder window (~4 windows per 3200-char chunk), which is under active
+ * re-measurement (task-3-report.md, "Fix round 1") — a first attempt at this
+ * constant repeated the exact non-binding-candidate-set artifact described
+ * above (the survivor cap `10 * oversample` exceeded the small test corpus, so
+ * the reported recall was an arithmetic identity, not a measurement) and was
+ * reverted. Do not raise this value without a corpus large enough that every
+ * rung of OVERSAMPLE_LADDER genuinely cuts candidates (corpus size >
+ * 10 * max(OVERSAMPLE_LADDER)), and a same-size non-windowed control isolating
+ * row-grain from corpus-size.
  */
-export const OVERSAMPLE = 32;
+export const OVERSAMPLE = 8;
 
 /** Ladder swept at full probe to separate quantization loss from cluster loss. */
 export const OVERSAMPLE_LADDER = [4, 8, 16, 32, 64] as const;

@@ -200,7 +200,11 @@ export async function calibrate(
     [embedModel],
   );
   const corpus = all.rows.map((r: any) => ({
-    key: `${r.tenant} ${r.doc_id} ${r.seq} ${r.ord}`,
+    // NUL-joined, not space-joined: NUL cannot appear in any of these values, so
+    // the key can never collide across rows. A space CAN appear in a doc_id and
+    // a collision here would silently inflate recall via the exact.includes(k)
+    // check in measure() below.
+    key: `${r.tenant}\0${r.doc_id}\0${r.seq}\0${r.ord}`,
     cluster: Number(r.cluster_id),
     sig: String(r.sig),
     vec: (r.embedding as number[]).map(Number),
