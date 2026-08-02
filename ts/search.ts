@@ -566,10 +566,14 @@ async function vecArm(
   const res = await client.query(
     // The funnel. When a calibrated IVF index exists, `cand` narrows to the
     // probed clusters and orders by Hamming distance on the bit signature —
-    // measured 1.30 us/chunk against 298.5 for the exact product, and
-    // 0.17 us/chunk once clustering narrows it. Only the survivors get the exact
-    // float dot product, which is what recovers the recall binary quantization
-    // loses (63.5% alone, 100% after rescore).
+    // measured 1.30 us/WINDOW against 298.5 for the exact product, and
+    // 0.17 us/WINDOW once clustering narrows it. These were measured back when
+    // one row meant one chunk; migration 0020 moved the row grain to one row
+    // per embedder window (~4 windows per max-size 3200-char chunk), so the
+    // same per-row cost now covers roughly a quarter as many chunks as before.
+    // Only the survivors get the exact float dot product, which is what
+    // recovers the recall binary quantization loses (63.5% alone, 100% after
+    // rescore).
     //
     // With no centroids or no signatures, $7 is NULL and this degrades to
     // exactly the previous full exact scan — correct, just slow. The index is an

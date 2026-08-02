@@ -506,7 +506,7 @@ ivf
         "SELECT count(*)::int AS embedded," +
           " count(*) FILTER (WHERE sig IS NOT NULL)::int AS signed," +
           " count(*) FILTER (WHERE cluster_id IS NOT NULL)::int AS clustered" +
-          " FROM chunks WHERE embedding IS NOT NULL AND embed_model = $1",
+          " FROM chunk_vectors WHERE embed_model = $1",
         [emb.id],
       );
       const c = cov.rows[0];

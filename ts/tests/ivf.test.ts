@@ -114,7 +114,7 @@ describe("the funnel against a real database", () => {
     const again = await backfillSignatures(client, emb.id); // nothing left to do
     expect(again.written).toBe(0);
     const gap = await client.query(
-      "SELECT count(*)::int AS n FROM chunks WHERE embedding IS NOT NULL AND sig IS NULL",
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE sig IS NULL",
     );
     expect(gap.rows[0].n).toBe(0);
   });
@@ -124,7 +124,7 @@ describe("the funnel against a real database", () => {
     expect(built.nlist).toBe(6);
     expect(built.assigned).toBeGreaterThan(0);
     const unassigned = await client.query(
-      "SELECT count(*)::int AS n FROM chunks WHERE embedding IS NOT NULL AND cluster_id IS NULL",
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE cluster_id IS NULL",
     );
     expect(unassigned.rows[0].n).toBe(0);
     const total = await client.query(
