@@ -451,15 +451,21 @@ describe("pglite zero-install backend", () => {
   // column, so a one-character edit re-embedded the whole document. Pairs with
   // the metadata-aware contentHash, which changes every existing row's hash and
   // would otherwise discard the entire corpus's vectors on the next ingest.
-  it("keeps embeddings for chunks whose text did not change", async () => {
+  //
+  // Migration 0020 moved vectors off chunks.embedding onto chunk_vectors, so the
+  // oracle this test reads from moved too — seeding/asserting on chunks.embedding
+  // now guards a dead column and would pass even if upsertDocument stopped
+  // touching chunk_vectors entirely (see C1 in the task-2 review).
+  it("keeps chunk_vectors for chunks whose text did not change", async () => {
     const base = normalizePage({ ...fixture("confluence_page.json"), id: "88002" });
     await upsertDocument(client, base);
     await client.query(
-      "UPDATE chunks SET embedding = '{0.1,0.2}'::float4[], embed_model = 'test' WHERE doc_id = $1",
+      "INSERT INTO chunk_vectors (tenant, doc_id, seq, ord, embedding, embed_model)" +
+        " SELECT tenant, doc_id, seq, 0, '{0.1,0.2}'::float4[], 'test' FROM chunks WHERE doc_id = $1",
       ["confluence:page:88002"],
     );
     const before = await client.query(
-      "SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1 AND embedding IS NOT NULL",
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE doc_id = $1",
       ["confluence:page:88002"],
     );
     expect(before.rows[0].n).toBeGreaterThan(1);
@@ -474,7 +480,7 @@ describe("pglite zero-install backend", () => {
     // change removes; until it lands, renaming a page is a full re-embed.
     await upsertDocument(client, { ...base, url: "https://confluence.corp/moved" });
     const after = await client.query(
-      "SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1 AND embedding IS NOT NULL",
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE doc_id = $1",
       ["confluence:page:88002"],
     );
     expect(after.rows[0].n).toBe(before.rows[0].n);
@@ -555,6 +561,56 @@ describe("pglite zero-install backend", () => {
       ["confluence:page:88010"],
     );
     expect(cleared.rows[0].n).toBe(1); // exactly one, not the whole document
+  });
+
+  // C1 regression (task-2 review): the ON CONFLICT clause NULLs the dead
+  // chunks.embedding/.embed_model/.sig/.cluster_id columns on a text change,
+  // but migration 0020 moved the real vectors to chunk_vectors, which that
+  // UPDATE never touches. Left unfixed, an edited chunk keeps serving its OLD
+  // text's vector forever — invisible, because chunks_unembedded only counts
+  // MISSING vectors, not stale ones. upsertDocument must delete the stale
+  // chunk_vectors rows itself; a metadata-only change must leave them alone.
+  it("drops chunk_vectors for exactly the chunk whose text changed", async () => {
+    const sections = Array.from(
+      { length: 12 },
+      (_, i) => `## Section ${i}\n\nBody text for section ${i} with enough words to chunk.`,
+    );
+    const base = normalizePage({
+      ...fixture("confluence_page.json"),
+      id: "88011",
+      body: sections.join("\n\n"),
+    });
+    await upsertDocument(client, base);
+    await client.query(
+      "INSERT INTO chunk_vectors (tenant, doc_id, seq, ord, embedding, embed_model)" +
+        " SELECT tenant, doc_id, seq, 0, '{0.1,0.2}'::float4[], 'test' FROM chunks WHERE doc_id = $1",
+      ["confluence:page:88011"],
+    );
+    const total = await client.query(
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE doc_id = $1",
+      ["confluence:page:88011"],
+    );
+    expect(total.rows[0].n).toBeGreaterThan(5);
+
+    // change ONE section's body — same edit shape as the chunks.embedding test
+    // above, but the property under test is chunk_vectors now.
+    sections[7] = "## Section 7\n\nCompletely rewritten body for section seven now.";
+    await upsertDocument(client, { ...base, body: sections.join("\n\n") });
+
+    const remaining = await client.query(
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE doc_id = $1",
+      ["confluence:page:88011"],
+    );
+    expect(remaining.rows[0].n).toBe(total.rows[0].n - 1); // exactly one dropped
+
+    // A metadata-only change (title untouched, body untouched) must drop none.
+    const before = remaining.rows[0].n;
+    await upsertDocument(client, { ...base, body: sections.join("\n\n"), url: "https://x/moved" });
+    const after = await client.query(
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE doc_id = $1",
+      ["confluence:page:88011"],
+    );
+    expect(after.rows[0].n).toBe(before);
   });
 
   // Regression from a real dry run: quarantined documents are DELIBERATELY

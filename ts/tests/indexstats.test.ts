@@ -23,7 +23,8 @@ import {
   pendingMigrations,
   safeDsn,
 } from "../db.js";
-import { SCORING_SQL, indexStats } from "../indexstats.js";
+import { FakeEmbedder } from "../embed/index.js";
+import { SCORING_SQL, formatIndexStats, indexStats } from "../indexstats.js";
 import { upsertDocument } from "../store.js";
 
 let dataDir: string;
@@ -91,6 +92,26 @@ describe("index stats", () => {
     expect(s.embeddedChunks).toBe(0);
     expect(s.vectorDim).toBeNull();
     expect(s.embedModel).toBeNull();
+  });
+
+  // I2 regression (task-2 review): vectors moved off chunks.embedding onto
+  // chunk_vectors (migration 0020), one row per embedder WINDOW. Reading the
+  // dead column here made this report claim "the semantic arm is not
+  // running" on a corpus where it demonstrably is — the first thing
+  // demo/eil-README.md has a human type. embeddedChunks must count distinct
+  // CHUNKS (tenant, doc_id, seq), not chunk_vectors rows, so a chunk split
+  // into several windows doesn't inflate the count past `chunks` itself.
+  it("reports the vector arm as running once chunk_vectors is populated", async () => {
+    const emb = new FakeEmbedder(8);
+    const { backfill } = await import("../embed/backfill.js");
+    await backfill(client, emb, { reembed: true });
+    const s = await indexStats(client);
+    expect(s.embeddedChunks).toBeGreaterThan(0);
+    expect(s.embeddedChunks).toBeLessThanOrEqual(s.chunks); // per-chunk, not per-window
+    expect(s.vectorDim).toBe(8);
+    expect(s.embedModel).toBe(emb.id);
+    expect(formatIndexStats(s)).not.toContain("the semantic arm is not running");
+    expect(formatIndexStats(s)).toContain(`model          ${emb.id}`);
   });
 
   it("quotes scoring SQL that the real search query still contains", async () => {

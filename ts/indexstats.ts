@@ -78,17 +78,21 @@ export async function indexStats(client: Db): Promise<IndexStats> {
       GROUP BY d.source ORDER BY d.source`,
   );
 
+  // Vectors live in chunk_vectors (migration 0020), one row per embedder
+  // WINDOW — several rows can belong to one chunk, so "embedded" counts
+  // distinct (tenant, doc_id, seq), not chunk_vectors rows, or a long chunk
+  // would inflate this past the actual chunk count above it in the report.
   const totals = await client.query(
-    `SELECT (SELECT count(*) FROM documents)                         AS documents,
-            (SELECT count(*) FROM chunks)                            AS chunks,
-            (SELECT count(*) FROM chunks WHERE embedding IS NOT NULL) AS embedded`,
+    `SELECT (SELECT count(*) FROM documents) AS documents,
+            (SELECT count(*) FROM chunks)    AS chunks,
+            (SELECT count(*) FROM (SELECT DISTINCT tenant, doc_id, seq FROM chunk_vectors) e) AS embedded`,
   );
 
   // Dimension and model come off a stored row, not from configuration — what is
   // configured and what is in the table are exactly the thing worth telling
   // apart when the vector arm is quietly not running.
   const sample = await client.query(
-    "SELECT array_length(embedding, 1) AS dim, embed_model FROM chunks WHERE embedding IS NOT NULL LIMIT 1",
+    "SELECT array_length(embedding, 1) AS dim, embed_model FROM chunk_vectors LIMIT 1",
   );
 
   const oversize = await client.query(

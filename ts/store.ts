@@ -352,7 +352,9 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
         " ON CONFLICT (tenant, doc_id, seq) DO UPDATE SET" +
         "   heading_path = EXCLUDED.heading_path, text = EXCLUDED.text," +
         "   content_hash = EXCLUDED.content_hash, code_tokens = EXCLUDED.code_tokens," +
-        // the text changed, so any stored vector is now for the wrong text
+        // the text changed, so any stored vector is now for the wrong text —
+        // these four columns are dead since migration 0020 (nothing reads them)
+        // but are kept NULLed for a clean rollback to the pre-0020 read path
         "   embedding = NULL, embed_model = NULL, sig = NULL, cluster_id = NULL",
       [
         doc.tenant,
@@ -366,6 +368,20 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
         doc.source === "code" ? codeTokens(doc.codePath ?? doc.title, c.text) : null,
       ],
     );
+    // The REAL vectors live in chunk_vectors (migration 0020) and the NULLing
+    // above no longer reaches them. Without this delete, a chunk whose text
+    // changed keeps serving its OLD text's vectors forever: backfill's
+    // embed-once check is "does a current-model row exist for this seq", not
+    // "is it fresh", so it never revisits a seq that still has stale rows —
+    // and chunks_unembedded only counts chunks with NO vector, so a stale one
+    // reports healthy. seq is not new here (it's a rewrite of an existing
+    // chunk, guarded by priorBySeq above), so any rows under any model are
+    // for text this chunk no longer has.
+    await client.query("DELETE FROM chunk_vectors WHERE tenant = $1 AND doc_id = $2 AND seq = $3", [
+      doc.tenant,
+      c.docId,
+      c.seq,
+    ]);
   }
   await client.query("DELETE FROM links WHERE tenant = $1 AND src_id = $2", [doc.tenant, doc.id]);
   for (const dst of doc.links) {

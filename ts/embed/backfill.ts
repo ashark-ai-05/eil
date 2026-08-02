@@ -61,17 +61,36 @@ export async function backfill(
       // the delete to only the model being written left a PRIOR model's rows
       // in place, and inserting ord 0 under the new model then collided with
       // them: "duplicate key value violates chunk_vectors_pkey".
-      await client.query(
-        "DELETE FROM chunk_vectors WHERE tenant = $1 AND doc_id = $2 AND seq = $3",
-        [row.tenant, row.doc_id, row.seq],
-      );
-      for (let ord = 0; ord < windows.length; ord++) {
+      //
+      // Transactional per chunk, matching replaceCodeIndex's delete+N-inserts
+      // in ts/store.ts (same failure, same fix). In autocommit, a crash
+      // between the DELETE and the first INSERT left the chunk with ZERO
+      // vectors — worse than the single-column UPDATE this replaced, which
+      // had no window where the old value was gone and the new one wasn't
+      // there yet. A crash mid-chunk (after ord 0 landed) is worse still: the
+      // embed-once NOT EXISTS check sees SOME current-model row for this seq
+      // and never revisits it, so a partial window set — the tail of the
+      // chunk permanently invisible to the vector arm — survives until a full
+      // --reembed. Resumability is at chunk granularity, same as before this
+      // task; it must not regress to window granularity.
+      await client.query("BEGIN");
+      try {
         await client.query(
-          "INSERT INTO chunk_vectors (tenant, doc_id, seq, ord, embedding, embed_model)" +
-            " VALUES ($1, $2, $3, $4, $5, $6)",
-          [row.tenant, row.doc_id, row.seq, ord, toVec(vecs[k]!), embedder.id],
+          "DELETE FROM chunk_vectors WHERE tenant = $1 AND doc_id = $2 AND seq = $3",
+          [row.tenant, row.doc_id, row.seq],
         );
-        k += 1;
+        for (let ord = 0; ord < windows.length; ord++) {
+          await client.query(
+            "INSERT INTO chunk_vectors (tenant, doc_id, seq, ord, embedding, embed_model)" +
+              " VALUES ($1, $2, $3, $4, $5, $6)",
+            [row.tenant, row.doc_id, row.seq, ord, toVec(vecs[k]!), embedder.id],
+          );
+          k += 1;
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
       }
       embedded += 1;
     }
