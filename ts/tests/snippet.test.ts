@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { chunkHash, contentHash } from "../contracts/models.js";
 import type { Db } from "../db.js";
 import type { Embedder } from "../embed/index.js";
-import { localViewer, searchDocs, sliceSnippet } from "../search.js";
+import {
+  SNIPPET_COVERAGE_OPTS,
+  SNIPPET_OPTS,
+  localViewer,
+  searchDocs,
+  sliceSnippet,
+} from "../search.js";
 import { openTestDb, seedDoc, testViewer } from "./helpers/db.js";
 
 /** Insert a document with EXPLICIT, separate chunks — seedDoc only ever
@@ -190,5 +196,26 @@ describe("sliceSnippet", () => {
 
   it("returns the text unchanged when it already fits", () => {
     expect(sliceSnippet("short", 100)).toBe("short");
+  });
+});
+
+// NEW-2 (review, fix round 2): SNIPPET_COVERAGE_OPTS used to be derived by
+// String.replace()-ing the literal marker spelling out of SNIPPET_OPTS — an
+// edit to that spelling elsewhere would have made the replace silently
+// no-op, and coverage would then be measured WITH markers still in it
+// (dangerous direction: an inflated coverage_len reads as more-covered than
+// the snippet actually is). Now both are derived from one shared fragment-
+// sizing constant, so they cannot drift apart; this test is defense in
+// depth against a future edit reopening the old failure mode by some other
+// route (e.g. hand-editing one constant and not the other).
+describe("SNIPPET_COVERAGE_OPTS", () => {
+  it("differs from SNIPPET_OPTS and carries no marker spelling", () => {
+    expect(SNIPPET_COVERAGE_OPTS).not.toBe(SNIPPET_OPTS);
+    expect(SNIPPET_COVERAGE_OPTS).not.toContain("**");
+  });
+
+  it("shares the same fragment sizing as SNIPPET_OPTS — only the markers differ", () => {
+    const stripMarkers = (opts: string) => opts.replace(/StartSel="[^"]*", StopSel="[^"]*", /, "");
+    expect(stripMarkers(SNIPPET_COVERAGE_OPTS)).toBe(stripMarkers(SNIPPET_OPTS));
   });
 });
