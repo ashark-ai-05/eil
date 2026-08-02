@@ -35,6 +35,31 @@ export async function backfill(
     text: string;
   }>;
 
+  // A --reembed DELETEs and re-INSERTs every chunk_vectors row for this
+  // model (below), so sig/cluster_id go NULL for the whole corpus at once —
+  // but ivf_centroids and any `chosen` metrics.ivf_calibration row are
+  // untouched and survive believing they still describe this data. Before
+  // migration 0020, reembedding was an in-place `UPDATE chunks SET
+  // embedding = ...` that left cluster_id alone, so a stale calibration
+  // degraded gracefully: wrong geometry, but still non-NULL. The
+  // one-vector-per-window rewrite can't preserve that — it inserts rows with
+  // a NEW dimension (ord), it does not update existing ones. Left unfixed,
+  // vecArm's `v.cluster_id = ANY($7)` filter (ts/search.ts) matches nothing
+  // against an all-NULL corpus and the vector arm returns ZERO results,
+  // silently, with no error: search quietly narrows to FTS-only. Superseding
+  // here, before any chunk is touched, means the funnel falls back to the
+  // exact scan (correct, just slow) for the WHOLE reembed, not only the
+  // fraction already rewritten when a query happens to land mid-run — the
+  // same fix as buildCentroids()'s supersede (NEW-4, fix round 2), applied
+  // to the other place chunk_vectors' sig/cluster_id can go stale.
+  if (opts.reembed) {
+    await client.query(
+      "UPDATE metrics.ivf_calibration SET superseded_at = now()" +
+        " WHERE embed_model = $1 AND superseded_at IS NULL",
+      [embedder.id],
+    );
+  }
+
   let embedded = 0;
   for (let i = 0; i < rows.length; i += batch) {
     const slice = rows.slice(i, i + batch);

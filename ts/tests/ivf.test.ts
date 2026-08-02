@@ -232,10 +232,12 @@ describe("the funnel against a real database", () => {
     expect(r.results.length).toBeGreaterThan(0);
   });
 
-  // Placed last in this describe block: it rebuilds centroids from scratch,
-  // which is disruptive to any test relying on earlier tests' calibration
-  // state (several do — see the "vecArm reads the calibrated oversample" test
-  // above, which saves/restores its own row for exactly this reason).
+  // These last two tests are placed at the end of this describe block
+  // deliberately: both rebuild/invalidate global (embed_model-scoped, not
+  // per-test) state — ivf_centroids and metrics.ivf_calibration — which is
+  // disruptive to earlier tests relying on a stable calibration (several do —
+  // see the "vecArm reads the calibrated oversample" test above, which
+  // saves/restores its own row for exactly this reason).
   it("supersedes a stale calibration when centroids are rebuilt, so a rebuild cannot leave a stale nprobe/oversample authoritative", async () => {
     // NEW-4 (fix round 2): buildCentroids() replaces ivf_centroids (DELETE +
     // re-INSERT) but, before this fix, never touched
@@ -276,5 +278,39 @@ describe("the funnel against a real database", () => {
     const r: any = await searchDocs(client, VIEWER, "refund policy", 10, emb);
     expect(Array.isArray(r.results)).toBe(true);
     expect(r.results.length).toBeGreaterThan(0);
+  });
+
+  it("supersedes a stale calibration when the model is re-embedded, so --reembed cannot leave the vector arm silently empty", async () => {
+    // Fix round 3, item 2: backfill()'s --reembed path DELETEs and
+    // re-INSERTs every chunk_vectors row for this model, so sig/cluster_id go
+    // NULL for the WHOLE corpus at once — but ivf_centroids and any `chosen`
+    // calibration row survive untouched, unlike buildCentroids()'s rebuild
+    // (the previous test), which does supersede. Before this fix, vecArm's
+    // `v.cluster_id = ANY($7)` filter matched nothing against an all-NULL
+    // corpus: the vector arm returned ZERO results, silently — no error, no
+    // log, `executor` just quietly stopped listing "vec" and search narrowed
+    // to FTS-only. This directly contradicts the invariant vecArm's own
+    // comment states: "the index is an optimisation, never a correctness
+    // dependency."
+    await buildCentroids(client, emb.id, {});
+    const cal = await calibrate(client, emb, {});
+    expect(cal.chosen).not.toBeNull(); // must actually calibrate, or this proves nothing
+    expect(await chosenNprobe(client, emb.id)).toBe(cal.chosen);
+
+    const { backfill } = await import("../embed/backfill.js");
+    await backfill(client, emb, { reembed: true });
+
+    // The stale calibration must stop being authoritative...
+    expect(await chosenNprobe(client, emb.id)).toBeNull();
+    // ...and the vector arm must actually keep contributing via the exact
+    // scan, not go silent: `executor` names every arm that ran, so a
+    // regression back to silent-zero-results would drop "vec" from it, not
+    // just shrink the result count (FTS alone could still return results
+    // here and mask the bug — checking `executor` is what actually verifies
+    // the fix, not just `results.length`).
+    const r: any = await searchDocs(client, VIEWER, "retry backoff dunning", 10, emb);
+    expect(Array.isArray(r.results)).toBe(true);
+    expect(r.results.length).toBeGreaterThan(0);
+    expect(String(r.executor)).toContain("vec");
   });
 });
