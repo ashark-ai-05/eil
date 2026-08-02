@@ -143,12 +143,16 @@ export async function loadCentroids(client: Db, embedModel: string): Promise<Cen
 export const RECALL_GATE = 0.98;
 
 /**
- * Fallback oversample for a corpus that has never been calibrated. The live
- * query path (vecArm, ts/search.ts) reaches this constant only when
- * chosenOversample() returns null — any corpus with a `chosen` calibration row
- * overwrites it, and calibrate() itself overwrites its own local copy on the
- * first OVERSAMPLE_LADDER iteration. It is not the operative default; treat it
- * as a floor, not a tuned value.
+ * Placeholder oversample: the live query path (vecArm, ts/search.ts) never
+ * actually reads it. `$10`, the only bind oversample affects, is evaluated
+ * only when `probes` ($7) is non-null — and `probes` and
+ * chosenOversample()'s overwrite of this value are gated by the exact same
+ * `chosenNprobe() != null` check, so whenever this constant would matter,
+ * chosenOversample() has already replaced it, and whenever it hasn't,
+ * `probes` is null and `$10` is never evaluated regardless of what this
+ * holds. calibrate() overwrites its own local copy unconditionally on the
+ * first OVERSAMPLE_LADDER iteration too. Not "a floor" — a real calibration
+ * can legitimately choose an oversample below this (e.g. 4).
  *
  * Two rounds of trying to tune this constant for migration 0020 (one row per
  * embedder window instead of one per chunk) both turned out to be measuring

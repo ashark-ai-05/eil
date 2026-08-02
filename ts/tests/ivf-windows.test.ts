@@ -7,32 +7,37 @@ import {
   calibrate,
 } from "../embed/buildivf.js";
 import type { Embedder } from "../embed/index.js";
-import { loadCentroids } from "../embed/ivf.js";
+import { toVec } from "../embed/index.js";
+import { loadCentroids, probeClusters } from "../embed/ivf.js";
 import { searchDocs } from "../search.js";
 import { narrowEmbedder, openTestDb, seedDoc, testViewer } from "./helpers/db.js";
 
 /** Wider than narrowEmbedder (32 dims vs 8), same char-code-sum-mod-dim
  *  construction: deterministic, no model load, forces windowing. Local to
- *  this one test, which exists specifically to make a genuinely-binding LIMIT
+ *  this one test, which exists to make genuine CLUSTER narrowing (nprobe)
  *  reachable — narrowEmbedder's 8 dimensions give only 256 distinct
  *  signatures, so Hamming ordering there is close to random and a
- *  fix-round-2 review found nothing below the full 64x OVERSAMPLE_LADDER
- *  rung clearing RECALL_GATE on this test's corpus (4/8/16 -> ~0.10/0.17/0.35
- *  recall), and that 64x rung's cap (640) exceeded the 592-row corpus then in
- *  use — so the test's own "genuinely binds" claim was false: recall=1.0000
- *  was the same non-binding-candidate-set arithmetic identity documented on
- *  OVERSAMPLE in ts/embed/ivf.ts, not a measurement.
+ *  fix-round-2 review found nothing below the full 64x OVERSAMPLE_LADDER rung
+ *  clearing RECALL_GATE on that corpus.
  *
- *  Both 32 and 64 dims were tried here; both still need the full 64x rung to
- *  clear the gate on this content (the near-duplicate windows within one
- *  topic's repeated-sentence chunks appear to be the harder constraint, not
- *  embedding dimensionality — consistent with "rows per cluster" being what
- *  actually drives the required oversample, per ts/embed/ivf.ts). Rather than
- *  chase a sub-64 rung further, the corpus below is sized so the 64x cap
- *  (640) still sits well under the total row count (~1,185) — genuinely
- *  binding, just not below the ladder's top rung. Documented honestly rather
- *  than claimed otherwise: this test proves the funnel stays correct under a
- *  real (if maximal) quantization cut, not under a merely-typical one. */
+ *  A fix-round-3 review went further and measured this WIDER embedder's own
+ *  ladder on this exact corpus/query/pipeline: at full probe (no cluster
+ *  loss), 4x/8x/16x/32x/64x recall was 0.000/0.023/0.100/0.300/0.600 —
+ *  NOTHING on OVERSAMPLE_LADDER clears the gate here, including 64x.
+ *  `cal.oversample` landing at 64 is buildivf.ts's fall-through
+ *  ("oversample = o // keep the best so far", :308) when nothing clears, not
+ *  a passing measurement. Worse: the only nprobe values whose pooled
+ *  candidate count exceeds the resulting LIMIT (10*64=640) are 32 and 34
+ *  (this corpus's nlist), and both of THOSE also collapse to 0.600 recall.
+ *  So on this corpus, "calibration succeeds" (cal.chosen non-null) and "the
+ *  oversample-based candidate LIMIT binds" are mutually exclusive outcomes —
+ *  no corpus we could construct with a deterministic, no-model-load embedder
+ *  made the survivor cut bind at a gate-clearing nprobe. Recorded here rather
+ *  than re-litigated: the test below proves the funnel stays correct under
+ *  genuine CLUSTER loss (nprobe narrowing the candidate pool, independently
+ *  verified below), not under a genuine oversample-cap loss — those are two
+ *  different mechanisms the funnel narrows candidates by, and only one of
+ *  them is exercised here. */
 const wideEmbedder: Embedder = {
   id: "test:wide32",
   windowChars: 100,
@@ -82,28 +87,29 @@ describe("ivf over window vectors", () => {
     expect(r.rows[0].n).toBe(0);
   });
 
-  it("returns the SAME results as the exact scan even when the candidate LIMIT genuinely binds", async () => {
+  it("returns the same results as the exact scan even when cluster probing genuinely narrows the candidate set", async () => {
     // ts/tests/ivf.test.ts's equivalence test ("returns the SAME results...")
     // runs against a 60-single-window-row corpus, well under
-    // limit(10)*OVERSAMPLE — the candidate LIMIT in vecArm's `cand` CTE
-    // (ts/search.ts) never actually cuts anything there, so it proves
-    // equivalence only in the regime where the funnel already IS a full scan.
-    // This test forces genuine windowing at a corpus large enough that the
-    // LIMIT clause actually restricts `cand` below the total row count, then
-    // checks the funnel still reproduces the exact scan.
+    // limit(10)*OVERSAMPLE — vecArm's `cand` CTE (ts/search.ts) never
+    // actually excludes anything there, cluster narrowing included, so it
+    // proves equivalence only in the regime where the funnel already IS a
+    // full scan. This test forces genuine windowing at a corpus large enough
+    // that CLUSTER PROBING (nprobe) actually excludes real candidates — most
+    // of the corpus never enters `cand` at all, because it isn't in a probed
+    // cluster — then checks the funnel still reproduces the exact scan.
     //
-    // The guard below checks against `cal.oversample` — the value
-    // chosenOversample() will actually return and vecArm will actually bind —
-    // not the OVERSAMPLE constant. Guarding against the constant was the
-    // original mistake: vecArm reads chosenOversample() whenever a `chosen`
-    // row exists (which it does the moment calibrate() succeeds below), so
-    // the constant is not what determines whether the LIMIT binds.
+    // NOT under test here: the oversample-based survivor cut inside `cand`
+    // (`LIMIT 10 * oversample`). See the comment on wideEmbedder above for
+    // why — on this corpus, and on every corpus tried against a
+    // deterministic, no-model-load embedder, gate-clearing calibration and a
+    // genuinely binding oversample cap never coincide.
     const db = await openTestDb();
     // Genuinely different vocabulary per topic, not one boilerplate sentence
     // differing only by an embedded number — a shared template dominates a
     // char-code-sum embedding and swamps the small per-doc numeric
-    // difference, leaving too little real signal for quantization to
-    // preserve once the candidate LIMIT actually cuts.
+    // difference, leaving too little real signal for k-means to recover
+    // separate clusters from, which is what this test needs nprobe to
+    // actually narrow.
     const topics = [
       "alpha bravo charlie delta echo foxtrot golf hotel india juliet",
       "kilo lima mike november oscar papa quebec romeo sierra tango",
@@ -132,25 +138,30 @@ describe("ivf over window vectors", () => {
     await assignClusters(db, wideEmbedder.id, centroids);
     const cal = await calibrate(db, wideEmbedder, {});
     // Must actually clear the recall gate, or `probes` stays null in vecArm
-    // and the LIMIT branch under test never runs.
+    // and neither narrowing mechanism under test ever runs.
     expect(cal.chosen).not.toBeNull();
-    // The whole point of this test: the candidate LIMIT — limit(10) times the
-    // oversample ACTUALLY IN EFFECT (cal.oversample, what chosenOversample()
-    // will return and vecArm will bind — NOT the OVERSAMPLE constant, which
-    // is what the original version of this test guarded against and why it
-    // asserted "genuinely binds" while it did not) — must cut below the
-    // corpus, or `cand`'s LIMIT clause never restricts anything and this test
-    // proves nothing beyond what ivf.test.ts already does. On this corpus
-    // `cal.oversample` lands at the full 64x rung (see the comment on
-    // wideEmbedder above for why a sub-64 rung was not achieved here), so the
-    // 100-doc corpus above is sized well past 10*64=640 specifically so this
-    // still holds even at the ladder's top rung.
-    expect(total).toBeGreaterThan(10 * cal.oversample);
+
+    // The whole point of this test: cluster probing must actually EXCLUDE
+    // real candidates — `probes` narrows `cand` to rows whose cluster_id is
+    // one of the probed ones (ts/search.ts), so replicate exactly what
+    // vecArm computes for the same query (embed, toVec, probeClusters at the
+    // calibrated nprobe) and count how many chunk_vectors rows that pool
+    // actually contains. If it were >= `total`, nprobe would not be
+    // narrowing anything and this test would prove nothing beyond what
+    // ivf.test.ts already does.
+    const query = "retry backoff dunning";
+    const qv = toVec((await wideEmbedder.embed([query]))[0]!);
+    const probes = probeClusters(qv, centroids, cal.chosen!);
+    const pooled = await db.query(
+      "SELECT count(*)::int AS n FROM chunk_vectors WHERE cluster_id = ANY($1::int[])",
+      [probes],
+    );
+    expect(pooled.rows[0].n).toBeLessThan(total);
 
     const viewer = testViewer();
-    const withIndex: any = await searchDocs(db, viewer, "retry backoff dunning", 10, wideEmbedder);
+    const withIndex: any = await searchDocs(db, viewer, query, 10, wideEmbedder);
     await db.query("UPDATE metrics.ivf_calibration SET chosen = false");
-    const exact: any = await searchDocs(db, viewer, "retry backoff dunning", 10, wideEmbedder);
+    const exact: any = await searchDocs(db, viewer, query, 10, wideEmbedder);
     expect(withIndex.results.map((r: any) => r.id)).toEqual(exact.results.map((r: any) => r.id));
   });
 });
