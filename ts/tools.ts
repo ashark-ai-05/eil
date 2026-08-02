@@ -39,12 +39,19 @@ export interface ToolSpec<S extends z.ZodRawShape = z.ZodRawShape> {
 const searchDocsSpec: ToolSpec = {
   name: "search_docs",
   description:
-    "Search indexed org knowledge (Confluence, Jira, notes). Returns compact " +
-    "results: ids, titles, snippets. Use get_doc(id) for full content. Ticket " +
-    "keys (e.g. PAY-981) resolve directly with their linked context. Each " +
-    "result's `truncated` says whether its snippet is the whole chunk or a " +
-    "cut of it. Call get_doc only when a result's `truncated` is true and " +
-    "the snippet does not already answer the question.",
+    "Search indexed org knowledge (Confluence, Jira, notes, code) — the shape " +
+    "of the response depends on how the query routes. Most queries return " +
+    "compact `results`: id, title, snippet, `truncated`. `truncated: false` " +
+    "means the snippet already contains the ENTIRE document — call get_doc " +
+    "only when `truncated` is true and the snippet does not already answer " +
+    "the question. A ticket key (e.g. PAY-981) instead resolves via the " +
+    "entity route: `entity` (the document, itself windowed — see its own " +
+    "`total_sections`) plus `linked` neighbors, with no `results` array and " +
+    "no `truncated` field at all. A path/symbol/literal query resolves via " +
+    "the code route: `results` are line-window code citations with no " +
+    "`snippet` or per-result `truncated`; `context.truncated` there means the " +
+    "total citation payload was cut to fit a budget, NOT that one citation is " +
+    "incomplete — it is not the same flag as the docs-route `truncated` above.",
   schema: z.object({
     query: z.string(),
     limit: z.number().int().default(8),
@@ -95,9 +102,14 @@ const getDocSpec: ToolSpec = {
   description:
     "Fetch one document's content by canonical id (from search_docs/expand). " +
     "Large documents are windowed; pass section=1,2,... for more. This read " +
-    "never refreshes or mutates the catalog. Call get_doc only when a " +
-    "result's `truncated` is true and the snippet does not already answer " +
-    "the question — a result with `truncated: false` already IS the whole chunk.",
+    "never refreshes or mutates the catalog. For a search_docs result from " +
+    "the default (docs) route, call get_doc only when its `truncated` is " +
+    "true and the snippet does not already answer the question — " +
+    "`truncated: false` there means the snippet already IS the whole " +
+    "document. Entity- and code-route search_docs results do not carry that " +
+    "field (see search_docs's description for what each route returns " +
+    "instead) — for those, call get_doc when the returned content does not " +
+    "already answer the question.",
   schema: z.object({ id: z.string(), section: z.number().int().default(0) }).strict(),
   requiresEnv: [],
   handler: async (c, v, a) => {
