@@ -59,29 +59,97 @@ function parseArgs(argv: string[]): { docs: number; out: string } {
   return { docs, out };
 }
 
-/** Char-code-sum-mod-dim: overlapping windows of the SAME chunk share most of
- *  their characters (75% step overlap in embed/window.ts), so their vectors
- *  are correlated the way overlapping real-embedding windows are — unlike an
- *  independent per-window hash, which would understate how much near-duplicate
- *  candidates from one chunk compete for the same oversample budget. */
-function charSumEmbedder(id: string, dim: number, windowChars: number): Embedder {
+// A first attempt used a char-code-sum-mod-dim hash embedder. At corpus sizes
+// large enough to satisfy C-1's binding requirement (thousands of rows), that
+// geometry turned out to be nearly unstructured — full-probe recall (no
+// cluster loss at all) collapsed to ~0.04-0.41 even at the top of
+// OVERSAMPLE_LADDER, for BOTH corpora. That is not a windowing effect, it is
+// hash noise: with no real topical structure, sign-bit quantization has
+// nothing coherent to preserve. It would have produced a curve, but not one
+// that says anything about windows vs. chunks.
+//
+// This embedder instead has EXPLICIT, controllable cluster structure: `nTopics`
+// random unit directions in `dim`-space act as ground-truth topics; a chunk's
+// vector is its topic direction plus per-chunk noise; a WINDOW's vector is its
+// chunk's vector plus a further, smaller per-window noise — modeling how real
+// overlapping windows of the same chunk (75% step overlap, embed/window.ts)
+// are near-duplicates of each other, not independent draws. Topic and doc
+// identity ride in `headingPath` (prepended to every window's embedded text by
+// embedWindows(), so every window can recover them); text queries sampled
+// later from the raw `chunks.text` column (no heading prefix) fall back to a
+// hash of the query text itself, deterministic either way.
+function mulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function unitVector(rng: () => number, dim: number): Float32Array {
+  const v = new Float32Array(dim);
+  for (let i = 0; i < dim; i++) v[i] = rng() * 2 - 1;
+  const n = Math.hypot(...v) || 1;
+  for (let i = 0; i < dim; i++) v[i]! /= n;
+  return v;
+}
+/** `out = normalize(base * (1-scale) + noise * scale)` — `scale` in [0,1]
+ *  controls how far `out` drifts from `base` toward an independent direction. */
+function blend(base: Float32Array, noise: Float32Array, scale: number): Float32Array {
+  const v = new Float32Array(base.length);
+  for (let i = 0; i < base.length; i++) v[i] = base[i]! * (1 - scale) + noise[i]! * scale;
+  const n = Math.hypot(...v) || 1;
+  for (let i = 0; i < v.length; i++) v[i]! /= n;
+  return v;
+}
+
+const TOPIC_TAG = /^T(\d+)D(\d+)\n/;
+
+function structuredEmbedder(opts: {
+  id: string;
+  dim: number;
+  windowChars: number;
+  nTopics: number;
+  chunkNoise: number; // doc-vs-doc spread within a topic
+  windowNoise: number; // window-vs-window spread within a chunk (<< chunkNoise)
+}): Embedder {
+  const topicRng = mulberry32(0xc0ffee);
+  const topics = Array.from({ length: opts.nTopics }, () => unitVector(topicRng, opts.dim));
   return {
-    id,
-    windowChars,
+    id: opts.id,
+    windowChars: opts.windowChars,
     async embed(texts: string[]): Promise<Float32Array[]> {
       return texts.map((t) => {
-        const v = new Array(dim).fill(0);
-        for (let i = 0; i < t.length; i++) v[i % dim]! += t.charCodeAt(i) / 1000;
-        const n = Math.hypot(...v) || 1;
-        return Float32Array.from(v.map((x) => x / n));
+        const m = TOPIC_TAG.exec(t);
+        const topic = m ? Number(m[1]) % opts.nTopics : hashString(t) % opts.nTopics;
+        const docSeed = m ? Number(m[2]) : hashString(t);
+        const chunkVec = blend(
+          topics[topic]!,
+          unitVector(mulberry32(Math.imul(docSeed, 2654435761) ^ 0x9e3779b9), opts.dim),
+          opts.chunkNoise,
+        );
+        return blend(chunkVec, unitVector(mulberry32(hashString(t)), opts.dim), opts.windowNoise);
       });
     },
   };
 }
 
-async function seedCorpus(client: Db, n: number, textLen: number): Promise<void> {
+async function seedCorpus(client: Db, n: number, textLen: number, nTopics: number): Promise<void> {
   for (let i = 0; i < n; i++) {
-    const base = `Topic ${i % 6}: retry backoff dunning refund policy variant ${i} with body text. `;
+    // The tag is carried in headingPath, not body text — embedWindows()
+    // prepends headingPath to EVERY window, so every window's embedded text
+    // starts with it regardless of where in the chunk that window falls.
+    const headingPath = `T${i % nTopics}D${i}`;
+    const base = `retry backoff dunning refund policy variant ${i} with body text. `;
     const text = base.repeat(Math.ceil(textLen / base.length)).slice(0, textLen);
     const doc = {
       title: `doc-${i}`,
@@ -99,8 +167,8 @@ async function seedCorpus(client: Db, n: number, textLen: number): Promise<void>
     );
     await client.query(
       "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash)" +
-        " VALUES ('default', $1, 0, '', $2, $3)",
-      [`doc-${i}`, text, chunkHash({ text })],
+        " VALUES ('default', $1, 0, $2, $3, $4)",
+      [`doc-${i}`, headingPath, text, chunkHash({ text })],
     );
   }
 }
@@ -128,6 +196,7 @@ async function runCorpus(opts: {
   embedder: Embedder;
   docs: number;
   textLen: number;
+  nTopics: number;
   log: (s: string) => void;
 }): Promise<{
   rows: number;
@@ -136,10 +205,10 @@ async function runCorpus(opts: {
   points: CalibrationPoint[];
   chosen: number | null;
 }> {
-  const { label, client, embedder, docs, textLen, log } = opts;
+  const { label, client, embedder, docs, textLen, nTopics, log } = opts;
   log(`\n=== ${label} ===`);
   log(`building: ${docs} docs, ${textLen} chars each, windowChars=${embedder.windowChars}`);
-  await seedCorpus(client, docs, textLen);
+  await seedCorpus(client, docs, textLen, nTopics);
   const { backfill } = await import("../ts/embed/backfill.js");
   const b = await backfill(client, embedder, { reembed: true });
   const rowCount = await client.query("SELECT count(*)::int AS n FROM chunk_vectors");
@@ -189,35 +258,61 @@ async function main() {
   const client = await connect();
   await migrate(client);
 
+  // 60 topics ~ sqrt(4000 target rows), so kmeans has a real chance of
+  // recovering them as clusters — this run is about isolating oversample
+  // (quantization) loss from cluster loss, not re-testing k-means itself.
+  const NTOPICS = 60;
+  const DIM = 64;
+  const CHUNK_NOISE = 0.35; // docs within one topic are related but distinct
+  const WINDOW_NOISE = 0.1; // windows within one chunk are near-duplicates
+
   // Windowed corpus: real chunker.MAX_CHARS (3200) at the real vendored
   // MiniLM's windowChars (1024) -> ~4 windows/doc.
-  const windowed = charSumEmbedder("exp:windowed32", 32, 1024);
+  const windowed = structuredEmbedder({
+    id: "exp:windowed64",
+    dim: DIM,
+    windowChars: 1024,
+    nTopics: NTOPICS,
+    chunkNoise: CHUNK_NOISE,
+    windowNoise: WINDOW_NOISE,
+  });
   const windowedResult = await runCorpus({
     label: "WINDOWED (~4 windows/chunk, production ratio)",
     client,
     embedder: windowed,
     docs,
     textLen: 3200,
+    nTopics: NTOPICS,
     log,
   });
 
-  // Reset for the control: same embedder MATH (charSumEmbedder), but a
+  // Reset for the control: same structured-embedder math and same nTopics /
+  // chunkNoise (so doc-vs-doc spread within a topic is identical), but
   // windowChars large enough that embedWindows() never splits — one row per
-  // chunk, same as pre-migration-0020. Doc count is set to MATCH the windowed
-  // corpus's measured total row count, so total corpus size is controlled for
-  // and only windows-per-chunk varies (C-2).
+  // chunk, same as pre-migration-0020 — so windowNoise never applies. Doc
+  // count is set to MATCH the windowed corpus's measured total row count, so
+  // total corpus size is controlled for and only windows-per-chunk varies
+  // (C-2).
   await client.query("DELETE FROM chunk_vectors");
   await client.query("DELETE FROM chunks");
   await client.query("DELETE FROM documents");
   await client.query("DELETE FROM ivf_centroids");
   await client.query("DELETE FROM metrics.ivf_calibration");
-  const nonWindowed = charSumEmbedder("exp:control32", 32, Number.MAX_SAFE_INTEGER);
+  const nonWindowed = structuredEmbedder({
+    id: "exp:control64",
+    dim: DIM,
+    windowChars: Number.MAX_SAFE_INTEGER,
+    nTopics: NTOPICS,
+    chunkNoise: CHUNK_NOISE,
+    windowNoise: WINDOW_NOISE, // unused: never more than 1 window/chunk here
+  });
   const controlResult = await runCorpus({
     label: `NON-WINDOWED CONTROL (1 window/chunk, ${windowedResult.rows} docs to match total rows)`,
     client,
     embedder: nonWindowed,
     docs: windowedResult.rows,
     textLen: 400, // content length is irrelevant here — never windows regardless
+    nTopics: NTOPICS,
     log,
   });
 
