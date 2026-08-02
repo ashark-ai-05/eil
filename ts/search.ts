@@ -20,15 +20,47 @@ import { ATTR, OP, currentTrace, withSpan } from "./telemetry.js";
  * below the point where an extract can answer anything, so the agent fetched the
  * whole document and paid for it.
  *
- * ~90 words over 2 fragments is ~6 sentences, which is where Provence (ICLR
- * 2025) measured query-biased extraction holding answer quality while removing
- * 50-80% of the context, and close to the ~60-token extract that scored best in
- * "Searching for Best Practices in RAG". Two fragments rather than one because a
- * question's evidence is frequently split across a document.
+ * MaxWords is a PER-FRAGMENT cap, not a total for the whole snippet — measured
+ * directly against Postgres/PGlite: at MaxWords=90 a two-fragment headline came
+ * back 177-178 words / ~1.2-1.3K characters, roughly double what "MaxWords=90"
+ * reads as. MaxWords=45 is what actually lands near the intended ~90 words
+ * across MaxFragments=2 (measured worst case 88 words / 639 chars), which is
+ * the ~6-sentence point where Provence (ICLR 2025) measured query-biased
+ * extraction holding answer quality while removing 50-80% of the context, and
+ * close to the ~60-token extract that scored best in "Searching for Best
+ * Practices in RAG". Two fragments rather than one because a question's
+ * evidence is frequently split across a document.
  */
 export const SNIPPET_OPTS =
-  "StartSel=**, StopSel=**, MaxWords=90, MinWords=30, MaxFragments=2, FragmentDelimiter= … ";
-/** ~90 words at ~6 chars/word, matching SNIPPET_OPTS on the lexical arm. */
+  "StartSel=**, StopSel=**, MaxWords=45, MinWords=30, MaxFragments=2, FragmentDelimiter= … ";
+/**
+ * SNIPPET_OPTS with empty StartSel/StopSel, so ts_headline extracts the exact
+ * same fragments with no `**` markers to strip. Used only to MEASURE coverage,
+ * never for display: stripping literal "**" from the marked snippet also
+ * strips "**" that occurs in the SOURCE TEXT (Confluence prefixes labelled
+ * pages with "**Labels:** ...", ts/ingest/confluence.ts:36; Obsidian bodies are
+ * markdown throughout), which corrupted the truncated flag in 13.4% of a
+ * 1500-case fuzz run (measured) — e.g. "The **retry** policy uses **backoff**
+ * throughout." stripped to fewer characters than the 48-char source even
+ * though the snippet covered all of it. A second, marker-free ts_headline call
+ * has nothing to strip, so its length is exact rather than heuristic.
+ *
+ * The empty markers MUST be quoted (`StartSel=""`) — measured directly: an
+ * unquoted `StartSel=, StopSel=,` is not "empty selector, empty selector", it
+ * is a ts_headline options-parser bug where the bare comma gets swallowed
+ * into the value and re-emitted literally in the output ("The retry policy"
+ * came back ",retry, policy", commas and all). `StartSel=""` is the form
+ * documented and tested to mean "no marker".
+ */
+export const SNIPPET_COVERAGE_OPTS = SNIPPET_OPTS.replace(
+  "StartSel=**, StopSel=**,",
+  'StartSel="", StopSel="",',
+);
+/** Measured worst case for SNIPPET_OPTS (MaxWords=45/MinWords=30/MaxFragments=2)
+ *  on the lexical arm: 639 chars / 88 words when matches cluster in one place.
+ *  540 keeps this arm's plain leading extract (no ts_headline, no query bias)
+ *  in the same ballpark rather than the ~2.2x mismatch MaxWords=90 produced —
+ *  "same ballpark", not byte-identical, since the two arms extract differently. */
 export const VEC_SNIPPET_CHARS = 540;
 export const GET_DOC_MAX_CHARS = 8_000;
 export const EXPAND_MAX_EDGES = 50;
@@ -134,8 +166,12 @@ export interface SearchResult {
   url: string | null;
   tier: string;
   snippet: string;
-  /** False means the snippet IS the chunk — there is nothing more to fetch.
-   *  An agent that cannot tell these apart fetches defensively, every time. */
+  /** False means the snippet already contains the entire DOCUMENT that
+   *  get_doc would return — there is nothing more to fetch. Scoped to the
+   *  document rather than the one matched chunk: a chunk can be short enough
+   *  to fit the snippet budget while the document around it is not (see the
+   *  doc_len comment in searchDocsInner's lexical query). An agent that
+   *  cannot tell these apart fetches defensively, every time. */
   truncated: boolean;
   score?: number;
 }
@@ -250,7 +286,43 @@ async function searchDocsInner(
      ), m AS (
        SELECT c.doc_id, c.seq, c.text, d.source, d.title, d.url, d.quality_tier, d.updated_at,
               ts_rank(c.tsv, qq.loose, 1) AS rank,
-              (c.tsv @@ qq.strict) AS strict_hit
+              (c.tsv @@ qq.strict) AS strict_hit,
+              -- 'truncated' has to describe what get_doc would return — the
+              -- whole DOCUMENT — not the one matched CHUNK. Comparing against
+              -- the chunk's own length reported truncated:false on every result
+              -- from a well-chunked page: tests/golden/confluence_page.chunks.json
+              -- (one real Confluence page) is 5 chunks of 103-213 chars, every
+              -- one comfortably inside the snippet budget, so a chunk-scoped
+              -- comparison called ALL FIVE fully covered while get_doc actually
+              -- holds 4 more sections the agent never saw. Computed here, inside
+              -- the join documents already passes through visibleSql() below,
+              -- rather than re-reading documents afterwards unguarded.
+              -- ts_headline drops the run of non-word characters attached to
+              -- the outermost matched word at EITHER end once MaxFragments >= 1
+              -- — measured directly, trailing: 'Retry uses backoff.' (19 chars)
+              -- headlined with this file's MaxFragments=2 options comes back
+              -- '**Retry** uses **backoff**', no trailing period. Leading:
+              -- ts/ingest/confluence.ts:36 prefixes every labelled page with a
+              -- '**Labels:** a, b' line, a blank line, then the body. A body
+              -- starting '**Labels:** payments, ops' (blank line) 'Retry uses
+              -- backoff...' headlines to 'Labels:** payments, ops' (blank
+              -- line) '**Retry** uses **backoff**...' — the leading '**' gone,
+              -- everything else intact. Both are the wrong direction (see the
+              -- comment on covered, below in JS) if left uncompensated: a
+              -- plain length(body) would flag a fully covered single-chunk
+              -- document truncated. Strip the same leading AND trailing runs
+              -- here so doc_len matches what ts_headline can actually return.
+              --
+              -- This does NOT close every gap ts_headline can open: a leading
+              -- STOPWORD immediately before the first matched term ('The
+              -- retry...' -> '**retry**...', dropping the real word 'The', not
+              -- just punctuation) is a separate, deeper behaviour no regex on
+              -- the raw body can predict without literally re-running
+              -- ts_headline on the whole document. Left uncompensated, it can
+              -- only push truncated toward true on a document that is in fact
+              -- fully covered — safe-direction (an occasional redundant
+              -- get_doc), never the dangerous direction (see covered, below).
+              length(regexp_replace(d.body, '^\\W+|\\W+$', '', 'g')) AS doc_len
          FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id CROSS JOIN qq
         WHERE c.tsv @@ qq.loose AND ${visibleSql(4, 5, 6)}
           AND ($7::text[] IS NULL OR d.source = ANY($7::text[]))
@@ -262,21 +334,27 @@ async function searchDocsInner(
          FROM best
      )
      SELECT doc_id, source, strict_hit, title, url, quality_tier, updated_at,
-            -- ts_headline drops the run of trailing non-word characters attached
-            -- to the last matched word once MaxFragments >= 1 — measured directly:
-            -- 'Retry uses backoff.' (19 chars) headlined with this file's
-            -- MaxFragments=2 options comes back '**Retry** uses **backoff**', no
-            -- trailing period, even though every word of the chunk is present.
-            -- A plain length(text) would flag that chunk truncated when it is
-            -- not, which is the wrong direction (see the comment below). Strip
-            -- the same trailing run here so text_len matches what ts_headline can
-            -- actually return.
-            length(regexp_replace(text, '\\W+$', '')) AS text_len,
-            ts_headline('english', text, (SELECT loose FROM qq), $2) AS snippet
+            doc_len AS text_len,
+            ts_headline('english', text, (SELECT loose FROM qq), $2) AS snippet,
+            -- Exact coverage length, not a heuristic one. Stripping "**" from
+            -- the marked snippet in JS also strips "**" that occurs IN THE
+            -- SOURCE TEXT, corrupting the comparison (see SNIPPET_COVERAGE_OPTS'
+            -- comment). This second ts_headline call, same options minus the
+            -- markers, extracts the identical fragments with nothing to strip.
+            length(ts_headline('english', text, (SELECT loose FROM qq), $8)) AS coverage_len
        FROM quota
       WHERE rn <= $3
       ORDER BY rank DESC, doc_id`,
-    [query, SNIPPET_OPTS, limit * 3, viewer.principal, viewer.groups, viewer.tenant, sources],
+    [
+      query,
+      SNIPPET_OPTS,
+      limit * 3,
+      viewer.principal,
+      viewer.groups,
+      viewer.tenant,
+      sources,
+      SNIPPET_COVERAGE_OPTS,
+    ],
   );
 
   const byDoc = new Map<string, SearchResult & { updated: Date | null }>();
@@ -290,10 +368,10 @@ async function searchDocsInner(
   for (const row of res.rows) {
     if (byDoc.has(row.doc_id)) continue;
     const snippet: string = row.snippet;
-    // ts_headline returns the WHOLE text when it fits inside the fragment
-    // budget, so a plain-length comparison is the exact test for "is there more".
-    // The ** markers are the only thing it adds, so strip them before comparing.
-    const covered = snippet.replaceAll("**", "").length >= Number(row.text_len);
+    // coverage_len is the marker-free extraction's length, computed in SQL —
+    // exact, not a JS-side strip of "**" (which also strips literal "**" that
+    // occurs in the source text; see SNIPPET_COVERAGE_OPTS' comment).
+    const covered = Number(row.coverage_len) >= Number(row.text_len);
     byDoc.set(row.doc_id, {
       id: row.doc_id,
       title: row.title,
@@ -544,6 +622,25 @@ export async function recordRetrieval(
   }
 }
 
+/**
+ * Cut `text` to at most `maxChars`, without splitting a UTF-16 surrogate pair
+ * (an emoji or other astral character would otherwise come back as one half
+ * of a broken glyph) and without cutting the last word in half (a raw
+ * `.slice()` cut a chunk of arbitrary prose at whatever byte the budget landed
+ * on, mid-word as often as not). Falls back to the raw cut when the budget
+ * does not even reach one whitespace-delimited token, so a single very long
+ * token is not collapsed to nothing.
+ */
+export function sliceSnippet(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  let end = maxChars;
+  const code = text.charCodeAt(end);
+  if (code >= 0xdc00 && code <= 0xdfff) end -= 1; // low surrogate: back up over the pair
+  const cut = text.slice(0, end);
+  const trimmed = cut.replace(/\S*$/, "").trimEnd();
+  return trimmed.length > 0 ? trimmed : cut;
+}
+
 /** Best-effort semantic arm: cosine over ACL-visible embedded chunks, scored
  *  IN Postgres (vectors are unit-norm, so cosine is a dot product) and cut to
  *  the candidate count there — only the winners are transferred. Returns a
@@ -687,7 +784,14 @@ async function vecArm(
      ), top AS (
        SELECT doc_id, seq, score FROM best ORDER BY score DESC, doc_id LIMIT $6
      )
-     SELECT t.doc_id, t.score, ch.text, d.title, d.url, d.quality_tier, d.updated_at
+     -- length(d.body), NOT length(ch.text): truncated has to describe the
+     -- DOCUMENT get_doc would return, not the one matched chunk — same
+     -- reasoning as the lexical arm's doc_len above. This documents-d join
+     -- reads no NEW rows: every doc_id here already passed visibleSql() inside
+     -- cand, so this is re-joining an already-ACL-cleared id for its length,
+     -- not a second unguarded read.
+     SELECT t.doc_id, t.score, ch.text, d.title, d.url, d.quality_tier, d.updated_at,
+            length(d.body) AS doc_len
        FROM top t
        JOIN chunks ch ON ch.tenant = $3 AND ch.doc_id = t.doc_id AND ch.seq = t.seq
        JOIN documents d ON d.tenant = $3 AND d.id = t.doc_id
@@ -710,16 +814,24 @@ async function vecArm(
     if (!byDoc.has(row.doc_id)) {
       const text = String(row.text);
       // No query terms to bias toward on this arm — the match was semantic — so
-      // this is a leading extract, not a headline. Same budget as the lexical
-      // arm so an agent sees one consistent snippet size.
-      const snippet = text.slice(0, VEC_SNIPPET_CHARS);
+      // this is a leading extract, not a headline. VEC_SNIPPET_CHARS is
+      // calibrated against the LEXICAL arm's measured worst case, not an exact
+      // match (see the VEC_SNIPPET_CHARS comment), so the two arms land in the
+      // same ballpark rather than byte-identical.
+      const snippet = sliceSnippet(text, VEC_SNIPPET_CHARS);
+      // `truncated` describes the DOCUMENT, not the matched chunk (`text`) —
+      // same C1 reasoning as the lexical arm. Comparing against the RAW
+      // (untrimmed) doc_len is deliberately the stricter bound here: this arm
+      // does not run ts_headline, so it carries none of that function's
+      // trailing-punctuation loss to compensate for, and a stricter bound only
+      // ever pushes an uncertain case toward truncated:true, never the reverse.
       byDoc.set(row.doc_id, {
         id: row.doc_id,
         title: row.title,
         url: row.url,
         tier: row.quality_tier,
         snippet,
-        truncated: text.length > snippet.length,
+        truncated: snippet.length < Number(row.doc_len),
         updated: row.updated_at,
       });
     }

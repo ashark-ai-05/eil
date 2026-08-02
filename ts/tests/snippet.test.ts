@@ -1,6 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { searchDocs } from "../search.js";
+import { chunkHash, contentHash } from "../contracts/models.js";
+import type { Db } from "../db.js";
+import type { Embedder } from "../embed/index.js";
+import { localViewer, searchDocs, sliceSnippet } from "../search.js";
 import { openTestDb, seedDoc, testViewer } from "./helpers/db.js";
+
+/** Insert a document with EXPLICIT, separate chunks — seedDoc only ever
+ *  writes one chunk at seq 0, which cannot reproduce a bug that depends on
+ *  the matched chunk being shorter than the document around it (C1 below). */
+async function seedMultiChunkDoc(
+  db: Db,
+  opts: { id: string; chunks: string[]; headingPath: string },
+): Promise<void> {
+  const body = opts.chunks.join("\n\n");
+  const doc = {
+    title: opts.id,
+    url: null,
+    hierarchy: [],
+    aclGroups: [],
+    qualityTier: "authored" as const,
+    updatedAt: null,
+    body,
+  };
+  await db.query(
+    "INSERT INTO documents (id, tenant, source, title, quality_tier, content_hash, body, ingested_by)" +
+      " VALUES ($1, 'default', 'confluence', $2, 'authored', $3, $4, $5)",
+    [opts.id, opts.id, contentHash(doc), body, testViewer().principal],
+  );
+  for (let seq = 0; seq < opts.chunks.length; seq++) {
+    const text = opts.chunks[seq]!;
+    await db.query(
+      "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash)" +
+        " VALUES ('default', $1, $2, $3, $4, $5)",
+      [opts.id, seq, opts.headingPath, text, chunkHash({ text })],
+    );
+  }
+}
 
 describe("snippets", () => {
   // NOTE: an earlier draft of this plan opened with
@@ -39,5 +74,121 @@ describe("snippets", () => {
     await seedDoc(db, { id: "conf:short", text: "Retry uses backoff.", headingPath: "Retry" });
     const out: any = await searchDocs(db, testViewer(), "retry backoff", 5);
     expect(out.results[0].truncated).toBe(false);
+  });
+
+  // C1 (review, fix round 1): truncated must describe the DOCUMENT get_doc
+  // would return, not the one matched chunk. A real Confluence page
+  // (tests/golden/confluence_page.chunks.json) is 5 chunks of 103-213 chars,
+  // every one inside the snippet budget on its own — a chunk-scoped
+  // comparison called every one of them fully covered while get_doc actually
+  // held four more sections the agent never saw.
+  it("reports truncated on a multi-chunk document even when the matched chunk alone fits the budget", async () => {
+    const db = await openTestDb();
+    await seedMultiChunkDoc(db, {
+      id: "conf:multi",
+      chunks: [
+        // Short enough that a CHUNK-scoped comparison would call it fully
+        // covered on its own.
+        "Payment Retry Policy. Retry uses backoff for payments.",
+        // Not matched by the query below (shares no query terms), but part of
+        // the same document — get_doc would return this too.
+        "Escalation: after five attempts, page on-call and open an incident. " +
+          "Refunds: reverse the charge and notify the customer within one business day.",
+      ],
+      headingPath: "Retry",
+    });
+    const out: any = await searchDocs(db, testViewer(), "retry backoff", 5);
+    expect(out.results[0].id).toBe("conf:multi");
+    expect(out.results[0].truncated).toBe(true);
+  });
+
+  // I2 (review, fix round 1): literal "**" in the SOURCE text — the realistic
+  // case is ts/ingest/confluence.ts:36, which prefixes every labelled
+  // Confluence page with "**Labels:** a, b\n\n<body>" — must not be mistaken
+  // for ts_headline's highlight markers when measuring coverage. A chunk that
+  // is fully covered must still report truncated:false even though it starts
+  // with literal "**" of its own. (A leading STOPWORD immediately before the
+  // first matched term is a separate, deeper ts_headline behaviour — see the
+  // doc_len comment in the lexical query — which is why this case anchors the
+  // match right after the labels line rather than after an English stopword.)
+  it("does not mark a snippet truncated because the source text itself contains **", async () => {
+    const db = await openTestDb();
+    await seedDoc(db, {
+      id: "conf:bold",
+      text: "**Labels:** payments, ops\n\nRetry uses backoff throughout the entire policy.",
+      headingPath: "Retry",
+    });
+    const out: any = await searchDocs(db, testViewer(), "retry backoff", 5);
+    expect(out.results[0].id).toBe("conf:bold");
+    expect(out.results[0].truncated).toBe(false);
+  });
+
+  // C1 on the vector arm: the same chunk-vs-document confusion existed in
+  // vecArm's fallback snippet (a plain slice of the matched chunk, compared
+  // against that chunk's own length). Previously untested.
+  it("reports truncated on the vector arm too, for a multi-chunk document", async () => {
+    const db = await openTestDb();
+    const { upsertDocument } = await import("../store.js");
+    const { backfill } = await import("../embed/backfill.js");
+    const marker = "Zylofrantic outage signature";
+    const filler = "Unrelated filler describing the follow-up review process in detail, ".repeat(6);
+    const body = `## Alpha\n${marker}: services degraded during the incident window.\n\n## Beta\n${filler}so this second section is clearly longer than the first, and the document as a whole is much bigger than the one chunk the vector arm will match on.`;
+    await upsertDocument(db, {
+      id: "jira:issue:VEC-1",
+      tenant: "default",
+      source: "jira",
+      title: "Vector multi-chunk",
+      hierarchy: [],
+      aclGroups: [],
+      qualityTier: "authored",
+      body,
+      links: [],
+    } as any);
+    // Stub: query "zzz" and the marker chunk both embed to [1,0,0]; everything
+    // else (including the doc's own second chunk) embeds to [0,1,0] — "zzz"
+    // shares no words with the body, so only the vec arm can surface this doc.
+    const stubEmbed: Embedder = {
+      id: "stub:snippet-c1",
+      windowChars: 1_000_000,
+      embed: async (texts) =>
+        texts.map((t) =>
+          t.includes(marker) || t === "zzz"
+            ? Float32Array.from([1, 0, 0])
+            : Float32Array.from([0, 1, 0]),
+        ),
+    };
+    await backfill(db, stubEmbed, { reembed: true });
+    const out: any = await searchDocs(db, localViewer(), "zzz", 8, stubEmbed);
+    const hit = (out.results as any[]).find((r) => r.id === "jira:issue:VEC-1");
+    expect(hit).toBeDefined();
+    expect(hit.truncated).toBe(true);
+  });
+});
+
+// Minor (review, fix round 1): a raw text.slice() could split a word or a
+// UTF-16 surrogate pair. sliceSnippet() is the fix; these are direct unit
+// tests of that boundary logic rather than round-tripping through search.
+describe("sliceSnippet", () => {
+  it("does not cut the last word in half", () => {
+    const text = "The quick brown fox jumps over the lazy dog";
+    // 12 chars lands inside "brown" ("The quick br").
+    expect(sliceSnippet(text, 12)).toBe("The quick");
+  });
+
+  it("does not split a UTF-16 surrogate pair", () => {
+    const emoji = "\u{1F389}"; // 🎉, a surrogate pair in UTF-16
+    const text = `abc${emoji}def`;
+    // Cuts exactly on the low surrogate (index 4: 'a','b','c', high, [low]).
+    const out = sliceSnippet(text, 4);
+    expect(out === "abc" || out === `abc${emoji}`).toBe(true);
+  });
+
+  it("falls back to a raw cut rather than collapsing a single long token to nothing", () => {
+    const token = "x".repeat(50);
+    expect(sliceSnippet(token, 10)).toHaveLength(10);
+  });
+
+  it("returns the text unchanged when it already fits", () => {
+    expect(sliceSnippet("short", 100)).toBe("short");
   });
 });
