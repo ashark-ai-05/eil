@@ -143,56 +143,24 @@ export async function loadCentroids(client: Db, embedModel: string): Promise<Cen
 export const RECALL_GATE = 0.98;
 
 /**
- * Default oversample, and a CORRECTION worth recording.
+ * Fallback oversample for a corpus that has never been calibrated. The live
+ * query path (vecArm, ts/search.ts) reaches this constant only when
+ * chosenOversample() returns null — any corpus with a `chosen` calibration row
+ * overwrites it, and calibrate() itself overwrites its own local copy on the
+ * first OVERSAMPLE_LADDER iteration. It is not the operative default; treat it
+ * as a floor, not a tuned value.
  *
- * An earlier measurement on one corpus showed 8x and 16x giving identical
- * recall, and that was turned into a fixed constant. It was an artifact: on that
- * corpus the probed candidate set was smaller than k * oversample, so the
- * oversample never bound. On a second corpus, a full Hamming scan measured
- * 4x -> 0.9333, 8x -> 0.9900, 16x -> 0.9967, 32x -> 1.0000.
- *
- * So oversample IS a knob, it is corpus-dependent, and it is now calibrated
- * alongside nprobe rather than assumed (chosenOversample(), read by vecArm in
- * ts/search.ts) — this default is only what a corpus uses BEFORE its first
- * calibration, and only the starting point of calibrate()'s own sweep.
- *
- * Migration 0020 moved the row grain from one vector per chunk to one per
- * embedder window (~4 windows per 3200-char chunk). A first attempt to
- * re-measure this constant repeated the exact non-binding-candidate-set
- * artifact described above at the new grain (survivor cap 10*32=320 exceeded a
- * 240-row test corpus, so the reported recall=1.0000 was arithmetic, not a
- * measurement) and was reverted; see task-3-report.md, "Fix round 1" for both
- * mistakes and the correction.
- *
- * scripts/ivf-oversample-experiment.ts re-measured this properly: a corpus
- * sized so every OVERSAMPLE_LADDER rung genuinely binds (rows > 10*64=640),
- * run at three scales, each against a SAME-TOTAL-ROW-COUNT non-windowed
- * control to isolate windows-per-chunk from corpus size:
- *
- *   rows    windowed oversample   control oversample   (both cleared at)
- *    4,000          8                     8
- *    8,000         16                    16
- *   16,000         32                    32
- *
- * Windowed and non-windowed land on the IDENTICAL oversample at every matched
- * row count — windowing has no measurable effect independent of corpus size.
- * The mechanism is simpler than "windows compete for the budget" (that
- * unmeasured claim was in an earlier draft of this comment and was wrong):
- * `cand`'s survivor cap (limit * oversample, ts/search.ts) is an ABSOLUTE row
- * count, so the FRACTION of the corpus it can cover shrinks as the corpus
- * grows, regardless of what a row represents. Migration 0020 just means a
- * document corpus that used to be N chunk-rows is now ~4N window-rows, so
- * whatever oversample it needed before, it now needs roughly 4x that to cover
- * the same fraction — which is exactly the 8 -> 32 this constant moved.
- *
- * That said: 32 is this experiment's measured value, on a synthetic corpus,
- * not a law of nature — a real corpus's actual requirement depends on its own
- * geometry and size, which is precisely why calibrate() + chosenOversample()
- * (not this constant) is what protects a real deployment. Re-run
- * `eil ivf calibrate` after `embed backfill --reembed` on any real corpus
- * rather than trusting this default at scale (also noted in README.md).
+ * Two rounds of trying to tune this constant for migration 0020 (one row per
+ * embedder window instead of one per chunk) both turned out to be measuring
+ * artifacts, not the constant: see task-3-report.md, "Fix round 1" and
+ * "Fix round 2". The one thing actually established — required oversample
+ * tracks ROWS PER CLUSTER (corpus size / nlist), not corpus size alone and not
+ * windows-per-chunk — means no single compiled-in number is correct for every
+ * corpus. scripts/ivf-oversample-experiment.ts reproduces the curve; run it
+ * against a corpus shaped like the real one before trusting any number here.
+ * Calibration (`eil ivf calibrate`) is mandatory, not this constant.
  */
-export const OVERSAMPLE = 32;
+export const OVERSAMPLE = 8;
 
 /** Ladder swept at full probe to separate quantization loss from cluster loss. */
 export const OVERSAMPLE_LADDER = [4, 8, 16, 32, 64] as const;
