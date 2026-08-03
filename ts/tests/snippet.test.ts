@@ -293,6 +293,73 @@ describe("snippets", () => {
     expect(lexHit.section_index).toBe(0);
     expect(vecHit.section_index).toBe(0);
   });
+
+  // The lexical arm ranks by ts_rank on lexical match; the vector arm ranks
+  // by cosine on the best chunk's embedding — they can legitimately choose
+  // DIFFERENT chunks of the SAME document. That is fine, but section_index
+  // must always describe the chunk THAT RESULT'S OWN snippet came from, never
+  // a value borrowed from the other arm. Built so the lexical keyword and the
+  // semantic marker sit in different, non-zero chunks (1 and 2 of 3), so a
+  // bug that let one arm's index leak onto the other's result, or a
+  // hardcoded/always-0 index, would both be caught.
+  it("each result's section_index describes its OWN snippet's chunk, even when arms pick different chunks", async () => {
+    const db = await openTestDb();
+    const { upsertDocument } = await import("../store.js");
+    const { backfill } = await import("../embed/backfill.js");
+    const lexicalWord = "yarnoxtile";
+    const semanticMarker = "Vorplexnil signal residue";
+    const body = `## Alpha\nUnrelated opening section with no special content at all.\n\n## Beta\nThis section mentions ${lexicalWord}, a word found nowhere else.\n\n## Gamma\n${semanticMarker}: the chunk the vector arm should match on.`;
+    await upsertDocument(db, {
+      id: "jira:issue:DIFF-CHUNK",
+      tenant: "default",
+      source: "jira",
+      title: "Different chunk per arm",
+      hierarchy: [],
+      aclGroups: [],
+      qualityTier: "authored",
+      body,
+      links: [],
+    } as any);
+
+    // Lexical-only path: flat embedder carries no cosine signal, so only the
+    // lexical match on "yarnoxtile" (chunk 1, "Beta") surfaces the doc.
+    const flatEmbed: Embedder = {
+      id: "stub:diffchunk-lex",
+      windowChars: 1_000_000,
+      embed: async (texts) => texts.map(() => Float32Array.from([0, 1, 0])),
+    };
+    await backfill(db, flatEmbed, { reembed: true });
+    const lexOut: any = await searchDocs(db, localViewer(), lexicalWord, 8, flatEmbed);
+    const lexHit = (lexOut.results as any[]).find((r) => r.id === "jira:issue:DIFF-CHUNK");
+    expect(lexHit).toBeDefined();
+    expect(lexHit.section_index).toBe(1); // Beta
+    expect(lexHit.section_count).toBe(3);
+    expect(lexHit.snippet).toContain(lexicalWord);
+
+    // Vector-only path: "zzz" shares no word with the body, so only the vec
+    // arm — matching on chunk 2, "Gamma" — can surface it.
+    const vecEmbed: Embedder = {
+      id: "stub:diffchunk-vec",
+      windowChars: 1_000_000,
+      embed: async (texts) =>
+        texts.map((t) =>
+          t.includes(semanticMarker) || t === "zzz"
+            ? Float32Array.from([1, 0, 0])
+            : Float32Array.from([0, 1, 0]),
+        ),
+    };
+    await backfill(db, vecEmbed, { reembed: true });
+    const vecOut: any = await searchDocs(db, localViewer(), "zzz", 8, vecEmbed);
+    const vecHit = (vecOut.results as any[]).find((r) => r.id === "jira:issue:DIFF-CHUNK");
+    expect(vecHit).toBeDefined();
+    expect(vecHit.section_index).toBe(2); // Gamma — DIFFERENT chunk from the lexical hit
+    expect(vecHit.section_count).toBe(3);
+    expect(vecHit.snippet).toContain("Vorplexnil");
+
+    // The two results are for the same document but describe different
+    // chunks — proves section_index is not a fixed/shared value.
+    expect(lexHit.section_index).not.toBe(vecHit.section_index);
+  });
 });
 
 // Minor (review, fix round 1): a raw text.slice() could split a word or a
