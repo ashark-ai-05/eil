@@ -5,9 +5,11 @@ import type { Embedder } from "../embed/index.js";
 import {
   SNIPPET_COVERAGE_OPTS,
   SNIPPET_OPTS,
+  getDoc,
   localViewer,
   searchDocs,
   sliceSnippet,
+  viewerFromAuthenticatedClaims,
 } from "../search.js";
 import { openTestDb, seedDoc, testViewer } from "./helpers/db.js";
 
@@ -359,6 +361,89 @@ describe("snippets", () => {
     // The two results are for the same document but describe different
     // chunks — proves section_index is not a fixed/shared value.
     expect(lexHit.section_index).not.toBe(vecHit.section_index);
+  });
+
+  // Round 4 (review): section_count's subquery filters chunks by tenant
+  // (ch2.tenant = $6 on the lexical arm) — dropping that predicate would
+  // still return the CORRECT document (documents.tenant is already enforced
+  // by visibleSql upstream) but the WRONG count, summed across every tenant
+  // sharing the same doc_id string. Same id in two tenants with DIFFERENT
+  // chunk counts: if the predicate were missing, both viewers would see
+  // 1 + 8 = 9 instead of their own tenant's real count — this is the seam
+  // that mistake would show up on.
+  it("does not leak another tenant's chunk count for a document with the same id", async () => {
+    const db = await openTestDb();
+    const sharedId = "conf:cross-tenant";
+    const text = "Retry uses backoff.";
+    const seedTenant = async (tenant: string, principal: string, chunkCount: number) => {
+      await db.query(
+        "INSERT INTO documents (id, tenant, source, title, quality_tier, content_hash, body, ingested_by)" +
+          " VALUES ($1, $2, 'confluence', 'x', 'authored', $3, $4, $5)",
+        [sharedId, tenant, `hash-${tenant}`, text, principal],
+      );
+      for (let seq = 0; seq < chunkCount; seq++) {
+        await db.query(
+          "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash)" +
+            " VALUES ($1, $2, $3, 'h', $4, $5)",
+          [tenant, sharedId, seq, text, `hash-${tenant}-${seq}`],
+        );
+      }
+    };
+    await seedTenant("default", testViewer().principal, 1);
+    await seedTenant("other-tenant", "other-user", 8);
+
+    const defaultOut: any = await searchDocs(db, testViewer(), "retry backoff", 5);
+    const defaultHit = (defaultOut.results as any[]).find((r) => r.id === sharedId);
+    expect(defaultHit).toBeDefined();
+    expect(defaultHit.section_count).toBe(1);
+
+    const otherViewer = viewerFromAuthenticatedClaims({
+      principal: "other-user",
+      tenant: "other-tenant",
+      groups: [],
+    });
+    const otherOut: any = await searchDocs(db, otherViewer, "retry backoff", 5);
+    const otherHit = (otherOut.results as any[]).find((r) => r.id === sharedId);
+    expect(otherHit).toBeDefined();
+    expect(otherHit.section_count).toBe(8);
+  });
+});
+
+// Round 4 (review, finding 2): an out-of-range get_doc `section` used to
+// fall straight into body.slice(start, start + maxChars) and come back ""
+// silently — indistinguishable from "this document has no content". The
+// reviewer's own repro: a 259-char, 5-chunk document reports
+// section_count:5 from search_docs, but get_doc's `section` counts
+// GET_DOC_MAX_CHARS pages, not chunks — this document has exactly ONE such
+// page, so get_doc(1) through get_doc(4) silently returned body:"" with no
+// error. Now they return an explicit error instead.
+describe("getDoc section range", () => {
+  it("returns an explicit error for an out-of-range section, not a silent empty body", async () => {
+    const db = await openTestDb();
+    await seedDoc(db, { id: "conf:short-doc", text: "Retry uses backoff.", headingPath: "Retry" });
+    const doc: any = await getDoc(db, testViewer(), "conf:short-doc", 1);
+    expect(doc).not.toBeNull();
+    expect(doc.total_sections).toBe(1);
+    expect(doc.body).toBeNull();
+    expect(typeof doc.error).toBe("string");
+    expect(doc.error).toContain("out of range");
+  });
+
+  it("returns an explicit error for a negative section too", async () => {
+    const db = await openTestDb();
+    await seedDoc(db, { id: "conf:short-doc", text: "Retry uses backoff.", headingPath: "Retry" });
+    const doc: any = await getDoc(db, testViewer(), "conf:short-doc", -1);
+    expect(doc.body).toBeNull();
+    expect(typeof doc.error).toBe("string");
+  });
+
+  it("still returns the real body for an in-range section, unaffected by the guard", async () => {
+    const db = await openTestDb();
+    await seedDoc(db, { id: "conf:short-doc", text: "Retry uses backoff.", headingPath: "Retry" });
+    const doc: any = await getDoc(db, testViewer(), "conf:short-doc", 0);
+    expect(doc.error).toBeUndefined();
+    expect(doc.body).toBe("Retry uses backoff.");
+    expect(doc.total_sections).toBe(1);
   });
 });
 

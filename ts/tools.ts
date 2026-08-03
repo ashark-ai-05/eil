@@ -46,15 +46,18 @@ const searchDocsSpec: ToolSpec = {
     "document — usually it does not, so treat it as a coarse safety flag, not " +
     "an instruction by itself. `section_index`/`section_count` say which part " +
     "you're looking at (e.g. section 2 of 5): if that section already answers " +
-    "the question, stop there — call get_doc only when it does not. A ticket " +
-    "key (e.g. PAY-981) instead resolves via the entity route: `entity` (the " +
-    "document, itself windowed — see its own `total_sections`) plus `linked` " +
-    "neighbors, with no `results` array and none of the fields above. A " +
-    "path/symbol/literal query resolves via the code route: `results` are " +
-    "line-window code citations with no `snippet`/`truncated`/`section_*`; " +
-    "`context.truncated` there means the total citation payload was cut to " +
-    "fit a budget, NOT that one citation is incomplete — a different flag " +
-    "from the docs-route `truncated` above, despite the same name.",
+    "the question, stop there — call get_doc only when it does not. These " +
+    "count indexed CHUNKS — NOT the same unit as get_doc's `section` " +
+    "argument (byte-pages); never pass section_index/section_count there. A " +
+    "ticket key (e.g. PAY-981) instead resolves via the entity route: " +
+    "`entity` (the document, itself windowed — see its own `total_sections`, " +
+    "a byte-page count, not section_count) plus `linked` neighbors, with no " +
+    "`results` array and none of the fields above. A path/symbol/literal " +
+    "query resolves via the code route: `results` are line-window code " +
+    "citations with no `snippet`/`truncated`/`section_*`; `context.truncated` " +
+    "there means the total citation payload was cut to fit a budget, NOT " +
+    "that one citation is incomplete — a different flag from the docs-route " +
+    "`truncated` above, despite the same name.",
   schema: z.object({
     query: z.string(),
     limit: z.number().int().default(8),
@@ -104,7 +107,10 @@ const getDocSpec: ToolSpec = {
   name: "get_doc",
   description:
     "Fetch one document's content by canonical id (from search_docs/expand). " +
-    "Large documents are windowed; pass section=1,2,... for more. This read " +
+    "`section` is a BYTE-PAGE index (0, 1, 2, ...), NOT search_docs' " +
+    "section_index/section_count (chunk units) — pass 0 first and read the " +
+    "response's own `total_sections` before requesting more; an out-of-range " +
+    "`section` returns an `error` field, not a silent empty body. This read " +
     "never refreshes or mutates the catalog. For a search_docs result from " +
     "the default (docs) route, call get_doc only when its `truncated` is " +
     "true and the snippet does not already answer the question — " +

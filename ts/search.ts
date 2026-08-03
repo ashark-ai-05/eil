@@ -434,7 +434,10 @@ async function searchDocsInner(
       tier: row.quality_tier,
       snippet,
       truncated: !covered,
-      section_index: row.seq,
+      // Number() on both, for symmetry: correct today as-is (chunks.seq is
+      // int, and pg driver returns it as a JS number already), latent-safe
+      // if that column ever widens to bigint (returned as a string).
+      section_index: Number(row.seq),
       section_count: Number(row.section_count),
       updated: row.updated_at,
     });
@@ -533,8 +536,8 @@ export async function getDoc(
   const row = res.rows[0];
   if (!row) return null;
   const body: string = row.body;
-  const start = section * maxChars;
-  return {
+  const totalSections = Math.max(1, Math.ceil(body.length / maxChars));
+  const base = {
     id: row.id,
     title: row.title,
     url: row.url,
@@ -549,9 +552,24 @@ export async function getDoc(
     // section_count:5 there — same-shaped names, different units, and
     // merging them would put contradictory numbers in one conversation.
     section,
-    total_sections: Math.max(1, Math.ceil(body.length / maxChars)),
-    body: body.slice(start, start + maxChars),
+    total_sections: totalSections,
   };
+  // An out-of-range section used to fall straight into
+  // body.slice(start, start + maxChars) and come back "" silently —
+  // indistinguishable from "this document has no content". A caller who read
+  // search_docs' section_count (chunk count) and passed it here as `section`
+  // (a byte-pagination page count) hit exactly this: no error, just an empty
+  // body. Silence is the failure mode this whole task has been fighting —
+  // make the caller's mistake visible instead of returning a body-shaped lie.
+  if (section < 0 || section >= totalSections) {
+    return {
+      ...base,
+      error: `section ${section} out of range — this document has ${totalSections} section(s): 0..${totalSections - 1}`,
+      body: null,
+    };
+  }
+  const start = section * maxChars;
+  return { ...base, body: body.slice(start, start + maxChars) };
 }
 
 export async function expand(
@@ -899,7 +917,8 @@ async function vecArm(
         tier: row.quality_tier,
         snippet,
         truncated: snippet.length < Number(row.doc_len),
-        section_index: row.seq,
+        // Number() on both, for symmetry with the lexical arm — see its comment.
+        section_index: Number(row.seq),
         section_count: Number(row.section_count),
         updated: row.updated_at,
       });
