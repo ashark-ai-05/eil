@@ -41,17 +41,20 @@ const searchDocsSpec: ToolSpec = {
   description:
     "Search indexed org knowledge (Confluence, Jira, notes, code) — the shape " +
     "of the response depends on how the query routes. Most queries return " +
-    "compact `results`: id, title, snippet, `truncated`. `truncated: false` " +
-    "means the snippet already contains the ENTIRE document — call get_doc " +
-    "only when `truncated` is true and the snippet does not already answer " +
-    "the question. A ticket key (e.g. PAY-981) instead resolves via the " +
-    "entity route: `entity` (the document, itself windowed — see its own " +
-    "`total_sections`) plus `linked` neighbors, with no `results` array and " +
-    "no `truncated` field at all. A path/symbol/literal query resolves via " +
-    "the code route: `results` are line-window code citations with no " +
-    "`snippet` or per-result `truncated`; `context.truncated` there means the " +
-    "total citation payload was cut to fit a budget, NOT that one citation is " +
-    "incomplete — it is not the same flag as the docs-route `truncated` above.",
+    "compact `results`: id, title, snippet, `truncated`, `section_index`, " +
+    "`section_count`. `truncated` says whether the snippet covers the WHOLE " +
+    "document — usually it does not, so treat it as a coarse safety flag, not " +
+    "an instruction by itself. `section_index`/`section_count` say which part " +
+    "you're looking at (e.g. section 2 of 5): if that section already answers " +
+    "the question, stop there — call get_doc only when it does not. A ticket " +
+    "key (e.g. PAY-981) instead resolves via the entity route: `entity` (the " +
+    "document, itself windowed — see its own `total_sections`) plus `linked` " +
+    "neighbors, with no `results` array and none of the fields above. A " +
+    "path/symbol/literal query resolves via the code route: `results` are " +
+    "line-window code citations with no `snippet`/`truncated`/`section_*`; " +
+    "`context.truncated` there means the total citation payload was cut to " +
+    "fit a budget, NOT that one citation is incomplete — a different flag " +
+    "from the docs-route `truncated` above, despite the same name.",
   schema: z.object({
     query: z.string(),
     limit: z.number().int().default(8),

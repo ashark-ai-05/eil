@@ -185,8 +185,26 @@ export interface SearchResult {
    *  document rather than the one matched chunk: a chunk can be short enough
    *  to fit the snippet budget while the document around it is not (see the
    *  doc_len comment in searchDocsInner's lexical query). An agent that
-   *  cannot tell these apart fetches defensively, every time. */
+   *  cannot tell these apart fetches defensively, every time.
+   *
+   *  Because the chunker strips heading lines from chunk text, coverage_len
+   *  can never reach text_len on any document with markdown headings, which
+   *  makes truncated collapse to `true` on most real corpora — an honest
+   *  worst-case signal, not a bug, but not an actionable one on its own.
+   *  section_index/section_count below are the actionable half: they tell
+   *  the agent WHICH PART of the document it is looking at, so it can decide
+   *  "I found my answer in section 2 of 5, no need to fetch the rest" even
+   *  though truncated is (correctly) true. */
   truncated: boolean;
+  /** Zero-based index of the chunk the snippet came from, among this
+   *  document's chunks. NOT get_doc's `section` — that is a BYTE-PAGINATION
+   *  page (GET_DOC_MAX_CHARS windows), a different unit entirely; see the
+   *  comment at getDoc's `section` field. */
+  section_index: number;
+  /** How many chunks this document has in total (tenant-scoped count against
+   *  `chunks`). NOT get_doc's `total_sections` — that counts byte-pagination
+   *  pages, not chunks; see the comment at getDoc's `total_sections` field. */
+  section_count: number;
   score?: number;
 }
 
@@ -329,7 +347,15 @@ async function searchDocsInner(
      -- both placements produce identical text_len values (23ms either way,
      -- once it runs on the cut set rather than the uncut one).
      SELECT picked.doc_id, picked.source, picked.strict_hit, picked.title, picked.url,
-            picked.quality_tier, picked.updated_at,
+            picked.quality_tier, picked.updated_at, picked.seq,
+            -- Chunk count for this document, tenant-scoped, computed here on
+            -- the ~limit*3 already-cut candidates — NOT inside m, which was
+            -- exactly the mistake doc_len made (measured 1640ms -> 23ms by
+            -- moving off the pre-cut path; see the picked CTE comment above).
+            -- chunks' primary key is (tenant, doc_id, seq), so this is an
+            -- index range scan per row, not a table scan.
+            (SELECT count(*) FROM chunks ch2
+              WHERE ch2.tenant = $6 AND ch2.doc_id = picked.doc_id) AS section_count,
             -- 'truncated' has to describe what get_doc would return — the
             -- whole DOCUMENT — not the one matched CHUNK. Comparing against
             -- the chunk's own length reported truncated:false on every result
@@ -408,6 +434,8 @@ async function searchDocsInner(
       tier: row.quality_tier,
       snippet,
       truncated: !covered,
+      section_index: row.seq,
+      section_count: Number(row.section_count),
       updated: row.updated_at,
     });
     const cls = row.source === "code" ? "fts_code" : "fts_prose";
@@ -514,6 +542,12 @@ export async function getDoc(
     tier: row.quality_tier,
     hierarchy: row.hierarchy,
     updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    // BYTE-PAGINATION page (GET_DOC_MAX_CHARS windows) — NOT a chunk index.
+    // Do not merge with SearchResult's section_index/section_count
+    // (ts/search.ts), which count CHUNKS: a 228-char, 5-chunk document is
+    // total_sections:1 here (it fits one GET_DOC_MAX_CHARS window) but
+    // section_count:5 there — same-shaped names, different units, and
+    // merging them would put contradictory numbers in one conversation.
     section,
     total_sections: Math.max(1, Math.ceil(body.length / maxChars)),
     body: body.slice(start, start + maxChars),
@@ -818,9 +852,13 @@ async function vecArm(
      -- reasoning as the lexical arm's doc_len above. This documents-d join
      -- reads no NEW rows: every doc_id here already passed visibleSql() inside
      -- cand, so this is re-joining an already-ACL-cleared id for its length,
-     -- not a second unguarded read.
-     SELECT t.doc_id, t.score, ch.text, d.title, d.url, d.quality_tier, d.updated_at,
-            length(d.body) AS doc_len
+     -- not a second unguarded read. section_count runs on top, which is
+     -- already cut to LIMIT $6 (~limit*3) — the same post-cut placement as
+     -- doc_len, not the pre-cut mistake that placement was fixing.
+     SELECT t.doc_id, t.score, t.seq, ch.text, d.title, d.url, d.quality_tier, d.updated_at,
+            length(d.body) AS doc_len,
+            (SELECT count(*) FROM chunks ch2
+              WHERE ch2.tenant = $3 AND ch2.doc_id = t.doc_id) AS section_count
        FROM top t
        JOIN chunks ch ON ch.tenant = $3 AND ch.doc_id = t.doc_id AND ch.seq = t.seq
        JOIN documents d ON d.tenant = $3 AND d.id = t.doc_id
@@ -861,6 +899,8 @@ async function vecArm(
         tier: row.quality_tier,
         snippet,
         truncated: snippet.length < Number(row.doc_len),
+        section_index: row.seq,
+        section_count: Number(row.section_count),
         updated: row.updated_at,
       });
     }

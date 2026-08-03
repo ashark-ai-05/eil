@@ -169,6 +169,130 @@ describe("snippets", () => {
     expect(hit).toBeDefined();
     expect(hit.truncated).toBe(true);
   });
+
+  // Round 3 (new work, directed by the human partner): truncated collapsing
+  // to (correctly) true on any multi-chunk document — see the doc comment on
+  // SearchResult.truncated — removed the actionable signal the flag was
+  // supposed to give an agent. section_index/section_count give it back:
+  // WHICH chunk matched, and how many the document has, so an agent that
+  // finds its answer in section 2 of 5 can stop without needing truncated to
+  // ever read false.
+  it("reports section_index/section_count on the lexical arm for a multi-chunk document", async () => {
+    const db = await openTestDb();
+    await seedMultiChunkDoc(db, {
+      id: "conf:sections",
+      chunks: [
+        "Retry policy uses backoff for payments.",
+        "Escalation procedure for unresolved retries.",
+        "Refund procedure once a retry is abandoned.",
+      ],
+      headingPath: "Retry",
+    });
+    const out: any = await searchDocs(db, testViewer(), "retry backoff", 5);
+    const hit = (out.results as any[]).find((r) => r.id === "conf:sections");
+    expect(hit).toBeDefined();
+    expect(hit.section_index).toBe(0); // the only chunk containing "backoff"
+    expect(hit.section_count).toBe(3); // real count — would fail if hardcoded to 1
+  });
+
+  it("reports section_index/section_count on the vector arm for a multi-chunk document", async () => {
+    const db = await openTestDb();
+    const { upsertDocument } = await import("../store.js");
+    const { backfill } = await import("../embed/backfill.js");
+    const marker = "Plovantex incident signature";
+    const filler = "Unrelated filler describing the follow-up review process in detail, ".repeat(6);
+    const body = `## Alpha\n${marker}: services degraded during the window.\n\n## Beta\n${filler}more unrelated content for the second section.\n\n## Gamma\nA third heading forces a third chunk, distinct from the first two.`;
+    await upsertDocument(db, {
+      id: "jira:issue:VEC-SEC",
+      tenant: "default",
+      source: "jira",
+      title: "Vector sections",
+      hierarchy: [],
+      aclGroups: [],
+      qualityTier: "authored",
+      body,
+      links: [],
+    } as any);
+    const stubEmbed: Embedder = {
+      id: "stub:vec-sections",
+      windowChars: 1_000_000,
+      embed: async (texts) =>
+        texts.map((t) =>
+          t.includes(marker) || t === "zzz"
+            ? Float32Array.from([1, 0, 0])
+            : Float32Array.from([0, 1, 0]),
+        ),
+    };
+    await backfill(db, stubEmbed, { reembed: true });
+    const out: any = await searchDocs(db, localViewer(), "zzz", 8, stubEmbed);
+    const hit = (out.results as any[]).find((r) => r.id === "jira:issue:VEC-SEC");
+    expect(hit).toBeDefined();
+    expect(hit.section_index).toBe(0); // Alpha, the marker chunk, is chunk 0
+    expect(hit.section_count).toBe(3); // real count — would fail if hardcoded to 1
+  });
+
+  it("agrees on section_count between arms for the same document", async () => {
+    const db = await openTestDb();
+    const { upsertDocument } = await import("../store.js");
+    const { backfill } = await import("../embed/backfill.js");
+    // "quorbatnil" is a real word, findable lexically; also embedded as the
+    // semantic anchor below — the SAME document is reached through EITHER
+    // arm depending on which query and embedder a given call uses, so both
+    // paths report section_count for the identical, known 2-chunk document.
+    const marker = "Quorbatnil incident signature";
+    const filler = "Unrelated filler describing the follow-up review process in detail, ".repeat(6);
+    const body =
+      `## Alpha\n${marker}: services degraded during the incident window.\n\n` +
+      `## Beta\n${filler}so this second section is clearly longer than the first.`;
+    await upsertDocument(db, {
+      id: "jira:issue:AGREE-1",
+      tenant: "default",
+      source: "jira",
+      title: "Agreement check",
+      hierarchy: [],
+      aclGroups: [],
+      qualityTier: "authored",
+      body,
+      links: [],
+    } as any);
+
+    // Lexical-only path: every text embeds to the SAME vector, so cosine
+    // carries no signal and the lexical match (a real word in chunk 0) is
+    // what actually surfaces the doc; byDoc's dedup means the lexical arm's
+    // fields win regardless of what the vec arm also nominally matches.
+    const flatEmbed: Embedder = {
+      id: "stub:agree-lex",
+      windowChars: 1_000_000,
+      embed: async (texts) => texts.map(() => Float32Array.from([0, 1, 0])),
+    };
+    await backfill(db, flatEmbed, { reembed: true });
+    const lexOut: any = await searchDocs(db, localViewer(), "quorbatnil", 8, flatEmbed);
+    const lexHit = (lexOut.results as any[]).find((r) => r.id === "jira:issue:AGREE-1");
+    expect(lexHit).toBeDefined();
+
+    // Vector-only path: "zzz" shares no word with the body, so only the vec
+    // arm can surface it — same document, same real chunk count.
+    const vecEmbed: Embedder = {
+      id: "stub:agree-vec",
+      windowChars: 1_000_000,
+      embed: async (texts) =>
+        texts.map((t) =>
+          t.includes(marker) || t === "zzz"
+            ? Float32Array.from([1, 0, 0])
+            : Float32Array.from([0, 1, 0]),
+        ),
+    };
+    await backfill(db, vecEmbed, { reembed: true });
+    const vecOut: any = await searchDocs(db, localViewer(), "zzz", 8, vecEmbed);
+    const vecHit = (vecOut.results as any[]).find((r) => r.id === "jira:issue:AGREE-1");
+    expect(vecHit).toBeDefined();
+
+    expect(lexHit.section_count).toBe(2);
+    expect(vecHit.section_count).toBe(2);
+    expect(lexHit.section_count).toBe(vecHit.section_count);
+    expect(lexHit.section_index).toBe(0);
+    expect(vecHit.section_index).toBe(0);
+  });
 });
 
 // Minor (review, fix round 1): a raw text.slice() could split a word or a
