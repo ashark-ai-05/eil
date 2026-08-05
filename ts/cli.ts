@@ -1167,7 +1167,7 @@ embed
 program.parseAsync(process.argv).catch(async (err: any) => {
   const { CatalogNotReady, safeDsn } = await import("./db.js");
   if (err instanceof CatalogNotReady) {
-    console.error("\n" + err.message + "\n");
+    console.error(`\n${err.message}\n`);
     process.exit(2);
   }
   if (["42P01", "42703", "3D000", "ECONNREFUSED"].includes(err?.code)) {
@@ -1176,7 +1176,7 @@ program.parseAsync(process.argv).catch(async (err: any) => {
         "",
         String(err.message),
         "",
-        "  database   " + safeDsn(),
+        `  database   ${safeDsn()}`,
         process.env.EIL_DATABASE_URL
           ? "             (from EIL_DATABASE_URL)"
           : "             (the default — EIL_DATABASE_URL is not set in this shell)",

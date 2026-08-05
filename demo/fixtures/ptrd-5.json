@@ -9,8 +9,6 @@
     "PTR-DEMO",
     "Runbooks"
   ],
-  "acl_groups": [
-    "grp-engineering"
-  ],
+  "acl_groups": [],
   "body": "> **SYNTHETIC DEMO CONTENT.** Illustrative only, generated for a capability\n> demonstration. Not a production reference. Do not cite in design or change\n> documentation.\n\nAmending a counterparty credit limit is a two person job, and credit-admin will\nnot let it be anything else.\n\nOne Risk Ops user raises the amendment. A second, different Risk Ops user\napproves it. credit-admin enforces the separation itself — the approve action is\nrefused when the approver is the same user who raised the change, and holding\nboth roles does not get you round it. This came in under PTR-392. Before that it\nwas a convention written on this page, and it was not always followed.\n\n## Raising\n\n1. credit-admin, Counterparties, find the counterparty. Check you are on the\n   right entity before you type anything; the same name appears more than once\n   and they are separate lines.\n2. Amendment. Enter the new limit and a reason. The reason is read in the\n   quarterly credit review by people who were not there, so write something a\n   stranger can follow rather than \"as agreed\".\n3. Save. The amendment sits in the pending queue and has no effect yet.\n\n## Approving\n\n4. The second user opens the pending queue and reads the reason, not only the\n   number. If the reason does not stand on its own, send it back.\n5. Approve. psr-limits takes the change and the gateways follow along shortly\n   afterwards.\n6. Record the amendment in the shift handover.\n\nIf you are alone on shift you cannot complete an amendment. Call the other region\nand borrow a second pair of eyes. There is no route that involves turning the\ncontrol off for an hour, and no one in Risk Ops can grant one.\n"
 }

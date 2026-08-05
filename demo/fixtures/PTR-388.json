@@ -20,8 +20,5 @@
         "body": "Regression case added — restart psr-limits under load and assert the gateway does not open a session early. Passing on the release candidate."
       }
     ]
-  },
-  "acl_groups": [
-    "grp-engineering"
-  ]
+  }
 }

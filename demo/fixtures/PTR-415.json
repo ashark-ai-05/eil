@@ -22,8 +22,5 @@
         "body": "Metric is out in the current gateway build. Alert rule still to do, and we have not agreed who it pages — Risk Ops or the platform on-call. d.mercer was going to come back on that."
       }
     ]
-  },
-  "acl_groups": [
-    "grp-engineering"
-  ]
+  }
 }

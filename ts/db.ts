@@ -125,7 +125,7 @@ export async function assertCatalogReady(client: Db): Promise<void> {
 
   if (nearby.length > 0) {
     lines.push(
-      `  There is a catalog in this directory. You probably want:`,
+      "  There is a catalog in this directory. You probably want:",
       "",
       `      export EIL_DATABASE_URL=pglite://${nearby[0]}`,
       "",
