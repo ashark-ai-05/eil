@@ -28,8 +28,37 @@ export interface Db {
   end(): Promise<void>;
 }
 
-export function dsn(): string {
-  return process.env.EIL_DATABASE_URL ?? "postgresql:///eil";
+export type DatabasePurpose = "admin" | "api" | "worker";
+
+const DATABASE_ENV: Record<DatabasePurpose, string> = {
+  admin: "EIL_DATABASE_ADMIN_URL",
+  api: "EIL_DATABASE_API_URL",
+  worker: "EIL_DATABASE_WORKER_URL",
+};
+
+/** Resolve a purpose-specific database identity. Runtime identities never
+ * inherit the legacy/admin DSN: that would recreate a union of privileges. */
+export function dsn(purpose: DatabasePurpose = "admin"): string {
+  const named = process.env[DATABASE_ENV[purpose]];
+  if (named) return named;
+  if (purpose === "admin") return process.env.EIL_DATABASE_URL ?? "postgresql:///eil";
+  throw new Error(
+    `missing env: ${DATABASE_ENV[purpose]} (runtime API and worker connections must use separate DSNs)`,
+  );
+}
+
+export function runtimeDsns(): { api: string; worker: string } {
+  const api = dsn("api");
+  const worker = dsn("worker");
+  if (api === worker) {
+    throw new Error(
+      "EIL_DATABASE_API_URL and EIL_DATABASE_WORKER_URL must use different credentials",
+    );
+  }
+  if (api.startsWith("pglite://") || worker.startsWith("pglite://")) {
+    throw new Error("multi-user runtime isolation requires server PostgreSQL, not PGlite");
+  }
+  return { api, worker };
 }
 
 /**
@@ -236,6 +265,45 @@ export async function connect(database?: string): Promise<Db> {
   const client = new pg.Client({ connectionString });
   await client.connect();
   return client;
+}
+
+/** Connect with the deliberately narrow API or connector-worker identity. */
+export async function connectRuntime(purpose: "api" | "worker", database?: string): Promise<Db> {
+  const urls = runtimeDsns();
+  const base = urls[purpose];
+  const connectionString = database === undefined ? base : withDatabase(base, database);
+  const client = new pg.Client({ connectionString });
+  await client.connect();
+  return client;
+}
+
+/**
+ * One-time cluster provisioning. This is intentionally not a migration:
+ * schema migrators need not have CREATEROLE, and concurrent database
+ * migrations must never race while creating cluster-global objects.
+ */
+export async function provisionRuntimeRoles(admin: Db): Promise<void> {
+  await admin.query(`DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'eil_api') THEN
+    CREATE ROLE eil_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'eil_connector_worker') THEN
+    CREATE ROLE eil_connector_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+END
+$$`);
+  await admin.query(`DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'secrets') THEN
+    REVOKE ALL ON SCHEMA secrets FROM eil_api;
+    REVOKE ALL ON ALL TABLES IN SCHEMA secrets FROM eil_api;
+    GRANT USAGE ON SCHEMA secrets TO eil_connector_worker;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA secrets
+      TO eil_connector_worker;
+  END IF;
+END
+$$`);
 }
 
 export function migrationFiles(dir: string = MIGRATIONS_DIR): Array<{ name: string; sql: string }> {

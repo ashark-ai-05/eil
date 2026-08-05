@@ -22,6 +22,7 @@ jobs:
           --health-retries 10
     env:
       EIL_DATABASE_URL: postgresql://postgres@localhost:5432/eil
+      EIL_REQUIRE_REAL_POSTGRES: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

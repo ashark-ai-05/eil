@@ -6,7 +6,7 @@ import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type pg from "pg";
-import { type Db, connect, migrate } from "./db.js";
+import { type Db, connect, migrate, provisionRuntimeRoles } from "./db.js";
 import { ingestDocs, runReconcile } from "./ingest/pipeline.js";
 import { promptHidden } from "./prompt.js";
 import type { Finding, ReqsBody } from "./reqs/schema.js";
@@ -21,6 +21,18 @@ db.command("migrate")
     try {
       const applied = await migrate(client);
       console.log(applied.length > 0 ? `applied: ${JSON.stringify(applied)}` : "up to date");
+    } finally {
+      await client.end();
+    }
+  });
+
+db.command("provision-runtime-roles")
+  .description("Create the cluster-wide API and connector-worker privilege roles")
+  .action(async () => {
+    const client = await connect();
+    try {
+      await provisionRuntimeRoles(client);
+      console.log("runtime roles provisioned (login users and passwords remain operator-managed)");
     } finally {
       await client.end();
     }
