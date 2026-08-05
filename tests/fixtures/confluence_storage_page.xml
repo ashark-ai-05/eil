@@ -1,0 +1,30 @@
+<h1>Payment Retry Policy</h1>
+<p>This page describes how the gateway retries failed payment authorisations.</p>
+<ac:structured-macro ac:name="info" ac:schema-version="1">
+  <ac:rich-text-body><p>Owned by the Payments platform team.</p></ac:rich-text-body>
+</ac:structured-macro>
+<h2>Backoff schedule</h2>
+<table>
+  <tbody>
+    <tr><th>Attempt</th><th>Delay</th><th>Terminal?</th></tr>
+    <tr><td>1</td><td>30s</td><td>no</td></tr>
+    <tr><td>2</td><td>2m</td><td>no</td></tr>
+    <tr><td>3</td><td>10m</td><td>yes</td></tr>
+  </tbody>
+</table>
+<h2>Guard clause</h2>
+<p>The worker gives up after the third attempt:</p>
+<ac:structured-macro ac:name="code" ac:schema-version="1">
+  <ac:parameter ac:name="language">bash</ac:parameter>
+  <ac:parameter ac:name="title">retry-guard.sh</ac:parameter>
+  <ac:plain-text-body><![CDATA[if [ "$RETRY_COUNT" -gt 3 ]; then
+    echo "giving up on $PAYMENT_ID"
+    exit 1
+fi]]></ac:plain-text-body>
+</ac:structured-macro>
+<h2>See also</h2>
+<p>Escalation lives in <ac:link><ri:page ri:content-title="Payment Escalation Runbook" ri:space-key="OPS"/><ac:plain-text-link-body><![CDATA[the escalation runbook]]></ac:plain-text-link-body></ac:link>, and the original design is <ac:link><ri:attachment ri:filename="retry-design.pdf"/></ac:link>.</p>
+<p>External reference: <a href="https://stripe.example/docs/retries">Stripe retry docs</a>.</p>
+<ac:structured-macro ac:name="warning" ac:schema-version="1">
+  <ac:rich-text-body><p>Do not raise the cap without a capacity review.</p></ac:rich-text-body>
+</ac:structured-macro>
