@@ -25,6 +25,15 @@ describe("normalizers", () => {
     expect(doc.links).not.toContain("jira:issue:PAY-981");
   });
 
+  it("jira: excludes visibility-restricted comments, fail-closed", () => {
+    const doc = normalizeIssue(fixture("jira_issue.json"));
+    // the restricted comment's author and body must never appear in the
+    // shared-ACL document body — only an omission count may.
+    expect(doc.body).not.toContain("legal-counsel");
+    expect(doc.body).not.toContain("184,220");
+    expect(doc.body).toContain("**Restricted comments omitted:** 1");
+  });
+
   it("hash gate is content-addressed", () => {
     const raw = fixture("confluence_page.json");
     expect(contentHash(normalizePage(raw))).toBe(contentHash(normalizePage(raw)));

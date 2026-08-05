@@ -18,7 +18,17 @@ export interface JiraIssue {
     created?: string | null;
     updated?: string | null;
     description?: string | null;
-    comments?: Array<{ author?: string; body: string }>;
+    /**
+     * `visibility` is Jira's own role/group restriction on a single comment —
+     * independent of the issue's ACL. EIL has no per-comment ACL model yet, so
+     * a restricted comment cannot inherit the issue-level `acl_groups` without
+     * over-exposing it to anyone who can see the issue.
+     */
+    comments?: Array<{
+      author?: string;
+      body: string;
+      visibility?: { type: string; value: string } | null;
+    }>;
     acl_groups?: string[];
     assignee?: string | null;
     labels?: string[];
@@ -37,6 +47,15 @@ export function normalize(issue: JiraIssue, tenant = "default"): CanonicalDoc {
   const docId = `jira:issue:${key}`;
   const f = issue.fields;
 
+  // visibility-restricted comments are fail-closed: excluded from the shared
+  // body rather than inheriting the (broader) issue-level acl_groups, since
+  // there is no per-comment ACL model yet. Only the count is surfaced — never
+  // the restricted author or text — so operators can see omission happened
+  // without the omission signal itself leaking anything.
+  const allComments = f.comments ?? [];
+  const visibleComments = allComments.filter((c) => !c.visibility);
+  const restrictedCount = allComments.length - visibleComments.length;
+
   // Facets go in the body as well as the fields, because the lexical arm can
   // only match what is in the text — a query for "unresolved payments bug
   // assigned to alice" has nowhere else to hit.
@@ -49,10 +68,15 @@ export function normalize(issue: JiraIssue, tenant = "default"): CanonicalDoc {
     ...(f.components?.length ? [`**Components:** ${f.components.join(", ")}`] : []),
     ...(f.fix_versions?.length ? [`**Fix versions:** ${f.fix_versions.join(", ")}`] : []),
     ...(f.labels?.length ? [`**Labels:** ${f.labels.join(", ")}`] : []),
+    ...(restrictedCount > 0
+      ? [
+          `**Restricted comments omitted:** ${restrictedCount} (visibility-limited; not yet ACL-mirrored)`,
+        ]
+      : []),
   ];
   const parts = [facets.join(" · ")];
   if (f.description) parts.push(`## Description\n\n${f.description}`);
-  for (const c of f.comments ?? []) {
+  for (const c of visibleComments) {
     parts.push(`## Comment — ${c.author ?? "unknown"}\n\n${c.body}`);
   }
   const body = parts.join("\n\n");

@@ -14,6 +14,11 @@
       {
         "author": "krunal",
         "body": "Confirmed: alert rule filters on status=PARKED but 2.4 renamed the status to RETRY_EXHAUSTED. Fix in progress, see also PAY-990."
+      },
+      {
+        "author": "legal-counsel",
+        "body": "Customer refund figure for the affected batch is $184,220 — do not disclose outside Legal.",
+        "visibility": { "type": "role", "value": "Administrators" }
       }
     ]
   }
