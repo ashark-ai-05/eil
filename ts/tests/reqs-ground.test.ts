@@ -26,6 +26,7 @@ import {
 } from "../reqs/prompt.js";
 import { walk } from "../reqs/schema.js";
 import { magnitude, recommendAction } from "../reqs/scoring.js";
+import { viewerFromAuthenticatedClaims } from "../search.js";
 
 /**
  * The unknown the demo actually lands on. It is deliberately the one PTR-420 is
@@ -793,12 +794,27 @@ describe("elaborate", () => {
     const fixtures = recordingClient({ total: 13, synthetic: 13 });
     const live = recordingClient({ total: 13, synthetic: 4 });
 
-    expect(await detectCorpusMode(fixtures.client)).toBe("fixtures");
-    expect(await detectCorpusMode(live.client)).toBe("live");
+    // Tenant is required now: omitting it used to widen the query to the whole
+    // catalog silently, so the dangerous case was the default.
+    expect(await detectCorpusMode(fixtures.client, "default")).toBe("fixtures");
+    expect(await detectCorpusMode(live.client, "default")).toBe("live");
 
+    // A viewer is now REQUIRED to derive corpusMode from the catalog, because
+    // deriving it needs to know whose catalog. This test previously relied on
+    // the silent fall-through to a whole-catalog count — exactly the path that
+    // let one tenant's corpus decide another tenant's verdict.
     const body = await elaborate(
       "PTR-401",
-      deps({ client: live.client, corpusMode: undefined, title: "Intraday PSR limit amendment" }),
+      deps({
+        client: live.client,
+        corpusMode: undefined,
+        title: "Intraday PSR limit amendment",
+        viewer: viewerFromAuthenticatedClaims({
+          principal: "reader",
+          tenant: "default",
+          groups: [],
+        }),
+      }),
     );
     expect(body.metadata.corpusMode).toBe("live");
   });

@@ -142,11 +142,37 @@ interface RawCriterion {
  * purpose: the failure that matters is a synthetic run narrated to executives as
  * a live one, never the reverse.
  */
-export async function detectCorpusMode(client: Db): Promise<CorpusMode> {
+export async function detectCorpusMode(client: Db, tenant: string): Promise<CorpusMode> {
+  return corpusModeFor(client, tenant);
+}
+
+/**
+ * Whole-catalog corpus mode, across every tenant.
+ *
+ * Deliberately a SEPARATE NAME rather than an omitted argument. When the tenant
+ * was optional, forgetting it silently widened the query to the entire catalog —
+ * so the dangerous behaviour was the *default* and reaching it required no
+ * decision at all. An operator who genuinely wants a cross-tenant count has to
+ * say this word out loud; nobody can arrive here by omission.
+ */
+export async function detectCorpusModeAcrossAllTenants(client: Db): Promise<CorpusMode> {
+  return corpusModeFor(client, null);
+}
+
+async function corpusModeFor(client: Db, tenant: string | null): Promise<CorpusMode> {
+  // Tenant-scoped when a viewer is in play. This value is stamped into the
+  // viewer-facing artefact, so an unscoped count lets ANOTHER tenant's corpus
+  // decide whether this tenant's run is narrated as live or as fixtures — a
+  // neighbour's synthetic seed data could mark a real run "fixtures", or a
+  // neighbour's real corpus could bless a synthetic one as "live".
+  //
+  // The optional whole-catalog form is retained for operator diagnostics that
+  // genuinely have no viewer; elaborate() always passes one.
   const { rows } = await client.query(
     "SELECT count(*)::int AS total," +
       " sum(CASE WHEN url LIKE '%example.com/%' THEN 1 ELSE 0 END)::int AS synthetic" +
-      " FROM documents",
+      " FROM documents WHERE ($1::text IS NULL OR tenant = $1)",
+    [tenant ?? null],
   );
   const total = Number(rows[0]?.total ?? 0);
   const synthetic = Number(rows[0]?.synthetic ?? 0);
@@ -544,7 +570,7 @@ async function version(): Promise<string> {
 
 /** The work item itself, read through the audited tool path under the caller's
  *  viewer — so a work item this caller may not see is not elaborated. */
-async function readWorkItem(
+export async function readWorkItem(
   client: Db,
   viewer: Viewer,
   docId: string,
@@ -554,9 +580,20 @@ async function readWorkItem(
   if (typeof doc.error === "string" || typeof doc.body !== "string") return null;
   // The ACL decision has already been made, on this exact id, by the read above.
   // This second query only fetches the field `get_doc` does not project.
+  //
+  // It must still be TENANT-bound. That earlier decision authorised
+  // (viewer.tenant, docId); asking for (any tenant, docId) is a different
+  // question. `documents` is PRIMARY KEY (tenant, id) since migration 0009, so
+  // the same canonical id legitimately exists in several tenants and rows[0]
+  // is whichever the planner returns — another tenant's author could be
+  // stamped into this artefact. An authorisation decision only covers the
+  // key it was made against.
   let author: string | null = null;
   try {
-    const { rows } = await client.query("SELECT author FROM documents WHERE id = $1", [docId]);
+    const { rows } = await client.query(
+      "SELECT author FROM documents WHERE tenant = $1 AND id = $2",
+      [viewer.tenant, docId],
+    );
     author = typeof rows[0]?.author === "string" ? rows[0].author : null;
   } catch {
     author = null;
@@ -592,8 +629,20 @@ export async function elaborate(workItem: string, deps: ElaborateDeps): Promise<
     throw new Error(`${CALLER}: no catalog and no title/brief supplied for ${workItem}`);
   }
 
+  // Deriving the mode from the catalog requires knowing WHOSE catalog. A client
+  // without a viewer used to fall through to a whole-catalog verdict stamped
+  // into this tenant's artefact; refusing is the only safe reading, since the
+  // alternative is narrating one organisation's corpus using another's data.
+  if (deps.client && deps.corpusMode === undefined && !deps.viewer) {
+    throw new Error(
+      `${CALLER}: deriving corpusMode from the catalog needs deps.viewer (whose tenant?) — pass a viewer, or set deps.corpusMode explicitly`,
+    );
+  }
   const corpusMode =
-    deps.corpusMode ?? (deps.client ? await detectCorpusMode(deps.client) : "fixtures");
+    deps.corpusMode ??
+    (deps.client && deps.viewer
+      ? await detectCorpusMode(deps.client, deps.viewer.tenant)
+      : "fixtures");
   const escalateTo = owner ?? `(no owner recorded in the catalog for ${workItem})`;
 
   const loop = new Elaboration(workItem, title, brief, escalateTo, deps);
