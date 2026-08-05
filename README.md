@@ -142,3 +142,7 @@ In progress:
 - [ ] Per-user tokens + HTTP MCP transport (phase 2 — the kube rollout gate)
 - [ ] Sub-linear vector scoring (LSH sketch column) — scoring is currently a
       linear scan, fine at personal scale
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
