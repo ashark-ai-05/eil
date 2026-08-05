@@ -73,7 +73,7 @@ change, no code:
 | Tier | Concurrent processes | Install rights |
 |---|---|---|
 | `pglite://<dir>` | no (exclusive lock) | none — pnpm only |
-| `pnpm eil db embedded` (embedded-postgres, Linux/WSL2) | **yes** — real PG server as your user | none |
+| `pnpm eil db embedded` (optional embedded-postgres, Linux/WSL2) | **yes** — real PG server as your user | none; reinstall without `--no-optional` if unavailable |
 | apt-in-WSL2 / brew | yes | sudo in your distro / brew |
 | org dev PG server (`EIL_DATABASE_URL=...`) | yes | none — ask for a schema |
 

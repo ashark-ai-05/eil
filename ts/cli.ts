@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /** The eil CLI — the only task runner. Cross-platform by construction. */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -38,7 +39,7 @@ db.command("embedded")
       EmbeddedPostgres = (await import(moduleName)).default;
     } catch {
       console.log(
-        "embedded-postgres is not installed. Add it with:\n  pnpm add -D embedded-postgres",
+        "embedded-postgres is not installed. Reinstall EIL with optional dependencies enabled.",
       );
       process.exit(1);
     }

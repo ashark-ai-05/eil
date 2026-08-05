@@ -23,14 +23,16 @@ above). Full install steps: **[docs/setup.md](docs/setup.md)**.
 
 ## Use it from an agent
 
-EIL is a standard stdio MCP server:
+EIL is a standard stdio MCP server. After an npm release, run a pinned version:
 
 ```sh
-claude mcp add eil-knowledge -- pnpm -s --dir /path/to/eil eil serve
+claude mcp add eil-knowledge -- npx -y eil@0.2.0 serve
 ```
 
-It exposes five tools — `search_docs`, `get_doc`, `expand`, `search_code`,
-`fetch_logs` — and is two-phase by design: search returns ids and snippets, and
+For a source checkout, use `pnpm -s --dir /path/to/eil eil serve`.
+
+It exposes six tools — `search_docs`, `get_doc`, `refresh_doc`, `expand`,
+`search_code`, `fetch_logs` — and is two-phase by design: search returns ids and snippets,
 the agent fetches only what it actually needs.
 
 To mount those tools inside **your own TypeScript MCP server** instead of

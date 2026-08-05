@@ -34,6 +34,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm tools:check
+      - run: pnpm pack:smoke
       # fails if docs/system-map.html no longer matches the code it describes
       - run: pnpm map:check
       # fails if demo/corpus + demo/fixtures no longer match ts/corpus/psr.ts,

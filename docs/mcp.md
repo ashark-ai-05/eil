@@ -1,7 +1,7 @@
 # Using EIL from MCP
 
-EIL exposes five tools — `search_docs`, `get_doc`, `expand`, `search_code`,
-`fetch_logs` — and is **two-phase by design**: search returns ids + snippets,
+EIL exposes six tools — `search_docs`, `get_doc`, `refresh_doc`, `expand`,
+`search_code`, `fetch_logs` — and is **two-phase by design**: search returns ids + snippets,
 then you fetch only what matters.
 
 There are three ways to consume it, in increasing order of coupling.
@@ -84,17 +84,13 @@ DB connection lifecycle. Don't reimplement any of that around it.
 
 ### Wiring it up
 
-`eil` is a private, unpublished, source-only package with no build step, so
-depend on it by path:
+Published releases contain compiled JavaScript and declarations, so plain Node can import the supported subpaths. Install a pinned release normally:
 
-```jsonc
-// your package.json
-{ "dependencies": { "eil": "file:../eil" } }
+```sh
+pnpm add eil@0.2.0
 ```
 
-The `exports` map points at `.ts` source, so your host must be able to load
-TypeScript — `tsx`, or any bundler (tsup, esbuild, vite). Plain `node` against
-the raw source will not work.
+For an unpublished checkout, run `pnpm build` and consume the tarball produced by `pnpm pack`; the package smoke test verifies that exact external-install path.
 
 ### Two things that will bite you
 

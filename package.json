@@ -1,15 +1,30 @@
 {
   "name": "eil",
   "version": "0.2.0",
-  "private": true,
   "type": "module",
   "exports": {
-    "./tools": "./ts/tools.ts",
-    "./search": "./ts/search.ts",
-    "./db": "./ts/db.ts",
-    "./embed": "./ts/embed/index.ts"
+    ".": {
+      "types": "./dist/tools.d.ts",
+      "import": "./dist/tools.js"
+    },
+    "./tools": {
+      "types": "./dist/tools.d.ts",
+      "import": "./dist/tools.js"
+    },
+    "./search": {
+      "types": "./dist/search.d.ts",
+      "import": "./dist/search.js"
+    },
+    "./db": {
+      "types": "./dist/db.d.ts",
+      "import": "./dist/db.js"
+    },
+    "./embed": {
+      "types": "./dist/embed/index.d.ts",
+      "import": "./dist/embed/index.js"
+    }
   },
-  "description": "Enterprise Intelligence Layer \u2014 knowledge plane (TypeScript)",
+  "description": "Enterprise Intelligence Layer — knowledge plane (TypeScript)",
   "scripts": {
     "eil": "tsx ts/cli.ts",
     "test": "vitest run",
@@ -21,7 +36,11 @@
     "pack:build": "tsx scripts/build-replay-pack.ts",
     "demo:reqs": "tsx scripts/build-demo-reqs.ts",
     "map:build": "tsx scripts/build-map.ts",
-    "map:check": "tsx scripts/build-map.ts --check"
+    "map:check": "tsx scripts/build-map.ts --check",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
+    "pack:smoke": "tsx scripts/pack-smoke.ts",
+    "tools:check": "tsx scripts/check-tool-docs.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
@@ -51,6 +70,19 @@
     "@huggingface/transformers": "^4.2.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/sdk-node": "^0.57.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "^0.57.0"
-  }
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.57.0",
+    "embedded-postgres": "^18.4.0-beta.17"
+  },
+  "bin": {
+    "eil": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "models"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.34.5"
 }
