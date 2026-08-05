@@ -101,6 +101,7 @@ export class JiraClient {
     const comments = (f.comment?.comments ?? []).map((c: any) => ({
       author: c.author?.displayName ?? "unknown",
       body: c.body ?? "",
+      visibility: c.visibility ?? null,
     }));
     return {
       key: apiIssue.key,

@@ -130,7 +130,15 @@ describe("jira", () => {
         reporter: { displayName: "krunal" },
         updated: `2026-06-0${n}T00:00:00+00:00`,
         description: "d",
-        comment: { comments: [{ author: { displayName: "a" }, body: "c" }] },
+        comment: {
+          comments: [
+            {
+              author: { displayName: "a" },
+              body: "c",
+              visibility: { type: "role", value: "Administrators" },
+            },
+          ],
+        },
       },
     });
     const calls: number[] = [];
@@ -151,6 +159,10 @@ describe("jira", () => {
     const issues = [];
     for await (const i of client.updatedSince(null)) issues.push(i);
     expect(issues.map((i) => i.key)).toEqual(["PAY-1", "PAY-2"]);
+    expect((issues[0]!.fields.comments?.[0] as any).visibility).toEqual({
+      type: "role",
+      value: "Administrators",
+    });
     expect(calls).toEqual([0, 1, 0, 1]);
     const doc = normalizeIssue(issues[0]!);
     expect(doc.id).toBe("jira:issue:PAY-1");
