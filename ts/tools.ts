@@ -43,7 +43,12 @@ const searchDocsSpec: ToolSpec = {
     "documents the source still considers CURRENT: a page its owners marked " +
     "deprecated, archived or superseded is excluded, because a replaced policy " +
     "is a wrong answer rather than a slightly worse one. Set " +
-    "`include_superseded: true` only to ask what something USED to say. The shape " +
+    "`include_superseded: true` only to ask what something USED to say. Every " +
+    "response also carries freshness bounds: `evidence_as_of_oldest` and " +
+    "`evidence_as_of_newest` span the results actually returned, and " +
+    "`corpus_current_to` is the last successful sync of the catalog itself " +
+    "(null means it has never synced successfully — treat that as unknown, not " +
+    "fresh). Trust an answer no further than `evidence_as_of_oldest`. The shape " +
     "of the response depends on how the query routes. Most queries return " +
     "compact `results`: id, title, snippet, `truncated`, `section_index`, " +
     "`section_count`. `truncated` says whether the snippet covers the WHOLE " +
@@ -200,9 +205,26 @@ const searchCodeSpec: ToolSpec = {
     ref: z.string().optional(),
     path: z.string().optional(),
     limit: z.number().int().default(10),
+    include_superseded: z.boolean().default(false),
   }),
   requiresEnv: [],
-  handler: async (c, v, a) => (await import("./code-search.js")).searchCodeIndex(c, v, a as any),
+  handler: async (c, v, a) => {
+    const { searchCodeIndex } = await import("./code-search.js");
+    const { attachFreshness } = await import("./search.js");
+    const out = await searchCodeIndex(c, v, {
+      ...(a as any),
+      includeSuperseded: a.include_superseded === true,
+    });
+    // Direct search_code answers carry the same AS-OF contract as every other
+    // answer path. A freshness guarantee that one tool quietly opts out of is
+    // not a guarantee.
+    return attachFreshness(
+      c,
+      v,
+      out,
+      out.results.map((r) => r.updatedAt),
+    );
+  },
 };
 
 const fetchLogsSpec: ToolSpec = {

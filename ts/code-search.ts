@@ -9,6 +9,8 @@ export interface CodeSearchQuery {
   ref?: string;
   path?: string;
   limit?: number;
+  /** Include files the source has retired. Default false; see the clause below. */
+  includeSuperseded?: boolean;
 }
 export interface CodeCitation {
   docId: string;
@@ -20,6 +22,10 @@ export interface CodeCitation {
   kind: CodeIndexKind;
   matchedValue: string;
   text: string;
+  /** Source last-modified, ISO, or null when the repo source could not report
+   *  one. Carried explicitly so answer-level freshness bounds have a typed
+   *  field to read rather than an unchecked cast that silently yields null. */
+  updatedAt: string | null;
 }
 export interface CodeContextPack {
   citations: CodeCitation[];
@@ -49,6 +55,12 @@ export async function searchCodeIndex(
     "d.quarantined_at IS NULL",
     "ci.value = $4",
   ];
+  // The code index is a separate write path AND a separate read path, so the
+  // shortcut route bypassed visibleSql() entirely and with it A4's validity
+  // filter — a deleted or retired file stayed citable through search_code long
+  // after prose search stopped returning it. Same rule, applied here explicitly:
+  // only the validity clause is optional, never ACL/tenant/tombstone/quarantine.
+  if (!q.includeSuperseded) clauses.push("d.valid_to IS NULL");
   const args: unknown[] = [viewer.tenant, viewer.principal, viewer.groups, value];
   if (q.kind) {
     args.push(q.kind);
@@ -68,7 +80,7 @@ export async function searchCodeIndex(
   }
   args.push(limit);
   const res = await client.query(
-    `SELECT ci.doc_id,ci.repo,ci.path,ci.ref,ci.kind,ci.raw_value,ci.line_start,ci.line_end,d.body FROM code_index ci JOIN documents d ON d.tenant=ci.tenant AND d.id=ci.doc_id WHERE ${clauses.join(" AND ")} ORDER BY ci.path,ci.line_start,ci.line_end,ci.kind,ci.doc_id LIMIT $${args.length}`,
+    `SELECT ci.doc_id,ci.repo,ci.path,ci.ref,ci.kind,ci.raw_value,ci.line_start,ci.line_end,d.body,d.updated_at FROM code_index ci JOIN documents d ON d.tenant=ci.tenant AND d.id=ci.doc_id WHERE ${clauses.join(" AND ")} ORDER BY ci.path,ci.line_start,ci.line_end,ci.kind,ci.doc_id LIMIT $${args.length}`,
     args,
   );
   const citations = res.rows.map(
@@ -82,6 +94,7 @@ export async function searchCodeIndex(
       kind: r.kind,
       matchedValue: r.raw_value,
       text: lineWindow(r.body, r.line_start, r.line_end),
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
     }),
   );
   let total = 0;

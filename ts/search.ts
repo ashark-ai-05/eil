@@ -307,7 +307,15 @@ async function searchDocsInner(
     const entityId = `jira:issue:${decision.match}`;
     const doc = await getDoc(client, viewer, entityId, 0, 2_000, includeSuperseded);
     const neighborhood = await expand(client, viewer, entityId);
-    return { route: "entity", entity: doc, linked: neighborhood.edges };
+    // Every response carries freshness, including the shortcuts. A contract the
+    // fast paths quietly opt out of is not a contract.
+    return {
+      route: "entity",
+      entity: doc,
+      linked: neighborhood.edges,
+      ...evidenceBounds([toDate(doc?.updated_at)]),
+      corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
+    };
   }
   if (
     inScope("code") &&
@@ -319,8 +327,19 @@ async function searchDocsInner(
       query: decision.match ?? query,
       kind,
       limit,
+      includeSuperseded,
     });
-    if (code.results.length > 0) return { route: decision.route, ...code };
+    if (code.results.length > 0)
+      return {
+        route: decision.route,
+        ...code,
+        // Typed field, not an unchecked cast: the previous `(r as {updated_at})`
+        // read a property CodeCitation never had, so every code-route bound was
+        // silently null even for dated files — a claim of "unknown freshness"
+        // that was really "I forgot to select the column".
+        ...evidenceBounds(code.results.map((r) => toDate(r.updatedAt))),
+        corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
+      };
   }
 
   // Lexical candidates, with two properties the naive query lacked:
@@ -507,10 +526,15 @@ async function searchDocsInner(
     })
     .sort(([sA, idA], [sB, idB]) => (sB !== sA ? sB - sA : idA < idB ? -1 : 1));
 
-  const results = scored.slice(0, limit).map(([score, docId]) => {
+  const picked = scored.slice(0, limit);
+  const results = picked.map(([score, docId]) => {
     const { updated: _updated, ...entry } = byDoc.get(docId)!;
     return { ...entry, score: Math.round(score * 1e6) / 1e6 };
   });
+  // Bounds describe the evidence ACTUALLY returned, not the corpus: a document
+  // that exists but did not match says nothing about this answer's freshness.
+  const bounds = evidenceBounds(picked.map(([, docId]) => byDoc.get(docId)?.updated ?? null));
+  const currentTo = await corpusCurrentTo(client, viewer.tenant);
   // Honesty about execution: path/symbol/exact routes still run through FTS
   // (specialized executors arrive with Zoekt/symbols) — the route only steers
   // arm weights today. `executor` names the arms that actually contributed, so
@@ -519,7 +543,100 @@ async function searchDocsInner(
     route: decision.route,
     executor: Object.keys(arms).sort().join("+") || "none",
     results,
+    ...bounds,
+    corpus_current_to: currentTo,
     ...confidence(results, arms),
+  };
+}
+
+/**
+ * When the catalog itself last successfully synced, or null if it never has.
+ *
+ * `last_success_at` rather than `updated_at`: a connector failing every document
+ * still touches its cursor row on every run, so `updated_at` reports a corpus
+ * that has been broken for a week as perfectly fresh. Only a run that actually
+ * landed a document may claim currency.
+ *
+ * Null is RETURNED, never omitted. A caller that cannot distinguish "never
+ * synced" from "just synced" is exactly the no-data-reads-as-OK failure.
+ */
+async function corpusCurrentTo(client: Db, tenant: string): Promise<string | null> {
+  // min(), not max(): currency for the tenant is the OLDEST successful sync,
+  // because one freshly-synced scope would otherwise mask every stale one. A
+  // corpus is only as current as its least current source.
+  //
+  // Null when there are no cursors at all, or when ANY cursor has never
+  // succeeded — a source that has never landed a document has no currency to
+  // average in, and treating it as absent would let the remaining sources
+  // vouch for data that was never fetched.
+  const res = await client.query(
+    `SELECT CASE
+              WHEN count(*) = 0 OR count(last_success_at) <> count(*) THEN NULL
+              ELSE min(last_success_at)
+            END AS t
+       FROM sync_cursors WHERE tenant = $1`,
+    [tenant],
+  );
+  const t = res.rows[0]?.t ?? null;
+  return t ? new Date(t).toISOString() : null;
+}
+
+/**
+ * Oldest and newest evidence under an answer.
+ *
+ * Two bounds, not one aggregate: a single `as_of` is ambiguous between "the
+ * freshest thing I found" and "the oldest thing I am relying on", and on a real
+ * corpus those differ by years. The oldest is the honest headline if a caller
+ * needs exactly one number — a conclusion is only as current as the stalest
+ * evidence beneath it.
+ */
+function evidenceBounds(stamps: Array<Date | null>): {
+  evidence_as_of_oldest: string | null;
+  evidence_as_of_newest: string | null;
+} {
+  const known = stamps.filter((d): d is Date => d instanceof Date);
+  if (known.length === 0) return { evidence_as_of_oldest: null, evidence_as_of_newest: null };
+  const times = known.map((d) => d.getTime());
+  return {
+    // One undated citation makes the WEAKEST bound unknown, not "the oldest
+    // date I happen to have". Reporting the oldest known date while an undated
+    // document sits in the same answer overstates freshness — precisely the
+    // claim this field exists to prevent.
+    evidence_as_of_oldest:
+      known.length === stamps.length ? new Date(Math.min(...times)).toISOString() : null,
+    // The newest known timestamp stays meaningful: something in this answer is
+    // at least that recent, whatever else is undated.
+    evidence_as_of_newest: new Date(Math.max(...times)).toISOString(),
+  };
+}
+
+/** Postgres timestamps arrive as Date or string depending on driver path. */
+function toDate(v: unknown): Date | null {
+  if (v instanceof Date) return v;
+  if (typeof v === "string") {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
+ * Attach the answer-level freshness contract to a response shape that did not
+ * go through searchDocsInner — currently the direct search_code tool.
+ *
+ * Exported so every answer path states AS-OF the same way. A guarantee one tool
+ * quietly opts out of is not a guarantee.
+ */
+export async function attachFreshness<T extends Record<string, unknown>>(
+  client: Db,
+  viewer: Viewer,
+  out: T,
+  stamps: Array<string | null>,
+): Promise<T & Record<string, unknown>> {
+  return {
+    ...out,
+    ...evidenceBounds(stamps.map(toDate)),
+    corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
   };
 }
 
