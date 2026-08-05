@@ -26,6 +26,18 @@ export interface CodeCitation {
    *  one. Carried explicitly so answer-level freshness bounds have a typed
    *  field to read rather than an unchecked cast that silently yields null. */
   updatedAt: string | null;
+  /**
+   * Always true on this path, and stated rather than assumed.
+   *
+   * `text` is a line window cut from `d.body` in this same query, so the quote
+   * IS the current document by construction — there is no index to drift out of
+   * step with. The lexical and vector arms quote `chunks.text`, written at
+   * ingest, which is why they must re-match.
+   *
+   * Emitted so a caller cannot tell "verified" apart from "this path forgot to
+   * say" — the exact ambiguity that let unset read as verified in search.ts.
+   */
+  evidenceVerified: true;
 }
 export interface CodeContextPack {
   citations: CodeCitation[];
@@ -95,6 +107,7 @@ export async function searchCodeIndex(
       matchedValue: r.raw_value,
       text: lineWindow(r.body, r.line_start, r.line_end),
       updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+      evidenceVerified: true,
     }),
   );
   let total = 0;

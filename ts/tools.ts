@@ -46,6 +46,10 @@ const searchDocsSpec: ToolSpec = {
     "`include_superseded: true` only to ask what something USED to say. Every " +
     "response also carries freshness bounds: `evidence_as_of_oldest` and " +
     "`evidence_as_of_newest` span the results actually returned, and " +
+    "Every snippet is re-checked against its document before it is served: a " +
+    "citation the document no longer contains is WITHHELD, not flagged, and " +
+    "`unverified_excluded` counts what was withheld so an empty result is never " +
+    'ambiguous between "nothing matched" and "nothing could be verified". ' +
     "`corpus_current_to` is the last successful sync of the catalog itself " +
     "(null means it has never synced successfully — treat that as unknown, not " +
     "fresh). Trust an answer no further than `evidence_as_of_oldest`. The shape " +
@@ -75,12 +79,14 @@ const searchDocsSpec: ToolSpec = {
     // and for showing what a single-source connector can see on its own.
     sources: z.array(z.string()).optional(),
     include_superseded: z.boolean().default(false),
+    include_unverified: z.boolean().default(false),
   }),
   requiresEnv: [],
   handler: (c, v, a) =>
     searchDocs(c, v, a.query, a.limit ?? 8, undefined, {
       sources: a.sources ?? null,
       includeSuperseded: a.include_superseded === true,
+      includeUnverified: a.include_unverified === true,
     }),
 };
 
@@ -218,10 +224,14 @@ const searchCodeSpec: ToolSpec = {
     // Direct search_code answers carry the same AS-OF contract as every other
     // answer path. A freshness guarantee that one tool quietly opts out of is
     // not a guarantee.
+    // Code citations are line windows cut from the CURRENT document body, so
+    // they are verified by construction. Stating the zero keeps the response
+    // contract identical on every answer path — a caller must never have to
+    // tell "nothing was withheld" apart from "this path forgot to say".
     return attachFreshness(
       c,
       v,
-      out,
+      { ...out, unverified_excluded: 0 },
       out.results.map((r) => r.updatedAt),
     );
   },

@@ -227,6 +227,8 @@ export interface SearchResult {
    *  pages, not chunks; see the comment at getDoc's `total_sections` field. */
   section_count: number;
   score?: number;
+  /** Whether the snippet was still present in the document at answer time. */
+  evidence_verified?: boolean;
 }
 
 export interface Edge {
@@ -257,6 +259,12 @@ export interface SearchOptions {
    * validity clause — ACL, tenant, tombstone and quarantine stay unconditional.
    */
   includeSuperseded?: boolean;
+  /**
+   * Return snippets that could not be re-verified against their document.
+   * Default false. See the `evidence_verified` projection for why they are
+   * withheld rather than served with a caveat.
+   */
+  includeUnverified?: boolean;
 }
 
 /** Normalised to `null` (no filter) or a non-empty array, once, at the entry point. */
@@ -297,6 +305,7 @@ async function searchDocsInner(
   const decision = classify(query);
   const sources = sourceFilter(opts);
   const includeSuperseded = opts?.includeSuperseded === true;
+  const includeUnverified = opts?.includeUnverified === true;
   // Both shortcuts below bypass the arms entirely and answer out of one source,
   // so each has to ask permission first. A scope the router can route around is
   // not a scope: "CHK-9" would return a Jira issue from a search restricted to
@@ -315,6 +324,9 @@ async function searchDocsInner(
       linked: neighborhood.edges,
       ...evidenceBounds([toDate(doc?.updated_at)]),
       corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
+      // get_doc returns the document body itself, so there is no chunk to
+      // re-match and nothing can be withheld. Zero by construction.
+      unverified_excluded: 0,
     };
   }
   if (
@@ -339,6 +351,10 @@ async function searchDocsInner(
         // that was really "I forgot to select the column".
         ...evidenceBounds(code.results.map((r) => toDate(r.updatedAt))),
         corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
+        // Zero by construction on this path, not zero by omission: code
+        // citations are cut from the current body, so nothing can be withheld.
+        // Stated so the response contract is identical on every route.
+        unverified_excluded: 0,
       };
   }
 
@@ -368,7 +384,15 @@ async function searchDocsInner(
      ), m AS (
        SELECT c.doc_id, c.seq, c.text, d.source, d.title, d.url, d.quality_tier, d.updated_at,
               ts_rank(c.tsv, qq.loose, 1) AS rank,
-              (c.tsv @@ qq.strict) AS strict_hit
+              (c.tsv @@ qq.strict) AS strict_hit,
+              -- The evidence contract, in one predicate: does the document
+              -- STILL contain the text this chunk is about to be quoted for?
+              -- Chunks are written from the body at ingest, so normally yes —
+              -- but a fresh-fetch, a partial write or a restore can move the
+              -- body without rebuilding the index, and the result is a citation
+              -- the document does not contain. Indistinguishable from a real
+              -- one to whoever reads it.
+              (position(c.text in d.body) > 0) AS evidence_verified
          FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id CROSS JOIN qq
         WHERE c.tsv @@ qq.loose AND ${visibleSql(4, 5, 6, includeSuperseded)}
           AND ($7::text[] IS NULL OR d.source = ANY($7::text[]))
@@ -397,7 +421,7 @@ async function searchDocsInner(
      -- both placements produce identical text_len values (23ms either way,
      -- once it runs on the cut set rather than the uncut one).
      SELECT picked.doc_id, picked.source, picked.strict_hit, picked.title, picked.url,
-            picked.quality_tier, picked.updated_at, picked.seq,
+            picked.quality_tier, picked.updated_at, picked.seq, picked.evidence_verified,
             -- Chunk count for this document, tenant-scoped, computed here on
             -- the ~limit*3 already-cut candidates — NOT inside m, which was
             -- exactly the mistake doc_len made (measured 1640ms -> 23ms by
@@ -477,6 +501,7 @@ async function searchDocsInner(
     // exact, not a JS-side strip of "**" (which also strips literal "**" that
     // occurs in the source text; see SNIPPET_COVERAGE_OPTS' comment).
     const covered = Number(row.coverage_len) >= Number(row.text_len);
+    const verified = row.evidence_verified === true;
     byDoc.set(row.doc_id, {
       id: row.doc_id,
       title: row.title,
@@ -489,6 +514,7 @@ async function searchDocsInner(
       // if that column ever widens to bigint (returned as a string).
       section_index: Number(row.seq),
       section_count: Number(row.section_count),
+      evidence_verified: verified,
       updated: row.updated_at,
     });
     const cls = row.source === "code" ? "fts_code" : "fts_prose";
@@ -526,7 +552,22 @@ async function searchDocsInner(
     })
     .sort(([sA, idA], [sB, idB]) => (sB !== sA ? sB - sA : idA < idB ? -1 : 1));
 
-  const picked = scored.slice(0, limit);
+  // Withheld, not served with a caveat. A snippet the document no longer
+  // contains is a quotation of something that does not exist, and an agent
+  // cannot un-read it once it is in the context window — a flag alongside the
+  // text is not a refusal. Counted so the exclusion is never silent: an empty
+  // result set that means "I refused to quote what I could not verify" must not
+  // look like "nothing matched".
+  // `=== true`, never `!== false`. The earlier spelling treated an UNSET field
+  // as verified, so any arm that forgot to project the column had its results
+  // served under a contract asserting they had been checked — the defensive
+  // -looking comparison was itself the fail-open. Unknown is not verified.
+  const verifiedScored = includeUnverified
+    ? scored
+    : scored.filter(([, docId]) => evidenceIsVerified(byDoc.get(docId)?.evidence_verified));
+  const unverifiedExcluded = scored.length - verifiedScored.length;
+
+  const picked = verifiedScored.slice(0, limit);
   const results = picked.map(([score, docId]) => {
     const { updated: _updated, ...entry } = byDoc.get(docId)!;
     return { ...entry, score: Math.round(score * 1e6) / 1e6 };
@@ -545,6 +586,7 @@ async function searchDocsInner(
     results,
     ...bounds,
     corpus_current_to: currentTo,
+    unverified_excluded: unverifiedExcluded,
     ...confidence(results, arms),
   };
 }
@@ -639,6 +681,16 @@ export async function attachFreshness<T extends Record<string, unknown>>(
     corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
   };
 }
+
+/**
+ * Only an explicit `true` counts as verified.
+ *
+ * Exported so the DIRECTION is pinned by a test rather than by a comparison
+ * operator nobody rereads. The original filter used `!== false`, which meant an
+ * arm that forgot to project the column had its results served under a response
+ * contract asserting they had been re-checked. Unknown is not verified.
+ */
+export const evidenceIsVerified = (v: unknown): boolean => v === true;
 
 /** Score gap below which a result set is worth re-querying rather than trusting. */
 export const WEAK_SCORE_GAP = 0.05;
@@ -1035,6 +1087,11 @@ async function vecArm(
      -- already cut to LIMIT $6 (~limit*3) — the same post-cut placement as
      -- doc_len, not the pre-cut mistake that placement was fixing.
      SELECT t.doc_id, t.score, t.seq, ch.text, d.title, d.url, d.quality_tier, d.updated_at,
+            -- Same evidence check as the lexical arm. This arm reaches
+            -- documents the lexical arm never scores, so leaving it out meant a
+            -- stale vector-only chunk was served under a contract claiming
+            -- every snippet had been re-checked.
+            (position(ch.text in d.body) > 0) AS evidence_verified,
             length(d.body) AS doc_len,
             (SELECT count(*) FROM chunks ch2
               WHERE ch2.tenant = $3 AND ch2.doc_id = t.doc_id) AS section_count
@@ -1081,6 +1138,7 @@ async function vecArm(
         // Number() on both, for symmetry with the lexical arm — see its comment.
         section_index: Number(row.seq),
         section_count: Number(row.section_count),
+        evidence_verified: row.evidence_verified === true,
         updated: row.updated_at,
       });
     }
