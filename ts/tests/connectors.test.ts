@@ -28,6 +28,7 @@ describe("confluence", () => {
       space: { name: "Payments Space" },
       ancestors: [{ title: "Runbooks" }],
       version: { when: "2026-06-03T10:00:00+00:00", by: { displayName: "asha" } },
+      history: { createdDate: "2026-05-01T09:00:00+00:00" },
       _links: { webui: "/pages/777" },
       body: { storage: { value: "<h2>Steps</h2><p>Check PAY-981 first.</p>" } },
     };
@@ -46,6 +47,7 @@ describe("confluence", () => {
     expect(doc.body).toContain("## Steps");
     expect(doc.links).toContain("jira:issue:PAY-981");
     expect(doc.url).toBe("https://confluence.example.com/pages/777");
+    expect(doc.createdAt).toBe("2026-05-01T09:00:00+00:00");
   });
 });
 
@@ -70,7 +72,7 @@ describe("confluence scoped", () => {
     for await (const _ of c.updatedSince(null)) {
       /* drain */
     }
-    expect(seen).toBe("type=page order by lastmodified asc");
+    expect(seen).toBe("type=page order by lastmodified asc, id asc");
   });
 
   it("injects a space predicate", async () => {
@@ -83,7 +85,7 @@ describe("confluence scoped", () => {
     for await (const _ of c.updatedSince(null, 'space = "ENG"')) {
       /* drain */
     }
-    expect(seen).toBe('type=page and space = "ENG" order by lastmodified asc');
+    expect(seen).toBe('type=page and space = "ENG" order by lastmodified asc, id asc');
   });
 
   it("descendants queries ancestor = id", async () => {
@@ -97,7 +99,7 @@ describe("confluence scoped", () => {
     for await (const p of c.descendants("100")) {
       out.push(p);
     }
-    expect(seen).toBe("ancestor = 100 order by lastmodified asc");
+    expect(seen).toBe("ancestor = 100 order by lastmodified asc, id asc");
     expect(out).toHaveLength(1);
   });
 
@@ -138,7 +140,7 @@ describe("jira", () => {
     const issues = [];
     for await (const i of client.updatedSince(null)) issues.push(i);
     expect(issues.map((i) => i.key)).toEqual(["PAY-1", "PAY-2"]);
-    expect(calls).toEqual([0, 1]);
+    expect(calls).toEqual([0, 1, 0, 1]);
     const doc = normalizeIssue(issues[0]!);
     expect(doc.id).toBe("jira:issue:PAY-1");
     expect(doc.url).toBe("https://jira.example.com/browse/PAY-1");
@@ -156,7 +158,7 @@ describe("jira scoped", () => {
     for await (const _ of c.updatedSince(null)) {
       /* drain */
     }
-    expect(seen).toBe("order by updated asc");
+    expect(seen).toBe("order by updated asc, key asc");
   });
 
   it("injects a project predicate and composes with the cursor", async () => {
@@ -172,8 +174,12 @@ describe("jira scoped", () => {
     for await (const _ of c.updatedSince("2026-06-01T00:00:00+00:00", 'project = "PAY"')) {
       /* drain */
     }
-    expect(seen[0]).toBe('project = "PAY" order by updated asc');
-    expect(seen[1]).toBe('project = "PAY" and updated >= "2026-06-01 00:00" order by updated asc');
+    expect(seen).toEqual([
+      'project = "PAY" order by updated asc, key asc',
+      'project = "PAY" order by updated asc, key asc',
+      'project = "PAY" and updated >= "2026-06-01 00:00" order by updated asc, key asc',
+      'project = "PAY" and updated >= "2026-06-01 00:00" order by updated asc, key asc',
+    ]);
   });
 
   it("scoped listIds carries the predicate", async () => {
@@ -204,7 +210,7 @@ describe("reconcile listings and single-item fetchers", () => {
     const ids = await client.listIds();
     expect(ids).toHaveLength(51);
     expect(ids[0]).toBe("confluence:page:0");
-    expect(calls).toEqual([0, 50]);
+    expect(calls).toEqual([0, 50, 0, 50]);
   });
 
   it("jira listIds pages through keys only", async () => {
@@ -325,5 +331,59 @@ describe("elk", () => {
     };
     const client = new ElkClient("https://elk.example.com", "pat", fetcher);
     await client.fetchLogs("q", undefined, 60, 500);
+  });
+});
+
+describe("mutable offset pagination", () => {
+  const page = (id: number) => ({
+    id: String(id),
+    title: `p${id}`,
+    space: { name: "S" },
+    ancestors: [],
+    version: { when: "2026-06-03T10:00:00+00:00", by: { displayName: "a" } },
+    body: { storage: { value: "<p>x</p>" } },
+  });
+
+  it("does not expose a Confluence listing until two complete scans agree", async () => {
+    let scan = 0;
+    const starts: number[] = [];
+    const fetcher: Fetcher = async (url) => {
+      const start = Number(new URL(String(url)).searchParams.get("start"));
+      if (start === 0) scan++;
+      starts.push(start);
+      if (start === 0)
+        return jsonResponse({ results: Array.from({ length: 50 }, (_, i) => page(i)), size: 50 });
+      if (start === 50 && scan === 1)
+        return jsonResponse({
+          results: Array.from({ length: 49 }, (_, i) => page(i + 51)),
+          size: 49,
+        });
+      if (start === 50)
+        return jsonResponse({
+          results: Array.from({ length: 50 }, (_, i) => page(i + 50)),
+          size: 50,
+        });
+      return jsonResponse({ results: [], size: 0 });
+    };
+    const out = [];
+    for await (const p of new ConfluenceClient("https://x", "t", fetcher).updatedSince(null))
+      out.push(p.id);
+    expect(out).toEqual(Array.from({ length: 100 }, (_, i) => String(i)));
+    expect(starts).toEqual([0, 50, 0, 50, 100, 0, 50, 100]);
+  });
+
+  it("refuses a reconciliation listing that never stabilizes", async () => {
+    let scan = 0;
+    const fetcher: Fetcher = async (url) => {
+      const start = Number(new URL(String(url)).searchParams.get("start"));
+      if (start === 0) scan++;
+      return jsonResponse({
+        results: start === 0 ? [{ id: String(scan) }] : [],
+        size: start === 0 ? 1 : 0,
+      });
+    };
+    await expect(new ConfluenceClient("https://x", "t", fetcher).listIds()).rejects.toThrow(
+      "refusing an incomplete listing after 3 scans",
+    );
   });
 });

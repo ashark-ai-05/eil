@@ -7,6 +7,7 @@
 import type { JiraIssue } from "../ingest/jira.js";
 import { type DcClient, type Fetcher, getJson, makeClient } from "./auth.js";
 import { cqlTs } from "./confluence.js";
+import { stableListing } from "./stable-pages.js";
 
 export const PAGE_SIZE = 50;
 // issuelinks is the point of this list. EIL was regex-scraping ticket keys out
@@ -47,20 +48,13 @@ export class JiraClient {
     if (scope) clauses.push(scope);
     if (cursor) clauses.push(`updated >= "${cqlTs(cursor)}"`);
     const where = clauses.length > 0 ? `${clauses.join(" and ")} ` : "";
-    const jql = `${where}order by updated asc`;
-    let start = 0;
-    for (;;) {
-      const data = await getJson(this.client, "/rest/api/2/search", {
-        jql,
-        fields: FIELDS,
-        maxResults: PAGE_SIZE,
-        startAt: start,
-      });
-      const issues = data.issues ?? [];
-      for (const issue of issues) yield this.toIssueDict(issue);
-      start += issues.length;
-      if (start >= (data.total ?? 0) || issues.length === 0) return;
-    }
+    const jql = `${where}order by updated asc, key asc`;
+    const issues = await stableListing(
+      "Jira incremental listing",
+      () => this.scanIssues(jql, FIELDS),
+      (issue) => String(issue.key),
+    );
+    for (const issue of issues) yield this.toIssueDict(issue);
   }
 
   /** Fetch one issue live — the get_doc fresh=true pull-through (flow K5). */
@@ -75,19 +69,28 @@ export class JiraClient {
   async listIds(scope?: string): Promise<string[]> {
     const where = scope ? `${scope} ` : "";
     const jql = `${where}order by key asc`;
-    const ids: string[] = [];
+    const issues = await stableListing(
+      "Jira reconciliation listing",
+      () => this.scanIssues(jql, "key"),
+      (issue) => String(issue.key),
+    );
+    return issues.map((issue) => `jira:issue:${issue.key}`);
+  }
+
+  private async scanIssues(jql: string, fields: string): Promise<any[]> {
+    const out: any[] = [];
     let start = 0;
     for (;;) {
       const data = await getJson(this.client, "/rest/api/2/search", {
         jql,
-        fields: "key",
+        fields,
         maxResults: PAGE_SIZE,
         startAt: start,
       });
       const issues = data.issues ?? [];
-      for (const issue of issues) ids.push(`jira:issue:${issue.key}`);
+      out.push(...issues);
       start += issues.length;
-      if (start >= (data.total ?? 0) || issues.length === 0) return ids;
+      if (start >= (data.total ?? 0) || issues.length === 0) return out;
     }
   }
 

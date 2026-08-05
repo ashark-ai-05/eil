@@ -7,6 +7,7 @@
 import type { ConfluencePage } from "../ingest/confluence.js";
 import { type DcClient, type Fetcher, getJson, makeClient } from "./auth.js";
 import { htmlToMarkdown } from "./htmlmd.js";
+import { stableListing } from "./stable-pages.js";
 
 export const PAGE_SIZE = 50;
 
@@ -26,44 +27,32 @@ export class ConfluenceClient {
     const clauses = ["type=page"];
     if (scope) clauses.push(scope);
     if (cursor) clauses.push(`lastmodified >= "${cqlTs(cursor)}"`);
-    const cql = `${clauses.join(" and ")} order by lastmodified asc`;
-    let start = 0;
-    for (;;) {
-      const data = await getJson(this.client, "/rest/api/content/search", {
-        cql,
-        expand: "body.storage,ancestors,version,space,metadata.labels",
-        limit: PAGE_SIZE,
-        start,
-      });
-      for (const page of data.results ?? []) yield this.toPageDict(page);
-      if ((data.size ?? 0) < PAGE_SIZE) return;
-      start += PAGE_SIZE;
-    }
+    const cql = `${clauses.join(" and ")} order by lastmodified asc, id asc`;
+    const pages = await stableListing(
+      "Confluence incremental listing",
+      () => this.scanPages(cql, "body.storage,ancestors,version,space,history,metadata.labels"),
+      (page) => String(page.id),
+    );
+    for (const page of pages) yield this.toPageDict(page);
   }
 
   /** Fetch one page live — the get_doc fresh=true pull-through (flow K5). */
   async getPage(id: string): Promise<ConfluencePage> {
     const data = await getJson(this.client, `/rest/api/content/${encodeURIComponent(id)}`, {
-      expand: "body.storage,ancestors,version,space,metadata.labels",
+      expand: "body.storage,ancestors,version,space,history,metadata.labels",
     });
     return this.toPageDict(data);
   }
 
   /** Page subtree for --with-descendants: every page under `pageId`, any depth. */
   async *descendants(pageId: string): AsyncGenerator<ConfluencePage> {
-    const cql = `ancestor = ${pageId} order by lastmodified asc`;
-    let start = 0;
-    for (;;) {
-      const data = await getJson(this.client, "/rest/api/content/search", {
-        cql,
-        expand: "body.storage,ancestors,version,space,metadata.labels",
-        limit: PAGE_SIZE,
-        start,
-      });
-      for (const page of data.results ?? []) yield this.toPageDict(page);
-      if ((data.size ?? 0) < PAGE_SIZE) return;
-      start += PAGE_SIZE;
-    }
+    const cql = `ancestor = ${pageId} order by lastmodified asc, id asc`;
+    const pages = await stableListing(
+      "Confluence descendants listing",
+      () => this.scanPages(cql, "body.storage,ancestors,version,space,history,metadata.labels"),
+      (page) => String(page.id),
+    );
+    for (const page of pages) yield this.toPageDict(page);
   }
 
   /** Complete id listing for reconcile (flow K1 deletions) — ids only, paged. */
@@ -71,16 +60,27 @@ export class ConfluenceClient {
     const clauses = ["type=page"];
     if (scope) clauses.push(scope);
     const cql = `${clauses.join(" and ")} order by id asc`;
-    const ids: string[] = [];
+    const pages = await stableListing(
+      "Confluence reconciliation listing",
+      () => this.scanPages(cql),
+      (page) => String(page.id),
+    );
+    return pages.map((page) => `confluence:page:${page.id}`);
+  }
+
+  private async scanPages(cql: string, expand?: string): Promise<any[]> {
+    const pages: any[] = [];
     let start = 0;
     for (;;) {
       const data = await getJson(this.client, "/rest/api/content/search", {
         cql,
+        ...(expand ? { expand } : {}),
         limit: PAGE_SIZE,
         start,
       });
-      for (const page of data.results ?? []) ids.push(`confluence:page:${page.id}`);
-      if ((data.size ?? 0) < PAGE_SIZE) return ids;
+      const batch = data.results ?? [];
+      pages.push(...batch);
+      if ((data.size ?? batch.length) < PAGE_SIZE) return pages;
       start += PAGE_SIZE;
     }
   }
@@ -97,7 +97,7 @@ export class ConfluenceClient {
       url: webui ? `${this.client.baseUrl}${webui}` : null,
       author: version.by?.displayName ?? null,
       updated: version.when ?? null,
-      created: null,
+      created: apiPage.history?.createdDate ?? null,
       ancestors: [...(space ? [space] : []), ...ancestors],
       acl_groups: [], // stamped by the phase-2 ACL syncer; empty = fail-closed
       // Labels are the single most useful Confluence facet — docs/ingestion.md

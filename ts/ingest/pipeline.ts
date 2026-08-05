@@ -265,12 +265,9 @@ export async function ingestRepo(
         changes = null; // unreachable sha -> full resync
       }
     }
-    // NOTE: the full-listing fallback below (changes === null) re-upserts
-    // every file currently present, but it does NOT tombstone files that
-    // were deleted during the missed commit range — there is no reconcile
-    // pass for code (unlike Confluence/Jira/Obsidian; deliberate non-goal).
-    // Those stale docs linger in the catalog until their path is re-touched
-    // by a future commit.
+    // The full-listing fallback below re-upserts every file currently present
+    // and reconciles the bounded repo/subpath inventory. Keep this comment in
+    // sync with the reconcileCodeRepo() call below.
     if (changes) {
       for (const ch of changes) {
         if (ch.status === "D") {
