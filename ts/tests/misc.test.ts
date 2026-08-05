@@ -58,8 +58,8 @@ describe("obsidian", () => {
     expect(note.title).toBe("Retry Policy Notes");
     expect(note.hierarchy).toEqual(["payments"]);
     expect(note.qualityTier).toBe("curated");
-    expect(note.links).toContain("jira:issue:PAY-981");
-    expect(note.links).toContain("obsidian:note:payments/parked-payments-runbook");
+    expect(note.links.map((l) => l.id)).toContain("jira:issue:PAY-981");
+    expect(note.links.map((l) => l.id)).toContain("obsidian:note:payments/parked-payments-runbook");
 
     const inbox = docs.find((d) => d.id.endsWith("inbox"))!;
     expect(inbox.title).toBe("inbox");

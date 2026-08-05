@@ -382,12 +382,16 @@ describe("code documents carry age and edges", () => {
       'import express from "express";', // bare specifier: a package, not a doc here
     ].join("\n");
     const doc = normalizeCode("org/r", "src/pay/charge.ts", body, null, "default", "sha");
-    expect(doc.links).toContain("jira:issue:PAY-981");
-    expect(doc.links).not.toContain("jira:issue:UTF-8");
-    expect(doc.links).not.toContain("jira:issue:SHA-256");
-    expect(doc.links).toContain("code:org/r:src/pay/retry");
-    expect(doc.links).toContain("code:org/r:src/config/app"); // .. resolved, ext stripped
-    expect(doc.links.some((l) => l.includes("express"))).toBe(false);
+    const ids = (d: typeof doc) => d.links.map((l) => l.id);
+    expect(ids(doc)).toContain("jira:issue:PAY-981");
+    // An import is a declared dependency; a ticket key in a comment is a mention.
+    expect(doc.links.find((l) => l.id === "code:org/r:src/pay/retry")?.rel).toBe("imports");
+    expect(doc.links.find((l) => l.id === "jira:issue:PAY-981")?.rel).toBe("references");
+    expect(ids(doc)).not.toContain("jira:issue:UTF-8");
+    expect(ids(doc)).not.toContain("jira:issue:SHA-256");
+    expect(ids(doc)).toContain("code:org/r:src/pay/retry");
+    expect(ids(doc)).toContain("code:org/r:src/config/app"); // .. resolved, ext stripped
+    expect(doc.links.some((l) => l.id.includes("express"))).toBe(false);
   });
 
   it("never links a file to itself", async () => {

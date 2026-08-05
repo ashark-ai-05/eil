@@ -127,11 +127,23 @@ export class JiraClient {
         // Jira reports a link from whichever side it was created, so the
         // relevant key is inward OR outward. Taking only one direction would
         // silently halve the dependency graph.
+        //
+        // Label and key MUST come from the same side. A Jira link type carries
+        // BOTH labels ("blocks" / "is blocked by"), so coalescing them
+        // independently — `type.outward ?? type.inward` beside
+        // `outwardIssue ?? inwardIssue` — reads the outward LABEL off a link
+        // that only has an inward ISSUE, and reports "PAY-1 blocks PAY-2" when
+        // the truth is the reverse. Harmless while the type was being
+        // discarded; a wrong fact the moment it is persisted.
         issue_links: (f.issuelinks ?? [])
-          .map((l: any) => ({
-            type: l.type?.outward ?? l.type?.inward ?? "relates to",
-            key: l.outwardIssue?.key ?? l.inwardIssue?.key ?? "",
-          }))
+          .map((l: any) =>
+            l.outwardIssue?.key
+              ? { type: l.type?.outward ?? l.type?.name ?? "relates to", key: l.outwardIssue.key }
+              : {
+                  type: l.type?.inward ?? l.type?.name ?? "relates to",
+                  key: l.inwardIssue?.key ?? "",
+                },
+          )
           .filter((l: any) => l.key),
       },
     };

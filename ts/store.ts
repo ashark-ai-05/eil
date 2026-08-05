@@ -384,10 +384,13 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
     ]);
   }
   await client.query("DELETE FROM links WHERE tenant = $1 AND src_id = $2", [doc.tenant, doc.id]);
-  for (const dst of doc.links) {
+  for (const link of doc.links) {
+    // `rel` was omitted here, so every edge fell to the column default and the
+    // relationship type the connector had already resolved was thrown away one
+    // statement before it would have been persisted.
     await client.query(
-      "INSERT INTO links (tenant, src_id, dst_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-      [doc.tenant, doc.id, dst],
+      "INSERT INTO links (tenant, src_id, dst_id, rel) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+      [doc.tenant, doc.id, link.id, link.rel],
     );
   }
   await client.query(

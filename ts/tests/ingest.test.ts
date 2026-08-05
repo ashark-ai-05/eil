@@ -12,8 +12,8 @@ describe("normalizers", () => {
     const doc = normalizePage(fixture("confluence_page.json"));
     expect(doc.id).toBe("confluence:page:12345");
     expect(doc.hierarchy).toEqual(["Payments Space", "Runbooks"]);
-    expect(doc.links).toContain("jira:issue:PAY-981");
-    expect(doc.links).toContain("obsidian:note:payments/parked-payments-runbook");
+    expect(doc.links.map((l) => l.id)).toContain("jira:issue:PAY-981");
+    expect(doc.links.map((l) => l.id)).toContain("obsidian:note:payments/parked-payments-runbook");
   });
 
   it("jira: builds body and links, never self-links", () => {
@@ -21,8 +21,8 @@ describe("normalizers", () => {
     expect(doc.id).toBe("jira:issue:PAY-981");
     expect(doc.title.startsWith("PAY-981:")).toBe(true);
     expect(doc.body).toContain("## Comment — krunal");
-    expect(doc.links).toContain("jira:issue:PAY-990");
-    expect(doc.links).not.toContain("jira:issue:PAY-981");
+    expect(doc.links.map((l) => l.id)).toContain("jira:issue:PAY-990");
+    expect(doc.links.map((l) => l.id)).not.toContain("jira:issue:PAY-981");
   });
 
   it("jira: excludes visibility-restricted comments, fail-closed", () => {

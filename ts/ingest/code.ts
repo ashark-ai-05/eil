@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { CanonicalDoc } from "../contracts/models.js";
+import { type CanonicalDoc, DEFAULT_REL } from "../contracts/models.js";
 import { ticketKeys } from "../core/ticket.js";
 /** Map a repo file into a CanonicalDoc (source="code"), plus ref helpers. */
 import { EXTRACTOR_VERSION, detectLanguage } from "./codeindex.js";
@@ -76,13 +76,17 @@ export function normalizeCode(
     // Ticket keys are where the code<->Jira edge physically lives, and imports
     // are a free, high-precision code<->code edge. `links: []` threw both away.
     links: [
-      ...ticketKeys(content).map((k) => `jira:issue:${k}`),
-      ...importLinks(key, path, content),
+      // A ticket key in a comment is a mention; an import is a declared
+      // structural dependency. They were both flattened to the same untyped
+      // edge, so `expand` could not tell "this file mentions PAY-42" from
+      // "this file imports that module".
+      ...ticketKeys(content).map((k) => ({ id: `jira:issue:${k}`, rel: DEFAULT_REL })),
+      ...importLinks(key, path, content).map((id) => ({ id, rel: "imports" })),
       // Compare against the EXTENSION-STRIPPED self id too: importLinks strips
       // extensions when resolving (the target may be .ts/.tsx/.js), so a file
       // importing itself produced `code:<repo>:src/a` against a self id of
       // `code:<repo>:src/a.ts` and slipped through.
-    ].filter((l) => l !== selfId && l !== selfIdNoExt),
+    ].filter((l) => l.id !== selfId && l.id !== selfIdNoExt),
     codeRepo: key,
     codePath: path,
     ...(ref ? { codeRef: ref } : {}),

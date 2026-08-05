@@ -46,7 +46,7 @@ describe("confluence", () => {
     expect(doc.id).toBe("confluence:page:777");
     expect(doc.hierarchy).toEqual(["Payments Space", "Runbooks"]);
     expect(doc.body).toContain("## Steps");
-    expect(doc.links).toContain("jira:issue:PAY-981");
+    expect(doc.links.map((l) => l.id)).toContain("jira:issue:PAY-981");
     expect(doc.url).toBe("https://confluence.example.com/pages/777");
     expect(doc.createdAt).toBe("2026-05-01T09:00:00+00:00");
   });
@@ -167,6 +167,66 @@ describe("jira", () => {
     const doc = normalizeIssue(issues[0]!);
     expect(doc.id).toBe("jira:issue:PAY-1");
     expect(doc.url).toBe("https://jira.example.com/browse/PAY-1");
+  });
+});
+
+describe("jira link direction", () => {
+  /**
+   * A Jira link TYPE carries both labels ("blocks" and "is blocked by"), while
+   * the linked issue appears under either `outwardIssue` or `inwardIssue`.
+   * Coalescing them independently — `type.outward ?? type.inward` beside
+   * `outwardIssue ?? inwardIssue` — reads the outward label off a link that
+   * only has an inward issue and states the relationship backwards.
+   *
+   * Latent while the type was discarded at normalize; a wrong fact the moment
+   * link types began to persist.
+   */
+  const issueWith = (link: unknown) => ({
+    key: "PAY-1",
+    fields: {
+      summary: "s",
+      project: { key: "PAY" },
+      updated: "2026-06-01T00:00:00+00:00",
+      comment: { comments: [] },
+      issuelinks: [link],
+    },
+  });
+
+  // The search endpoint returns a thin inventory and each issue is then
+  // fetched individually, so the mock has to serve both shapes.
+  const linksOf = async (link: unknown) => {
+    const issue = issueWith(link);
+    const fetcher: Fetcher = async (url) => {
+      const parsed = new URL(String(url));
+      if (/\/issue\/PAY-1$/.test(parsed.pathname)) return jsonResponse(issue);
+      return jsonResponse({
+        issues: [{ key: issue.key, fields: { updated: issue.fields.updated } }],
+        total: 1,
+        startAt: Number(parsed.searchParams.get("startAt") ?? 0),
+      });
+    };
+    const client = new JiraClient("https://jira.example.com", "pat", fetcher);
+    const out = [];
+    for await (const i of client.updatedSince(null)) out.push(i);
+    return out[0]?.fields.issue_links ?? [];
+  };
+
+  it("labels an outward link with the outward phrase", async () => {
+    expect(
+      await linksOf({
+        type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
+        outwardIssue: { key: "PAY-2" },
+      }),
+    ).toEqual([{ type: "blocks", key: "PAY-2" }]);
+  });
+
+  it("labels an inward link with the INWARD phrase, not the outward one", async () => {
+    expect(
+      await linksOf({
+        type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
+        inwardIssue: { key: "PAY-3" },
+      }),
+    ).toEqual([{ type: "is blocked by", key: "PAY-3" }]);
   });
 });
 
