@@ -1166,6 +1166,26 @@ embed
     }
   });
 
+program
+  .command("doctor")
+  .description(
+    "Preflight: Node version, proxy/TLS route, database reachability, connector credentials and keychain",
+  )
+  .action(async () => {
+    const { runDoctor } = await import("./doctor.js");
+    const { closeScopedFetch } = await import("./connectors/httpclient.js");
+    try {
+      const report = await runDoctor();
+      console.log(JSON.stringify(report, null, 2));
+      // exitCode, not exit(2): the immediate form would tear the process
+      // down before the finally below (and this command's own DB
+      // connection close inside runDoctor) can finish running.
+      if (!report.ok) process.exitCode = 2;
+    } finally {
+      await closeScopedFetch();
+    }
+  });
+
 /**
  * The one place a failed command becomes something a person can act on.
  *
