@@ -45,13 +45,25 @@ const tools = matchAll(
   /^\s*name: "([a-z_]+)",$/gm,
 );
 
-/** metrics.vw_* views — the ones that ARE the metric definitions. */
-const views = readdirSync(join(ROOT, "migrations"))
-  .filter((f) => f.endsWith(".sql"))
-  .sort()
-  .flatMap((f) =>
-    [...read(`migrations/${f}`).matchAll(/CREATE\s+VIEW\s+metrics\.(vw_\w+)/gi)].flatMap(group1),
-  );
+/**
+ * metrics.vw_* views — the ones that ARE the metric definitions. A view can
+ * be DROP + CREATE'd again in a later migration to fix a bug (0018's
+ * vw_connector_health, 0023's tenant scoping) without changing its name, so
+ * dedupe to the live set — first-seen order, since that is the order a
+ * reader encounters the view's original purpose in migration history.
+ */
+const views = [
+  ...new Set(
+    readdirSync(join(ROOT, "migrations"))
+      .filter((f) => f.endsWith(".sql"))
+      .sort()
+      .flatMap((f) =>
+        [...read(`migrations/${f}`).matchAll(/CREATE\s+VIEW\s+metrics\.(vw_\w+)/gi)].flatMap(
+          group1,
+        ),
+      ),
+  ),
+];
 if (views.length === 0) throw new Error("build-map: found no metrics.vw_* views in migrations/");
 
 /** Sources you can actually ingest, from the `eil ingest <x>` subcommands. */

@@ -16,6 +16,13 @@ const AUDIT_PLAN: Array<[string, string, number, number]> = [
   ["asha", "search_code", 0, 1],
   ["asha", "get_doc", 1, 2],
 ];
+// Deliberately reuses "krunal"/"search_docs" from AUDIT_PLAN — a key
+// collision across tenants would be silently merged if a view's GROUP BY
+// forgot tenant, so this is the case that actually tests isolation.
+const TENANT_B_AUDIT_PLAN: Array<[string, string, number, number]> = [
+  ["krunal", "search_docs", 5, 3],
+  ["priya", "get_doc", 2, 2],
+];
 const DAYS = ["2026-07-25", "2026-07-26"];
 const LLM_PLAN: Array<
   [string, string | null, string, number | null, number | null, number, boolean, number]
@@ -101,6 +108,23 @@ beforeAll(async () => {
       " VALUES ('2026-07-25', 'krunal', 'amp', 'amp-admin-api', 42.5, 'credits', 21.25)," +
       "        ('2026-07-25', 'asha', 'maas', 'gateway', 1.2345, 'usd', 1.2345)",
   );
+
+  // A second tenant, seeded on the same day with overlapping principal/tool
+  // names on purpose — the isolation tests below prove the views separate by
+  // tenant rather than by coincidence of distinct labels.
+  for (const [principal, tool, resultCount, reps] of TENANT_B_AUDIT_PLAN) {
+    for (let i = 0; i < reps; i++) {
+      await client.query(
+        "INSERT INTO audit_log (at, tenant, principal, tool, args, result_count)" +
+          " VALUES ($1::date + interval '1 hour' * $2, 'tenant-b', $3, $4, $5, $6)",
+        [DAYS[0], i, principal, tool, JSON.stringify({ seed: i }), resultCount],
+      );
+    }
+  }
+  await client.query(
+    "INSERT INTO metrics.usage_facts (day, tenant, principal, tool, source, quantity, unit, cost_usd)" +
+      " VALUES ('2026-07-25', 'tenant-b', 'krunal', 'amp', 'amp-admin-api', 9, 'credits', 4.5)",
+  );
 });
 
 afterAll(async () => {
@@ -122,7 +146,7 @@ describe.skipIf(!available)("metrics views", () => {
   it("vw_tool_calls matches an independent recount", async () => {
     for (const day of DAYS) {
       const res = await client.query(
-        "SELECT principal, tool, calls::int FROM metrics.vw_tool_calls WHERE day = $1",
+        "SELECT principal, tool, calls::int FROM metrics.vw_tool_calls WHERE day = $1 AND tenant = 'default'",
         [day],
       );
       const got = new Map(res.rows.map((r) => [`${r.principal}|${r.tool}`, r.calls]));
@@ -132,7 +156,8 @@ describe.skipIf(!available)("metrics views", () => {
 
   it("vw_zero_results has exact rates", async () => {
     const res = await client.query(
-      "SELECT tool, calls::int, zero_calls::int, zero_rate FROM metrics.vw_zero_results WHERE day = $1",
+      "SELECT tool, calls::int, zero_calls::int, zero_rate FROM metrics.vw_zero_results" +
+        " WHERE day = $1 AND tenant = 'default'",
       [DAYS[0]],
     );
     const got = Object.fromEntries(
@@ -144,7 +169,8 @@ describe.skipIf(!available)("metrics views", () => {
 
   it("vw_two_phase ratio", async () => {
     const res = await client.query(
-      "SELECT searches::int, fetches::int, ratio FROM metrics.vw_two_phase WHERE day = $1",
+      "SELECT searches::int, fetches::int, ratio FROM metrics.vw_two_phase" +
+        " WHERE day = $1 AND tenant = 'default'",
       [DAYS[1]],
     );
     const row = res.rows[0];
@@ -185,13 +211,62 @@ describe.skipIf(!available)("metrics views", () => {
 
   it("vw_spend_daily preserves native units", async () => {
     const res = await client.query(
-      "SELECT tool, unit, quantity, cost_usd FROM metrics.vw_spend_daily ORDER BY tool",
+      "SELECT tool, unit, quantity, cost_usd FROM metrics.vw_spend_daily" +
+        " WHERE tenant = 'default' ORDER BY tool",
     );
     const got = Object.fromEntries(
       res.rows.map((r) => [r.tool, [r.unit, Number(r.quantity), Number(r.cost_usd)]]),
     );
     expect(got.amp).toEqual(["credits", 42.5, 21.25]);
     expect(got.maas).toEqual(["usd", 1.2345, 1.2345]);
+  });
+
+  it("tenant scoping isolates audit and spend metrics", async () => {
+    // Same day, overlapping principal/tool labels, different tenant — proves
+    // the views group by tenant rather than merging on label collision.
+    const calls = await client.query(
+      "SELECT principal, tool, calls::int FROM metrics.vw_tool_calls" +
+        " WHERE day = $1 AND tenant = 'tenant-b' ORDER BY principal",
+      [DAYS[0]],
+    );
+    expect(calls.rows).toEqual([
+      { principal: "krunal", tool: "search_docs", calls: 3 },
+      { principal: "priya", tool: "get_doc", calls: 2 },
+    ]);
+
+    // tenant-b's rows must not have leaked into 'default's krunal/search_docs
+    // count for the same day — expectedCalls() already excludes tenant-b.
+    const defaultCalls = await client.query(
+      "SELECT calls::int FROM metrics.vw_tool_calls" +
+        " WHERE day = $1 AND tenant = 'default' AND principal = 'krunal' AND tool = 'search_docs'",
+      [DAYS[0]],
+    );
+    expect(defaultCalls.rows[0]!.calls).toBe(expectedCalls().get("krunal|search_docs"));
+
+    const zeroResults = await client.query(
+      "SELECT calls::int, zero_calls::int FROM metrics.vw_zero_results" +
+        " WHERE day = $1 AND tenant = 'tenant-b' AND tool = 'search_docs'",
+      [DAYS[0]],
+    );
+    expect(zeroResults.rows[0]).toEqual({ calls: 3, zero_calls: 0 });
+
+    const twoPhase = await client.query(
+      "SELECT searches::int, fetches::int FROM metrics.vw_two_phase" +
+        " WHERE day = $1 AND tenant = 'tenant-b'",
+      [DAYS[0]],
+    );
+    expect(twoPhase.rows[0]).toEqual({ searches: 3, fetches: 2 });
+
+    const spend = await client.query(
+      "SELECT unit, quantity, cost_usd FROM metrics.vw_spend_daily" +
+        " WHERE tenant = 'tenant-b' AND tool = 'amp'",
+    );
+    const spendRow = spend.rows[0]!;
+    expect([spendRow.unit, Number(spendRow.quantity), Number(spendRow.cost_usd)]).toEqual([
+      "credits",
+      9,
+      4.5,
+    ]);
   });
 
   it("report renders from the views", async () => {
