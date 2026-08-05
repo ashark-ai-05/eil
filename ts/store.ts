@@ -234,8 +234,9 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
   const write = await client.query(
     `INSERT INTO documents
         (id, tenant, source, title, url, author, created_at, updated_at,
-         hierarchy, acl_groups, acl_snapshot, acl_version, quality_tier, content_hash, body, ingested_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         hierarchy, acl_groups, acl_snapshot, acl_version, quality_tier, content_hash, body, ingested_by,
+         valid_from, valid_to, superseded_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
      ON CONFLICT (tenant, id) DO UPDATE SET
         title = EXCLUDED.title, url = EXCLUDED.url, author = EXCLUDED.author,
         created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
@@ -243,6 +244,11 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
         acl_snapshot = EXCLUDED.acl_snapshot, acl_version = EXCLUDED.acl_version,
         quality_tier = EXCLUDED.quality_tier, content_hash = EXCLUDED.content_hash,
         body = EXCLUDED.body, ingested_at = now(),
+        -- Validity is re-derived from the source on every ingest, so a page
+        -- that loses its "obsolete" label becomes current again rather than
+        -- staying dead because the first sync saw it retired.
+        valid_from = EXCLUDED.valid_from, valid_to = EXCLUDED.valid_to,
+        superseded_by = EXCLUDED.superseded_by,
         -- Ownership is NOT transferred by a re-ingest. Overwriting it meant any
         -- later writer — a refresh_doc call, another user's sync, the service
         -- account — silently re-owned the row, and since acl_groups is stamped
@@ -269,6 +275,11 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
       hash,
       doc.body,
       userInfo().username,
+      // valid_from falls back to createdAt/updatedAt so a source that says
+      // nothing about validity still gets a sensible start rather than NULL.
+      doc.validFrom ?? doc.createdAt ?? doc.updatedAt ?? null,
+      doc.validTo ?? null,
+      doc.supersededBy ?? null,
     ],
   );
   // Quarantine short-circuits the pipeline. This placement is the whole safety

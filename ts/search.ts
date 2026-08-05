@@ -81,9 +81,30 @@ export const EXPAND_MAX_EDGES = 50;
 
 // Mandatory, fail-closed visibility: a request always has exactly one tenant.
 // Only static $-indices ever reach SQL text.
-const visibleSql = (principalIdx: number, groupsIdx: number, tenantIdx: number) =>
+//
+// Superseded documents are excluded HERE, beside the ACL and tombstone tests,
+// rather than being down-weighted in ranking. Two reasons. A rank penalty is a
+// suggestion — a superseded page that is a much better lexical match still
+// surfaces, and "the retry limit is 3" from a replaced policy is not a slightly
+// worse answer, it is a wrong one. And putting it in the single predicate every
+// arm already composes means a future arm cannot forget it, which is the same
+// property that keeps the ACL honest.
+//
+// `valid_to IS NULL` (not `> now()`) is deliberate: validity is stamped at
+// ingest from what the source said, so retrieval stays a pure function of the
+// catalog and two identical queries cannot disagree because a clock ticked.
+const visibleSql = (
+  principalIdx: number,
+  groupsIdx: number,
+  tenantIdx: number,
+  includeSuperseded = false,
+) =>
   `((d.ingested_by = $${principalIdx} OR d.acl_groups ?| $${groupsIdx}::text[])` +
-  ` AND d.tenant = $${tenantIdx} AND d.tombstoned_at IS NULL AND d.quarantined_at IS NULL)`;
+  ` AND d.tenant = $${tenantIdx} AND d.tombstoned_at IS NULL AND d.quarantined_at IS NULL` +
+  // ONLY the validity clause is optional. ACL, tenant, tombstone and quarantine
+  // stay unconditional: asking for history must never be a way to ask for
+  // someone else's documents.
+  `${includeSuperseded ? "" : " AND d.valid_to IS NULL"})`;
 
 export interface Viewer {
   principal: string;
@@ -227,6 +248,15 @@ export interface Edge {
  */
 export interface SearchOptions {
   sources?: readonly string[] | null;
+  /**
+   * Include documents the source has retired. Default false.
+   *
+   * "Excluded by default" must not mean "unreachable": an operator asking what
+   * the policy USED to be is a legitimate question, and a direct id turning into
+   * a permanent undocumented 404 would be its own bug. This relaxes only the
+   * validity clause — ACL, tenant, tombstone and quarantine stay unconditional.
+   */
+  includeSuperseded?: boolean;
 }
 
 /** Normalised to `null` (no filter) or a non-empty array, once, at the entry point. */
@@ -266,6 +296,7 @@ async function searchDocsInner(
 ): Promise<Record<string, unknown>> {
   const decision = classify(query);
   const sources = sourceFilter(opts);
+  const includeSuperseded = opts?.includeSuperseded === true;
   // Both shortcuts below bypass the arms entirely and answer out of one source,
   // so each has to ask permission first. A scope the router can route around is
   // not a scope: "CHK-9" would return a Jira issue from a search restricted to
@@ -274,7 +305,7 @@ async function searchDocsInner(
 
   if (decision.route === "entity" && inScope("jira")) {
     const entityId = `jira:issue:${decision.match}`;
-    const doc = await getDoc(client, viewer, entityId, 0, 2_000);
+    const doc = await getDoc(client, viewer, entityId, 0, 2_000, includeSuperseded);
     const neighborhood = await expand(client, viewer, entityId);
     return { route: "entity", entity: doc, linked: neighborhood.edges };
   }
@@ -320,7 +351,7 @@ async function searchDocsInner(
               ts_rank(c.tsv, qq.loose, 1) AS rank,
               (c.tsv @@ qq.strict) AS strict_hit
          FROM chunks c JOIN documents d ON d.tenant = c.tenant AND d.id = c.doc_id CROSS JOIN qq
-        WHERE c.tsv @@ qq.loose AND ${visibleSql(4, 5, 6)}
+        WHERE c.tsv @@ qq.loose AND ${visibleSql(4, 5, 6, includeSuperseded)}
           AND ($7::text[] IS NULL OR d.source = ANY($7::text[]))
      ), best AS (
        SELECT DISTINCT ON (doc_id) * FROM m ORDER BY doc_id, strict_hit DESC, rank DESC, seq
@@ -454,7 +485,16 @@ async function searchDocsInner(
   const arms: Record<string, string[]> = {};
   for (const [name, ids] of Object.entries(lists)) if (ids.length > 0) arms[name] = ids;
   try {
-    const vec = await vecArm(client, viewer, query, limit, byDoc, embedder, sources);
+    const vec = await vecArm(
+      client,
+      viewer,
+      query,
+      limit,
+      byDoc,
+      embedder,
+      sources,
+      includeSuperseded,
+    );
     if (vec && vec.length > 0) arms.vec = vec;
   } catch (err: any) {
     console.error(`vec arm skipped: ${err.message}`); // best-effort: degrade to FTS-only
@@ -527,10 +567,13 @@ export async function getDoc(
   docId: string,
   section = 0,
   maxChars: number = GET_DOC_MAX_CHARS,
+  /** Retrieve a superseded document by its exact id. Off by default; see
+   *  visibleSql for why only the validity clause is ever relaxed. */
+  includeSuperseded = false,
 ): Promise<Record<string, unknown> | null> {
   const res = await client.query(
-    `SELECT id, title, url, source, quality_tier, hierarchy, updated_at, body
-     FROM documents d WHERE id = $1 AND ${visibleSql(2, 3, 4)}`,
+    `SELECT id, title, url, source, quality_tier, hierarchy, updated_at, valid_to, superseded_by, body
+     FROM documents d WHERE id = $1 AND ${visibleSql(2, 3, 4, includeSuperseded)}`,
     [docId, viewer.principal, viewer.groups, viewer.tenant],
   );
   const row = res.rows[0];
@@ -735,6 +778,7 @@ async function vecArm(
   byDoc: Map<string, SearchResult & { updated: Date | null }>,
   embedder?: Embedder,
   sources: string[] | null = null,
+  includeSuperseded = false,
 ): Promise<string[] | null> {
   // Build the embedder first (construction is cheap — the local model loads
   // lazily on embed(), not here). May throw if a provider is misconfigured ->
@@ -847,7 +891,7 @@ async function vecArm(
     `WITH cand AS (
        SELECT v.doc_id, v.seq, v.ord, v.embedding
          FROM chunk_vectors v JOIN documents d ON d.tenant = v.tenant AND d.id = v.doc_id
-        WHERE v.embed_model = $5 AND ${visibleSql(1, 2, 3)}
+        WHERE v.embed_model = $5 AND ${visibleSql(1, 2, 3, includeSuperseded)}
           AND ($7::int[] IS NULL OR v.cluster_id = ANY($7::int[]))
           AND ($11::text[] IS NULL OR d.source = ANY($11::text[]))
         ORDER BY CASE WHEN $8::varbit IS NULL OR v.sig IS NULL THEN 0

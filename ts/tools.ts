@@ -39,7 +39,11 @@ export interface ToolSpec<S extends z.ZodRawShape = z.ZodRawShape> {
 const searchDocsSpec: ToolSpec = {
   name: "search_docs",
   description:
-    "Search indexed org knowledge (Confluence, Jira, notes, code) — the shape " +
+    "Search indexed org knowledge (Confluence, Jira, notes, code). Results are " +
+    "documents the source still considers CURRENT: a page its owners marked " +
+    "deprecated, archived or superseded is excluded, because a replaced policy " +
+    "is a wrong answer rather than a slightly worse one. Set " +
+    "`include_superseded: true` only to ask what something USED to say. The shape " +
     "of the response depends on how the query routes. Most queries return " +
     "compact `results`: id, title, snippet, `truncated`, `section_index`, " +
     "`section_count`. `truncated` says whether the snippet covers the WHOLE " +
@@ -65,10 +69,14 @@ const searchDocsSpec: ToolSpec = {
     // Naming sources is for a caller who already knows where the answer lives —
     // and for showing what a single-source connector can see on its own.
     sources: z.array(z.string()).optional(),
+    include_superseded: z.boolean().default(false),
   }),
   requiresEnv: [],
   handler: (c, v, a) =>
-    searchDocs(c, v, a.query, a.limit ?? 8, undefined, { sources: a.sources ?? null }),
+    searchDocs(c, v, a.query, a.limit ?? 8, undefined, {
+      sources: a.sources ?? null,
+      includeSuperseded: a.include_superseded === true,
+    }),
 };
 
 /**
@@ -119,10 +127,29 @@ const getDocSpec: ToolSpec = {
     "field (see search_docs's description for what each route returns " +
     "instead) — for those, call get_doc when the returned content does not " +
     "already answer the question.",
-  schema: z.object({ id: z.string(), section: z.number().int().default(0) }).strict(),
+  schema: z
+    .object({
+      id: z.string(),
+      section: z.number().int().default(0),
+      include_superseded: z.boolean().default(false),
+    })
+    .strict(),
   requiresEnv: [],
   handler: async (c, v, a) => {
-    const doc = await getDoc(c, v, a.id, a.section ?? 0);
+    const doc = await getDoc(c, v, a.id, a.section ?? 0, undefined, a.include_superseded === true);
+    // A retired document is a deliberate exclusion, not a missing one. Saying so
+    // — and naming the flag that retrieves it — keeps a superseded page from
+    // looking like an undocumented permanent 404.
+    if (!doc) {
+      const retired = await getDoc(c, v, a.id, a.section ?? 0, undefined, true);
+      if (retired) {
+        return {
+          error: `superseded: ${a.id} is no longer current; pass include_superseded: true to read it`,
+          superseded_by: retired.superseded_by ?? null,
+          valid_to: retired.valid_to ?? null,
+        };
+      }
+    }
     return doc ?? { error: `not found: ${a.id}` };
   },
 };
