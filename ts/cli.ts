@@ -6,7 +6,7 @@ import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type pg from "pg";
-import { type Db, connect, migrate, provisionRuntimeRoles } from "./db.js";
+import { type Db, connect, dsn, migrate, provisionRuntimeRoles } from "./db.js";
 import { ingestDocs, runReconcile } from "./ingest/pipeline.js";
 import { promptHidden } from "./prompt.js";
 import type { Finding, ReqsBody } from "./reqs/schema.js";
@@ -1183,6 +1183,223 @@ program
       if (!report.ok) process.exitCode = 2;
     } finally {
       await closeScopedFetch();
+    }
+  });
+
+/**
+ * F5b: the durable-queue worker pool and the schedule commands that feed it
+ * are an explicit, opt-in Postgres deployment mode — `eil ingest ...` above
+ * remains the synchronous path and works against local/PGlite exactly as
+ * before. Queued execution needs real Postgres for FOR UPDATE SKIP LOCKED
+ * across processes, so both command groups refuse a pglite:// DSN up
+ * front rather than failing confusingly on the first claim() call.
+ */
+function requireRealPostgresForQueue(): void {
+  if (dsn().startsWith("pglite://")) {
+    console.log(
+      "this command requires real Postgres (FOR UPDATE SKIP LOCKED across processes) — " +
+        "EIL_DATABASE_URL is pglite://, which is the local/zero-install tier, not a queued deployment.",
+    );
+    process.exit(1);
+  }
+}
+
+const worker = program
+  .command("worker")
+  .description("Durable-queue worker pool (F5b) — explicit Postgres deployment mode");
+
+worker
+  .command("run")
+  .description("Claim and process queued connector-sync jobs until stopped (Ctrl+C)")
+  .option("--concurrency <n>", "concurrent claim loops", "4")
+  .option("--lease-ms <ms>", "lease duration per claim", "60000")
+  .option("--poll-ms <ms>", "poll interval when the queue is empty", "1000")
+  .action(async (opts) => {
+    requireRealPostgresForQueue();
+    const { registerIngestJobTypes, startWorkerPool } = await import("./worker.js");
+    const { scrubJobError } = await import("./jobqueue.js");
+    const { ConfluenceClient } = await import("./connectors/confluence.js");
+    const { JiraClient } = await import("./connectors/jira.js");
+    registerIngestJobTypes();
+    const client = await connect();
+    const reportError = (label: string, err: unknown) =>
+      console.error(`${label}: ${scrubJobError(String((err as Error)?.message ?? err))}`);
+    // Constructed lazily, per claimed job, NOT via liveClient()'s
+    // hard-exit-on-missing-env behavior — a single job type's missing
+    // credentials must fail (and retry/dead-letter) that one job through
+    // the normal fail() path, not take down every other job the pool is
+    // processing.
+    const pool = startWorkerPool(client, {
+      concurrency: Number(opts.concurrency),
+      leaseMs: Number(opts.leaseMs),
+      pollIntervalMs: Number(opts.pollMs),
+      clients: {
+        confluence: () => new ConfluenceClient(),
+        jira: () => new JiraClient(),
+      },
+      // Without these, a database outage makes every claim loop retry
+      // silently while this command keeps printing "running" — scrubbed
+      // the same way a persisted job error is, since these can carry
+      // upstream connector error text too.
+      onClaimError: (err) => reportError("claim error", err),
+      onJobError: (job, err) => reportError(`job ${job.id} (${job.job_type}) failed`, err),
+    });
+    console.log(`worker pool running (concurrency ${opts.concurrency}); press Ctrl+C to stop`);
+    let stopping = false;
+    const stop = async () => {
+      if (stopping) return;
+      stopping = true;
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+      console.log("stopping: finishing in-flight jobs...");
+      await pool.stop();
+      // ConfluenceClient/JiraClient route through the F2 scoped dispatcher;
+      // leaving it open on shutdown leaks pooled sockets the same way an
+      // un-closed doctor run would (see the doctor command above).
+      const { closeScopedFetch } = await import("./connectors/httpclient.js");
+      await closeScopedFetch();
+      await client.end();
+      process.exit(0);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    await new Promise(() => {}); // foreground until signalled
+  });
+
+const schedule = program
+  .command("schedule")
+  .description(
+    "Enqueue a recurring connector sync onto the durable queue (F5b, requires real Postgres)",
+  );
+
+schedule
+  .command("confluence")
+  .description("Schedule a Confluence sync — full instance, space, project, or raw query")
+  .option("--space <keys>", "one or more space keys, comma-separated")
+  .option("--query <cql>", "raw CQL predicate (advanced escape hatch)")
+  .option("--tenant <tenant>", "tenant", "default")
+  .option("--window-ms <ms>", "dedupe window for repeated schedule calls", String(60 * 60 * 1000))
+  .action(async (opts) => {
+    requireRealPostgresForQueue();
+    const { parseConfluenceScopes } = await import("./connectors/scope.js");
+    let scopes: import("./connectors/scope.js").Scope[];
+    try {
+      scopes = parseConfluenceScopes(opts);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
+    const { registerIngestJobTypes, scheduleConfluenceSync } = await import("./worker.js");
+    registerIngestJobTypes();
+    const client = await connect();
+    try {
+      for (const scope of scopes) {
+        const job = await scheduleConfluenceSync(client, opts.tenant, scope, {
+          windowMs: Number(opts.windowMs),
+        });
+        console.log(
+          `scheduled job ${job.id} (${job.status}) idempotency_key=${job.idempotency_key}`,
+        );
+      }
+    } finally {
+      await client.end();
+    }
+  });
+
+schedule
+  .command("jira")
+  .description("Schedule a Jira sync — full instance, project, or raw query")
+  .option("--project <keys>", "one or more project keys, comma-separated")
+  .option("--query <jql>", "raw JQL predicate (advanced escape hatch)")
+  .option("--tenant <tenant>", "tenant", "default")
+  .option("--window-ms <ms>", "dedupe window for repeated schedule calls", String(60 * 60 * 1000))
+  .action(async (opts) => {
+    requireRealPostgresForQueue();
+    const { parseJiraScopes } = await import("./connectors/scope.js");
+    let scopes: import("./connectors/scope.js").Scope[];
+    try {
+      scopes = parseJiraScopes(opts);
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
+    const { registerIngestJobTypes, scheduleJiraSync } = await import("./worker.js");
+    registerIngestJobTypes();
+    const client = await connect();
+    try {
+      for (const scope of scopes) {
+        const job = await scheduleJiraSync(client, opts.tenant, scope, {
+          windowMs: Number(opts.windowMs),
+        });
+        console.log(
+          `scheduled job ${job.id} (${job.status}) idempotency_key=${job.idempotency_key}`,
+        );
+      }
+    } finally {
+      await client.end();
+    }
+  });
+
+schedule
+  .command("obsidian")
+  .description("Schedule an Obsidian vault sync")
+  .requiredOption("--vault <dir>", "Vault root directory")
+  .option("--tenant <tenant>", "tenant", "default")
+  .option("--window-ms <ms>", "dedupe window for repeated schedule calls", String(60 * 60 * 1000))
+  .action(async (opts) => {
+    requireRealPostgresForQueue();
+    const { registerIngestJobTypes, scheduleObsidianSync } = await import("./worker.js");
+    registerIngestJobTypes();
+    const client = await connect();
+    try {
+      const job = await scheduleObsidianSync(client, opts.tenant, opts.vault, {
+        windowMs: Number(opts.windowMs),
+      });
+      console.log(`scheduled job ${job.id} (${job.status}) idempotency_key=${job.idempotency_key}`);
+    } finally {
+      await client.end();
+    }
+  });
+
+schedule
+  .command("repo <ref>")
+  .description("Schedule a git/Bitbucket repo sync")
+  .option("--source <kind>", "git | bitbucket (default: auto-detect)")
+  .option("--branch <b>", "branch", "main")
+  .option("--subpath <p>", "restrict to a subdirectory")
+  .option("--include <glob...>", "only paths matching (repeatable)")
+  .option("--exclude <glob...>", "skip paths matching (repeatable)")
+  .option("--name <key>", "override the repo key (else derived from the ref)")
+  .option(
+    "--acl-group <g...>",
+    "groups granted read on this repo; omit for owner-only (fail-closed)",
+  )
+  .option("--tenant <tenant>", "tenant", "default")
+  .option("--window-ms <ms>", "dedupe window for repeated schedule calls", String(60 * 60 * 1000))
+  .action(async (ref: string, opts) => {
+    requireRealPostgresForQueue();
+    const { registerIngestJobTypes, scheduleRepoSync } = await import("./worker.js");
+    registerIngestJobTypes();
+    const client = await connect();
+    try {
+      const job = await scheduleRepoSync(
+        client,
+        opts.tenant,
+        {
+          ref,
+          ...(opts.source ? { kind: opts.source } : {}),
+          branch: opts.branch,
+          ...(opts.subpath ? { subpath: opts.subpath } : {}),
+          ...(opts.name ? { name: opts.name } : {}),
+          ...(opts.aclGroup ? { aclGroups: opts.aclGroup } : {}),
+          ...(opts.include ? { includes: opts.include } : {}),
+          ...(opts.exclude ? { excludes: opts.exclude } : {}),
+        },
+        { windowMs: Number(opts.windowMs) },
+      );
+      console.log(`scheduled job ${job.id} (${job.status}) idempotency_key=${job.idempotency_key}`);
+    } finally {
+      await client.end();
     }
   });
 
