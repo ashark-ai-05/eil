@@ -6,6 +6,7 @@
  * credentials — a PAT inherits your permissions.
  */
 
+import { scopedFetch } from "./httpclient.js";
 import { getSecret } from "./keychain.js";
 import { withRetry } from "./retry.js";
 
@@ -21,7 +22,7 @@ export function makeClient(
   prefix: string,
   baseUrl?: string,
   token?: string,
-  fetcher: Fetcher = fetch,
+  fetcher: Fetcher = scopedFetch,
 ): DcClient {
   const url = (baseUrl ?? required(`EIL_${prefix}_URL`)).replace(/\/+$/, "");
   const tok = token ?? getSecret(`EIL_${prefix}_TOKEN`) ?? process.env[`EIL_${prefix}_TOKEN`];
