@@ -30,10 +30,13 @@ export class ConfluenceClient {
     const cql = `${clauses.join(" and ")} order by lastmodified asc, id asc`;
     const pages = await stableListing(
       "Confluence incremental listing",
-      () => this.scanPages(cql, "body.storage,ancestors,version,space,history,metadata.labels"),
+      () => this.scanPages(cql, "version"),
       (page) => String(page.id),
     );
-    for (const page of pages) yield this.toPageDict(page);
+    // Fetch and yield bodies one at a time after the cheap inventory agrees.
+    // This keeps memory bounded and preserves pipeline cursor progress if a
+    // later body fetch is rate-limited or the process stops.
+    for (const page of pages) yield await this.getPage(String(page.id));
   }
 
   /** Fetch one page live — the get_doc fresh=true pull-through (flow K5). */
@@ -49,10 +52,10 @@ export class ConfluenceClient {
     const cql = `ancestor = ${pageId} order by lastmodified asc, id asc`;
     const pages = await stableListing(
       "Confluence descendants listing",
-      () => this.scanPages(cql, "body.storage,ancestors,version,space,history,metadata.labels"),
+      () => this.scanPages(cql, "version"),
       (page) => String(page.id),
     );
-    for (const page of pages) yield this.toPageDict(page);
+    for (const page of pages) yield await this.getPage(String(page.id));
   }
 
   /** Complete id listing for reconcile (flow K1 deletions) — ids only, paged. */

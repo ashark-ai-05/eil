@@ -51,10 +51,12 @@ export class JiraClient {
     const jql = `${where}order by updated asc, key asc`;
     const issues = await stableListing(
       "Jira incremental listing",
-      () => this.scanIssues(jql, FIELDS),
+      () => this.scanIssues(jql, "key,updated"),
       (issue) => String(issue.key),
     );
-    for (const issue of issues) yield this.toIssueDict(issue);
+    // Fetch and yield bodies sequentially after the cheap inventory agrees so
+    // successful items advance the durable cursor before a later fetch fails.
+    for (const issue of issues) yield await this.getIssue(String(issue.key));
   }
 
   /** Fetch one issue live — the get_doc fresh=true pull-through (flow K5). */

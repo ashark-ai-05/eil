@@ -33,9 +33,10 @@ describe("confluence", () => {
       body: { storage: { value: "<h2>Steps</h2><p>Check PAY-981 first.</p>" } },
     };
     const fetcher: Fetcher = async (url) => {
-      const cql = new URL(String(url)).searchParams.get("cql");
-      expect(cql).toContain('lastmodified >= "2026-06-01 00:00"');
-      return jsonResponse({ results: [apiPage], size: 1 });
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/rest/api/content/777")) return jsonResponse(apiPage);
+      expect(parsed.searchParams.get("cql")).toContain('lastmodified >= "2026-06-01 00:00"');
+      return jsonResponse({ results: [{ id: "777", version: apiPage.version }], size: 1 });
     };
     const client = new ConfluenceClient("https://confluence.example.com", "pat", fetcher);
     const pages = [];
@@ -91,8 +92,10 @@ describe("confluence scoped", () => {
   it("descendants queries ancestor = id", async () => {
     let seen = "";
     const fetcher: Fetcher = async (url) => {
-      seen = new URL(String(url)).searchParams.get("cql") ?? "";
-      return jsonResponse({ results: [apiPage("9")], size: 1 });
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/rest/api/content/9")) return jsonResponse(apiPage("9"));
+      seen = parsed.searchParams.get("cql") ?? "";
+      return jsonResponse({ results: [{ id: "9", version: apiPage("9").version }], size: 1 });
     };
     const c = new ConfluenceClient("https://x", "t", fetcher);
     const out = [];
@@ -132,9 +135,17 @@ describe("jira", () => {
     });
     const calls: number[] = [];
     const fetcher: Fetcher = async (url) => {
-      const start = Number(new URL(String(url)).searchParams.get("startAt"));
+      const parsed = new URL(String(url));
+      const issueKey = parsed.pathname.match(/\/issue\/(PAY-\d+)$/)?.[1];
+      if (issueKey) return jsonResponse(makeIssue(Number(issueKey.split("-")[1])));
+      const start = Number(parsed.searchParams.get("startAt"));
       calls.push(start);
-      return jsonResponse({ issues: [makeIssue(start === 0 ? 1 : 2)], total: 2, startAt: start });
+      const issue = makeIssue(start === 0 ? 1 : 2);
+      return jsonResponse({
+        issues: [{ key: issue.key, fields: { updated: issue.fields.updated } }],
+        total: 2,
+        startAt: start,
+      });
     };
     const client = new JiraClient("https://jira.example.com", "pat", fetcher);
     const issues = [];
@@ -348,7 +359,10 @@ describe("mutable offset pagination", () => {
     let scan = 0;
     const starts: number[] = [];
     const fetcher: Fetcher = async (url) => {
-      const start = Number(new URL(String(url)).searchParams.get("start"));
+      const parsed = new URL(String(url));
+      const pageId = parsed.pathname.match(/\/content\/(\d+)$/)?.[1];
+      if (pageId) return jsonResponse(page(Number(pageId)));
+      const start = Number(parsed.searchParams.get("start"));
       if (start === 0) scan++;
       starts.push(start);
       if (start === 0)
@@ -370,6 +384,22 @@ describe("mutable offset pagination", () => {
       out.push(p.id);
     expect(out).toEqual(Array.from({ length: 100 }, (_, i) => String(i)));
     expect(starts).toEqual([0, 50, 0, 50, 100, 0, 50, 100]);
+  });
+
+  it("yields agreed Confluence bodies incrementally before a later fetch fails", async () => {
+    const fetcher: Fetcher = async (url) => {
+      const parsed = new URL(String(url));
+      const pageId = parsed.pathname.match(/\/content\/(\d+)$/)?.[1];
+      if (pageId === "2") throw new Error("rate limited");
+      if (pageId) return jsonResponse(page(Number(pageId)));
+      return jsonResponse({ results: [0, 1, 2].map((id) => ({ id: String(id) })), size: 3 });
+    };
+    const yielded: string[] = [];
+    await expect(async () => {
+      for await (const item of new ConfluenceClient("https://x", "t", fetcher).updatedSince(null))
+        yielded.push(item.id);
+    }).rejects.toThrow("rate limited");
+    expect(yielded).toEqual(["0", "1"]);
   });
 
   it("refuses a reconciliation listing that never stabilizes", async () => {

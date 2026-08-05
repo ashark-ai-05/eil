@@ -2,7 +2,10 @@
  * Offset pagination over a live, mutable result set is not a snapshot. A row
  * moving across a page boundary can make another row disappear from the scan
  * without any request failing. Run complete scans until two consecutive ID
- * sequences agree; only then expose records to the ingestion pipeline.
+ * sequences agree; only then expose records to the ingestion pipeline. Agreement
+ * is a bounded heuristic, not snapshot isolation: a vendor snapshot/delta cursor
+ * remains the proof-grade fix for a continuously mutating result set. Callers
+ * should scan only cheap identity/revision fields, then fetch bodies sequentially.
  */
 export async function stableListing<T>(
   label: string,
