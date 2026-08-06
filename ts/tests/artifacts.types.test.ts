@@ -39,7 +39,7 @@ const version = {
  * Never invoked. Its only job is to be type-checked — calling it would hit a
  * database, and what is under test is the compiler's refusal, not behaviour.
  */
-export async function _mutationsRequireATransaction(db: Db, tx: Tx): Promise<void> {
+async function _mutationsRequireATransaction(db: Db, tx: Tx): Promise<void> {
   // @ts-expect-error a plain Db cannot store bytes outside a transaction
   await putArtifact(db, "default", Buffer.from("x"), {});
   // @ts-expect-error a plain Db cannot record an observation outside a transaction
@@ -60,7 +60,7 @@ export async function _mutationsRequireATransaction(db: Db, tx: Tx): Promise<voi
   await collectArtifactGarbage(tx, "default");
 }
 
-export async function _transactionsDoNotNest(db: Db, tx: Tx): Promise<void> {
+async function _transactionsDoNotNest(db: Db, tx: Tx): Promise<void> {
   // A fresh connection may open one.
   await withTransaction(db, async () => undefined);
 
