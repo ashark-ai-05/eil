@@ -5,7 +5,7 @@ import type { RepoChange, RepoSource } from "../connectors/reposource.js";
 import type { Scope } from "../connectors/scope.js";
 import { cursorKey, predicate } from "../connectors/scope.js";
 import type { CanonicalDoc } from "../contracts/models.js";
-import type { Db } from "../db.js";
+import type { Db, Tx } from "../db.js";
 import { connect } from "../db.js";
 import { getCursor, setCursor } from "../store.js";
 import { normalizeCode } from "./code.js";
@@ -16,19 +16,75 @@ import type { RepoFilter } from "./repofilter.js";
 interface IngestOutcome {
   seen: number;
   changed: number;
+  /** HARD failures: the document did not land. Holds the cursor. */
   failed: number;
+  /** Related work that did not land while the document DID. Never holds the cursor. */
+  healthDebt: number;
   target: string | null;
+}
+
+/**
+ * One unit of ingestion: a document, plus optional related state that must
+ * commit with it.
+ *
+ * Deliberately source-NEUTRAL. The runner knows only that some related state
+ * exists and must share the document's commit boundary; what that state is —
+ * attachments, anything later — is the caller's business, closed over inside
+ * the hook. Putting source-specific fields here would leak connector policy
+ * into shared orchestration.
+ */
+export interface IngestItem {
+  doc: CanonicalDoc;
+  /**
+   * Work that was ATTEMPTED and failed before this item reached the runner,
+   * without preventing the document itself from being correct.
+   *
+   * This is the second failure axis, and it exists because the first one drives
+   * two unrelated decisions at once. `failed` both marks the run unhealthy AND
+   * pins `retryFrom` so the next run re-fetches from that document. That is
+   * right for a document that did not land. It is catastrophic for related work
+   * that can never succeed — an oversized attachment would hold the watermark
+   * forever, re-fetching the same window every run and advancing nothing, which
+   * is exactly the livelock the fatal-error handling above was written to
+   * eliminate.
+   *
+   * So debt counts toward health and toward the persisted failure count, and
+   * never toward the cursor.
+   */
+  healthDebt?: number;
+  /**
+   * Related state, persisted INSIDE the document's transaction.
+   *
+   * Runs even when the document's text is unchanged: related state has its own
+   * lifecycle and can move while the parent hash does not. A throw here is a
+   * HARD failure — the document and the related state roll back together, and
+   * the cursor holds — because a parent committed without the state that was
+   * supposed to accompany it is exactly the half-applied write the single
+   * boundary exists to prevent.
+   */
+  persistRelated?: (tx: Tx) => Promise<void>;
+}
+
+const asItem = (v: CanonicalDoc | IngestItem): IngestItem => ("doc" in v ? v : { doc: v });
+
+/** Debt must be a real count. A NaN would silently vanish from every sum. */
+function validDebt(n: number | undefined, id: string): number {
+  if (n === undefined) return 0;
+  if (!Number.isInteger(n) || n < 0)
+    throw new Error(`ingest item ${id}: healthDebt must be a non-negative integer, got ${n}`);
+  return n;
 }
 
 export async function ingestDocs(
   source: string,
-  docs: AsyncIterable<CanonicalDoc> | Iterable<CanonicalDoc>,
+  docs: AsyncIterable<CanonicalDoc | IngestItem> | Iterable<CanonicalDoc | IngestItem>,
   cursorOf?: (doc: CanonicalDoc) => string | null,
   tenant = "default",
 ): Promise<void> {
-  const { setCursor, upsertDocument } = await import("../store.js");
+  const { setCursor, upsertDocumentInTx } = await import("../store.js");
+  const { withTransaction } = await import("../db.js");
   const client = await connect();
-  const outcome: IngestOutcome = { seen: 0, changed: 0, failed: 0, target: null };
+  const outcome: IngestOutcome = { seen: 0, changed: 0, failed: 0, healthDebt: 0, target: null };
   let latest: string | null = null;
   let retryFrom: string | null = null;
   // A failure thrown by the GENERATOR — i.e. any HTTP error inside a
@@ -43,11 +99,26 @@ export async function ingestDocs(
   // operator must see the failure — but only after the cursor is safe.
   let fatal: unknown;
   try {
-    for await (const doc of docs) {
+    for await (const entry of docs) {
+      const item = asItem(entry);
+      const doc = item.doc;
       outcome.seen += 1;
       const value = cursorOf ? cursorOf(doc) : null;
+      let debt = 0;
       try {
-        if (await upsertDocument(client, doc)) {
+        // Validated INSIDE the per-item guard. Outside it, a malformed count
+        // would escape as a fatal listing error and abort every remaining
+        // document — punishing the whole run for one caller's bad field.
+        debt = validDebt(item.healthDebt, doc.id);
+        // ONE transaction owns the document and everything that must land with
+        // it. The hook runs unconditionally, not only when the text changed:
+        // related state moves independently of the parent hash.
+        const changed = await withTransaction(client, async (tx) => {
+          const didChange = await upsertDocumentInTx(tx, doc);
+          await item.persistRelated?.(tx);
+          return didChange;
+        });
+        if (changed) {
           outcome.changed += 1;
           console.log(`  ~ ${doc.id}`);
         }
@@ -57,6 +128,11 @@ export async function ingestDocs(
         if (value && (retryFrom === null || value < retryFrom)) retryFrom = value;
         continue;
       }
+      // Debt is counted only once the document actually landed, and it does NOT
+      // touch retryFrom — the watermark still advances past a document that is
+      // itself correct.
+      outcome.healthDebt += debt;
+      if (debt > 0) console.log(`  · ${doc.id}: ${debt} related item(s) did not land`);
       if (value && (latest === null || value > latest)) latest = value;
     }
   } catch (err: any) {
@@ -71,11 +147,14 @@ export async function ingestDocs(
           // saw, has not SUCCEEDED — even though it may legitimately advance the
           // cursor past the documents that did land. Only a clean pass resets
           // the freshness clock.
-          succeeded: !fatal && outcome.failed === 0,
+          // Debt makes a run unhealthy exactly as a hard failure does — work
+          // that should have landed did not. What it must never do is pin the
+          // cursor, which is why it is absent from `retryFrom` entirely.
+          succeeded: !fatal && outcome.failed === 0 && outcome.healthDebt === 0,
           // Recorded even when the run is already marked unsuccessful: "3
           // documents did not land" and "the run failed" are different facts,
           // and only the first says how much of the corpus is missing.
-          itemFailures: outcome.failed,
+          itemFailures: outcome.failed + outcome.healthDebt,
           ...(fatal ? { error: String((fatal as Error)?.message ?? fatal).slice(0, 500) } : {}),
         });
     } finally {
@@ -94,6 +173,11 @@ export async function ingestDocs(
   if (outcome.failed > 0)
     summary += `, ${outcome.failed} FAILED (cursor held at ${outcome.target})`;
   else if (latest) summary += `, cursor -> ${latest}`;
+  // Reported separately and never as "held": saying the cursor was held when it
+  // advanced would describe the opposite of what happened, and an operator
+  // reading it would go looking for a stuck connector that is not stuck.
+  if (outcome.healthDebt > 0)
+    summary += `, ${outcome.healthDebt} related item(s) missing (cursor advanced)`;
   console.log(summary);
 }
 
