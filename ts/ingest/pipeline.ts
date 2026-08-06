@@ -72,6 +72,10 @@ export async function ingestDocs(
           // cursor past the documents that did land. Only a clean pass resets
           // the freshness clock.
           succeeded: !fatal && outcome.failed === 0,
+          // Recorded even when the run is already marked unsuccessful: "3
+          // documents did not land" and "the run failed" are different facts,
+          // and only the first says how much of the corpus is missing.
+          itemFailures: outcome.failed,
           ...(fatal ? { error: String((fatal as Error)?.message ?? fatal).slice(0, 500) } : {}),
         });
     } finally {
@@ -193,11 +197,17 @@ export async function ingestRepo(
   tenant: string,
   /** Groups granted read on every file. Empty = owner-only, and fail-closed. */
   aclGroups: readonly string[] = [],
-): Promise<{ upserted: number; deleted: number; skipped: number }> {
+): Promise<{ upserted: number; deleted: number; skipped: number; failed: number }> {
   const { upsertDocument } = await import("../store.js");
   const ckey = `code:${key}${subpath ? `:${subpath}` : ""}`;
   const client = await connect();
-  const out = { upserted: 0, deleted: 0, skipped: 0 };
+  // `skipped` and `failed` are deliberately separate counters. A path excluded
+  // by the filter, or a binary blob, is a policy decision working correctly —
+  // every real repository skips vendored trees and images. A file the source
+  // could not READ is a document that should be in the corpus and is not.
+  // Reporting them as one number would mark every repository permanently
+  // incomplete, which is the same as reporting nothing at all.
+  const out = { upserted: 0, deleted: 0, skipped: 0, failed: 0 };
   try {
     const head = await source.headSha();
     const cursor = await getCursor(client, ckey, tenant);
@@ -230,8 +240,11 @@ export async function ingestRepo(
       try {
         content = await source.readFile(path);
       } catch (err: any) {
-        out.skipped++;
-        console.log(`  skip ${path} (read failed: ${err.message})`);
+        // A read failure is NOT a skip. The file is in the repository, it
+        // belongs in the corpus, and it is missing — so it is counted where a
+        // reader of the coverage report will see it.
+        out.failed++;
+        console.log(`  ! ${path} (read failed: ${err.message})`);
         return;
       }
       if (!filter.acceptContent(content)) {
@@ -292,10 +305,34 @@ export async function ingestRepo(
       out.deleted += removed.length;
       for (const id of removed) console.log(`  - ${id} (quarantined after full resync)`);
     }
-    await setCursor(client, ckey, head, tenant);
-    console.log(
-      `${ckey}: ${out.upserted} upserted, ${out.deleted} deleted, ${out.skipped} skipped -> ${head}`,
-    );
+    // A run that could not read some of the files it listed has not fully
+    // succeeded, however many others landed. Before this, the default
+    // `{succeeded: true}` recorded a fresh `last_success_at` and a zero failure
+    // count for exactly that run, so the corpus reported itself current while
+    // documents were missing from it.
+    //
+    // The cursor is HELD at its prior value when anything failed, which is the
+    // part that makes the item-failure count truthful rather than decorative.
+    // Advancing to `head` puts the unreadable file BEHIND the cursor: it did not
+    // change, so no later incremental scan ever lists it again. The next run
+    // triggered by some unrelated commit then reads everything it sees, records
+    // `itemFailures: 0`, and restores `complete: true` while that document stays
+    // permanently absent. A per-run count is only honest if the failed items are
+    // guaranteed to be in the next run's scan, and only holding the cursor
+    // guarantees that. This mirrors `retryFrom` in ingestDocs above.
+    //
+    // Holding at null on a first full run is deliberate and is not a lost
+    // cursor: with no earlier position to fall back to, "never advanced" is what
+    // forces the next run to re-list the whole repository, which necessarily
+    // includes the files that failed.
+    const advanceTo = out.failed === 0 ? head : cursor;
+    await setCursor(client, ckey, advanceTo, tenant, {
+      succeeded: out.failed === 0,
+      itemFailures: out.failed,
+    });
+    let line = `${ckey}: ${out.upserted} upserted, ${out.deleted} deleted, ${out.skipped} skipped`;
+    if (out.failed > 0) line += `, ${out.failed} FAILED`;
+    console.log(`${line} -> ${head}`);
   } finally {
     await client.end();
     await source.dispose();

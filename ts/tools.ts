@@ -228,11 +228,17 @@ const searchCodeSpec: ToolSpec = {
     // they are verified by construction. Stating the zero keeps the response
     // contract identical on every answer path — a caller must never have to
     // tell "nothing was withheld" apart from "this path forgot to say".
+    // `["code"]` rather than null: this tool reads exactly one source, so a
+    // missing code connector is a fact about THIS answer. Reporting "no source
+    // in particular was requested" would let an absent index read as an empty
+    // repository.
     return attachFreshness(
       c,
       v,
       { ...out, unverified_excluded: 0 },
       out.results.map((r) => r.updatedAt),
+      ["code"],
+      a.include_superseded === true,
     );
   },
 };

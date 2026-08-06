@@ -36,20 +36,29 @@ export async function getCursor(
 export async function setCursor(
   client: Db,
   source: string,
-  cursor: string,
+  /** Null pins the connector at "never advanced", so the next run rescans from
+   *  the beginning. That is the correct hold when a first full run lost files:
+   *  there is no earlier position to fall back to. */
+  cursor: string | null,
   tenant = "default",
-  outcome: { succeeded: boolean; error?: string } = { succeeded: true },
+  outcome: { succeeded: boolean; error?: string; itemFailures?: number } = { succeeded: true },
 ): Promise<void> {
   await client.query(
-    "INSERT INTO sync_cursors (tenant, source, cursor, last_success_at, consecutive_failures, last_error)" +
-      " VALUES ($1, $2, $3, CASE WHEN $4 THEN now() END, CASE WHEN $4 THEN 0 ELSE 1 END, $5)" +
+    "INSERT INTO sync_cursors (tenant, source, cursor, last_success_at, consecutive_failures," +
+      " last_error, last_run_item_failures)" +
+      " VALUES ($1, $2, $3, CASE WHEN $4 THEN now() END, CASE WHEN $4 THEN 0 ELSE 1 END, $5, $6)" +
       " ON CONFLICT (tenant, source) DO UPDATE SET" +
       "   cursor = EXCLUDED.cursor," +
       "   updated_at = now()," +
       "   last_success_at = CASE WHEN $4 THEN now() ELSE sync_cursors.last_success_at END," +
       "   consecutive_failures = CASE WHEN $4 THEN 0 ELSE sync_cursors.consecutive_failures + 1 END," +
-      "   last_error = $5",
-    [tenant, source, cursor, outcome.succeeded, outcome.error ?? null],
+      "   last_error = $5," +
+      // Overwritten every run, never accumulated: this describes the corpus as
+      // it stands now, so a run that reads the previously-unreadable files must
+      // be able to report zero. A running total could only grow and would
+      // eventually describe nothing.
+      "   last_run_item_failures = $6",
+    [tenant, source, cursor, outcome.succeeded, outcome.error ?? null, outcome.itemFailures ?? 0],
   );
 }
 

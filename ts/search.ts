@@ -9,6 +9,7 @@ import { z } from "zod";
 import { rrf } from "./core/fusion.js";
 import { modifier } from "./core/ranking.js";
 import { type Route, classify } from "./core/router.js";
+import { type Coverage, coverageFor } from "./coverage.js";
 import type { Db } from "./db.js";
 import { type Embedder, getEmbedder, toVec } from "./embed/index.js";
 import { OVERSAMPLE, loadCentroids, probeClusters, signature } from "./embed/ivf.js";
@@ -324,6 +325,11 @@ async function searchDocsInner(
       linked: neighborhood.edges,
       ...evidenceBounds([toDate(doc?.updated_at)]),
       corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
+      // `["jira"]`, not the caller's filter: this shortcut answers out of Jira
+      // alone, so Jira's health is the whole coverage basis. Passing the filter
+      // through (null when unfiltered) would let an unrelated dead Confluence
+      // connector mark a perfectly good Jira answer incomplete.
+      coverage: await coverageForViewer(client, viewer, ["jira"], includeSuperseded),
       // get_doc returns the document body itself, so there is no chunk to
       // re-match and nothing can be withheld. Zero by construction.
       unverified_excluded: 0,
@@ -351,6 +357,9 @@ async function searchDocsInner(
         // that was really "I forgot to select the column".
         ...evidenceBounds(code.results.map((r) => toDate(r.updatedAt))),
         corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
+        // Same reasoning as the entity shortcut: this path consults the code
+        // index and nothing else, so that is the basis it reports.
+        coverage: await coverageForViewer(client, viewer, ["code"], includeSuperseded),
         // Zero by construction on this path, not zero by omission: code
         // citations are cut from the current body, so nothing can be withheld.
         // Stated so the response contract is identical on every route.
@@ -586,6 +595,7 @@ async function searchDocsInner(
     results,
     ...bounds,
     corpus_current_to: currentTo,
+    coverage: await coverageForViewer(client, viewer, sources, includeSuperseded),
     unverified_excluded: unverifiedExcluded,
     ...confidence(results, arms),
   };
@@ -663,22 +673,54 @@ function toDate(v: unknown): Date | null {
 }
 
 /**
- * Attach the answer-level freshness contract to a response shape that did not
- * go through searchDocsInner — currently the direct search_code tool.
+ * The coverage basis for this answer, from the viewer capability.
  *
- * Exported so every answer path states AS-OF the same way. A guarantee one tool
- * quietly opts out of is not a guarantee.
+ * A thin adapter so `coverage.ts` needs no opinion about `Viewer`, and so every
+ * answer path derives the disclosure from the SAME authenticated tenant and
+ * groups the ACL predicate uses. A coverage report computed against a different
+ * scope than the results would be worse than none: it would be a confident
+ * statement about a corpus other than the one that was searched.
+ */
+export const coverageForViewer = (
+  client: Db,
+  viewer: Viewer,
+  requested: readonly string[] | null,
+  includeSuperseded = false,
+): Promise<Coverage> =>
+  coverageFor(
+    client,
+    { tenant: viewer.tenant, principal: viewer.principal, groups: viewer.groups },
+    requested,
+    includeSuperseded,
+  );
+
+/**
+ * Attach the answer-level freshness and coverage contract to a response shape
+ * that did not go through searchDocsInner — currently the direct search_code
+ * tool.
+ *
+ * Exported so every answer path states AS-OF and coverage the same way. A
+ * guarantee one tool quietly opts out of is not a guarantee — which is exactly
+ * how the code route ended up the single arm serving unverified evidence.
+ *
+ * `requested` names the sources this answer could possibly have drawn from, so
+ * a tool that only ever reads one source still reports honestly when that source
+ * is missing. Passing `null` here would say "no source in particular was asked
+ * for", which for a single-source tool is false.
  */
 export async function attachFreshness<T extends Record<string, unknown>>(
   client: Db,
   viewer: Viewer,
   out: T,
   stamps: Array<string | null>,
+  requested: readonly string[] | null = null,
+  includeSuperseded = false,
 ): Promise<T & Record<string, unknown>> {
   return {
     ...out,
     ...evidenceBounds(stamps.map(toDate)),
     corpus_current_to: await corpusCurrentTo(client, viewer.tenant),
+    coverage: await coverageForViewer(client, viewer, requested, includeSuperseded),
   };
 }
 
