@@ -10,6 +10,12 @@ import { cqlTs } from "./confluence.js";
 import { stableListing } from "./stable-pages.js";
 
 export const PAGE_SIZE = 50;
+
+/** Cheapest read-only "does this token work" call — never depends on any
+ *  project/issue existing or being visible to it. Used only by `eil doctor`. */
+export async function doctorProbe(client: DcClient): Promise<void> {
+  await getJson(client, "/rest/api/2/myself");
+}
 // issuelinks is the point of this list. EIL was regex-scraping ticket keys out
 // of prose while Jira's OWN structured dependency graph — blocks, is-blocked-by,
 // duplicates, relates-to — sat one field away and was never requested. assignee,

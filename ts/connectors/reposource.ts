@@ -4,7 +4,8 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { type DcClient, type Fetcher, getJson, makeClient } from "./auth.js";
+import { repoMaxBytes } from "../ingest/repofilter.js";
+import { type DcClient, type Fetcher, getJson, getRaw, makeClient } from "./auth.js";
 
 const run = promisify(execFile);
 
@@ -246,12 +247,12 @@ export class BitbucketApiSource implements RepoSource {
   }
   async readFile(path: string): Promise<string> {
     const at = this.head ?? (await this.headSha());
-    const res = await this.client.fetcher(
-      new URL(`${this.client.baseUrl}${this.base()}/raw/${enc(path)}?at=${at}`),
-      { headers: this.client.headers },
-    );
-    if (!res.ok) throw new Error(`raw ${path} -> ${res.status}`);
-    return res.text();
+    // Through the shared timeout+retry funnel (was a bare this.client.fetcher
+    // call, silently skipping both), bounded by the same EIL_REPO_MAX_BYTES
+    // policy the post-fetch content filter already enforces — an oversized
+    // file is now rejected during the fetch itself, not after downloading it
+    // in full over the network.
+    return getRaw(this.client, `${this.base()}/raw/${enc(path)}?at=${at}`, repoMaxBytes());
   }
   blobUrl(path: string): string | null {
     return `${this.client.baseUrl}${this.base()}/browse/${enc(path)}?at=${this.branch}`;

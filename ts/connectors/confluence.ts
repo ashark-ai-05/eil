@@ -11,6 +11,12 @@ import { stableListing } from "./stable-pages.js";
 
 export const PAGE_SIZE = 50;
 
+/** Cheapest read-only "does this token work" call — never depends on any
+ *  space/page existing or being visible to it. Used only by `eil doctor`. */
+export async function doctorProbe(client: DcClient): Promise<void> {
+  await getJson(client, "/rest/api/user/current");
+}
+
 /** ISO timestamp -> the 'yyyy-MM-dd HH:mm' form CQL/JQL accept. */
 export function cqlTs(isoCursor: string): string {
   return isoCursor.slice(0, 16).replace("T", " ");

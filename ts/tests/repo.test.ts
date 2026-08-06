@@ -2,13 +2,18 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { Fetcher } from "../connectors/auth.js";
 import { BitbucketApiSource, GitCloneSource } from "../connectors/reposource.js";
 import type { RepoChange, RepoSource } from "../connectors/reposource.js";
 import { chunk } from "../core/chunker.js";
 import { detectSource, normalizeCode, repoKey } from "../ingest/code.js";
-import { RepoFilter, globToRegExp } from "../ingest/repofilter.js";
+import {
+  DEFAULT_REPO_MAX_BYTES,
+  RepoFilter,
+  globToRegExp,
+  repoMaxBytes,
+} from "../ingest/repofilter.js";
 
 const codeDoc = (body: string) =>
   ({
@@ -81,6 +86,37 @@ describe("repofilter", () => {
     expect(f.acceptContent("clean text")).toBe(true);
     expect(f.acceptContent("has\0nul")).toBe(false); // binary
     expect(f.acceptContent("x".repeat(101))).toBe(false); // oversize
+  });
+});
+
+describe("repoMaxBytes — fails safe, never open", () => {
+  it("uses the configured value when it is a finite positive number", () => {
+    expect(repoMaxBytes({ EIL_REPO_MAX_BYTES: "1000" })).toBe(1000);
+  });
+
+  it("falls back to the default when unset", () => {
+    expect(repoMaxBytes({})).toBe(DEFAULT_REPO_MAX_BYTES);
+  });
+
+  it("falls back to the default for NaN, empty, zero, or negative input — never disables the guard", () => {
+    // NaN is the sharpest case: every `bytes > maxBytes` comparison against
+    // NaN is false, which is exactly "unbounded" — the one outcome this
+    // function must never produce.
+    for (const bad of ["not-a-number", "", "0", "-5", "NaN", "Infinity"]) {
+      expect(repoMaxBytes({ EIL_REPO_MAX_BYTES: bad })).toBe(DEFAULT_REPO_MAX_BYTES);
+    }
+  });
+
+  it("RepoFilter's own default and the raw-fetch cap share the same safe value for malformed input", () => {
+    const env = { EIL_REPO_MAX_BYTES: "not-a-number" };
+    const safe = repoMaxBytes(env);
+    expect(safe).toBe(DEFAULT_REPO_MAX_BYTES);
+    // Wires the resolved value through exactly like BitbucketApiSource.readFile
+    // does, and proves the guard is genuinely enforced (rejects content over
+    // the safe default) rather than silently disabled by a NaN that leaked
+    // through unvalidated.
+    const f = new RepoFilter({ maxBytes: safe });
+    expect(f.acceptContent("x".repeat(safe + 1))).toBe(false);
   });
 });
 
@@ -260,6 +296,87 @@ describe("BitbucketApiSource (mock)", () => {
     expect(changes).toEqual({ "apps/web/src/a.ts": "M" });
     expect(changes["apps/api/src/b.ts"]).toBeUndefined();
     expect(changes["apps/web-extra/c.ts"]).toBeUndefined();
+  });
+});
+
+describe("BitbucketApiSource readFile — shared timeout+retry funnel, bounded body", () => {
+  const savedMaxBytes = process.env.EIL_REPO_MAX_BYTES;
+  afterEach(() => {
+    if (savedMaxBytes === undefined) delete process.env.EIL_REPO_MAX_BYTES;
+    else process.env.EIL_REPO_MAX_BYTES = savedMaxBytes;
+  });
+
+  it("retries a transient failure instead of surfacing it immediately (closes the old client.fetcher bypass)", async () => {
+    let rawCalls = 0;
+    const fetcher: Fetcher = async (url) => {
+      const u = String(url);
+      if (u.includes("/commits")) return json({ values: [{ id: "abc123" }] });
+      if (u.includes("/raw/")) {
+        rawCalls++;
+        if (rawCalls === 1) return new Response("temporarily unavailable", { status: 503 });
+        return new Response("file contents", { status: 200 });
+      }
+      return json({});
+    };
+    const s = new BitbucketApiSource(
+      { ref: "PAY/retry", branch: "main", baseUrl: "http://localhost:7990", token: "fake-token" },
+      fetcher,
+    );
+    expect(await s.readFile("src/a.ts")).toBe("file contents");
+    expect(rawCalls).toBe(2); // the 503 was retried through getRaw, not surfaced on the first attempt
+  });
+
+  it("rejects an oversized response via Content-Length, releasing the stream rather than buffering it", async () => {
+    process.env.EIL_REPO_MAX_BYTES = "10";
+    let canceled = false;
+    const bigBody = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("x".repeat(100)));
+        controller.close();
+      },
+      cancel() {
+        canceled = true;
+      },
+    });
+    const fetcher: Fetcher = async (url) => {
+      const u = String(url);
+      if (u.includes("/commits")) return json({ values: [{ id: "abc123" }] });
+      if (u.includes("/raw/")) {
+        return new Response(bigBody, { status: 200, headers: { "content-length": "100" } });
+      }
+      return json({});
+    };
+    const s = new BitbucketApiSource(
+      { ref: "PAY/retry", branch: "main", baseUrl: "http://localhost:7990", token: "fake-token" },
+      fetcher,
+    );
+    // Rejected off the declared Content-Length alone (100 > 10), never returning
+    // any of the enqueued bytes back to the caller.
+    await expect(s.readFile("src/a.ts")).rejects.toThrow(
+      /exceeds 10 bytes \(Content-Length: 100\)/,
+    );
+    expect(canceled).toBe(true); // the stream was explicitly released, not left dangling
+  });
+
+  it("rejects a response that exceeds the cap while streaming, when Content-Length is absent", async () => {
+    process.env.EIL_REPO_MAX_BYTES = "10";
+    const bigBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("x".repeat(100)));
+        controller.close();
+      },
+    });
+    const fetcher: Fetcher = async (url) => {
+      const u = String(url);
+      if (u.includes("/commits")) return json({ values: [{ id: "abc123" }] });
+      if (u.includes("/raw/")) return new Response(bigBody, { status: 200 }); // no content-length
+      return json({});
+    };
+    const s = new BitbucketApiSource(
+      { ref: "PAY/retry", branch: "main", baseUrl: "http://localhost:7990", token: "fake-token" },
+      fetcher,
+    );
+    await expect(s.readFile("src/a.ts")).rejects.toThrow(/exceeds 10 bytes while streaming/);
   });
 });
 

@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { Fetcher } from "../connectors/auth.js";
 import {
   classifyFetchError,
   connectorCredentialChecks,
@@ -18,6 +19,12 @@ import {
   runDoctor,
   scrubSecrets,
 } from "../doctor.js";
+
+const jsonOk = (body: unknown = {}) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 
 describe("nodeVersionCheck", () => {
   it("accepts the declared floor and above", () => {
@@ -163,6 +170,118 @@ describe("connectorCredentialChecks", () => {
     expect(confluence.detail).toContain("not in environment");
     expect(confluence.detail).toContain("presence unknown");
     expect(confluence.detail).toContain("keychain");
+  });
+});
+
+describe("runDoctor — authenticated connector readiness", () => {
+  const noKeychain = () => null; // explicit no-op: proves isolation, not just absence of a real credential
+
+  it("reports a configured URL with no credentials as blocked, without making a network call", async () => {
+    let called = false;
+    const fetcher: Fetcher = async () => {
+      called = true;
+      return jsonOk();
+    };
+    const report = await runDoctor({ EIL_JIRA_URL: "https://127.0.0.1:1" }, fetcher, noKeychain);
+    const auth = report.checks.find((c) => c.name === "auth:jira")!;
+    expect(auth.ok).toBe(false);
+    expect(auth.blocked).toEqual({ reason: "missing_credentials" });
+    expect(auth.detail).not.toContain("authentication rejected"); // distinct from a real auth failure
+    expect(called).toBe(false);
+  });
+
+  it("reports success when the token is present and the probe's minimal authenticated request succeeds", async () => {
+    const fetcher: Fetcher = async (url) => {
+      expect(String(url)).toContain("/rest/api/2/myself"); // the real production probe path, not a stand-in
+      return jsonOk({ name: "asha" });
+    };
+    const report = await runDoctor(
+      { EIL_JIRA_URL: "https://127.0.0.1:1", EIL_JIRA_TOKEN: "pat-123" },
+      fetcher,
+      noKeychain,
+    );
+    const auth = report.checks.find((c) => c.name === "auth:jira")!;
+    expect(auth.ok).toBe(true);
+    expect(auth.blocked).toBeUndefined();
+  });
+
+  it("distinguishes a rejected token (401/403) from a blocked/missing-credentials state", async () => {
+    const fetcher: Fetcher = async () => new Response("nope", { status: 401 });
+    const report = await runDoctor(
+      { EIL_JIRA_URL: "https://127.0.0.1:1", EIL_JIRA_TOKEN: "stale-token" },
+      fetcher,
+      noKeychain,
+    );
+    const auth = report.checks.find((c) => c.name === "auth:jira")!;
+    expect(auth.ok).toBe(false);
+    expect(auth.blocked).toBeUndefined();
+    expect(auth.detail).toContain("authentication rejected (401)");
+  });
+
+  it("skips entirely for a source with no configured URL — same as the existing reachability check", async () => {
+    const report = await runDoctor({}, async () => jsonOk(), noKeychain);
+    expect(report.checks.some((c) => c.name.startsWith("auth:"))).toBe(false);
+  });
+
+  it("credentials are never present in a check's serialized output, even on success", async () => {
+    const fetcher: Fetcher = async () => jsonOk({ name: "asha" });
+    const report = await runDoctor(
+      { EIL_JIRA_URL: "https://127.0.0.1:1", EIL_JIRA_TOKEN: "super-secret-pat" },
+      fetcher,
+      noKeychain,
+    );
+    expect(JSON.stringify(report)).not.toContain("super-secret-pat");
+  });
+
+  // The bug the previous round left in place: makeClient's fallback chain
+  // (token ?? keychain(...) ?? env[...]) meant an injected `env` that OMITS
+  // a token still fell through to the REAL process.env/keychain underneath
+  // it. This is the actual regression — an ambient credential is set for
+  // real, and the injected env deliberately omits it — proving the new
+  // explicit CredentialSource genuinely isolates rather than merely
+  // happening to pass because nothing ambient existed to leak.
+  describe("isolation from the real ambient environment", () => {
+    const savedToken = process.env.EIL_JIRA_TOKEN;
+    const savedUser = process.env.EIL_JIRA_USER;
+    afterEach(() => {
+      if (savedToken === undefined) delete process.env.EIL_JIRA_TOKEN;
+      else process.env.EIL_JIRA_TOKEN = savedToken;
+      if (savedUser === undefined) delete process.env.EIL_JIRA_USER;
+      else process.env.EIL_JIRA_USER = savedUser;
+    });
+
+    it("an ambient EIL_JIRA_TOKEN/EIL_JIRA_USER cannot leak into an injected env that omits them", async () => {
+      process.env.EIL_JIRA_TOKEN = "ambient-real-token-should-never-be-used";
+      process.env.EIL_JIRA_USER = "ambient-real-user-should-never-be-used";
+      let called = false;
+      const fetcher: Fetcher = async () => {
+        called = true;
+        return jsonOk();
+      };
+      const report = await runDoctor({ EIL_JIRA_URL: "https://127.0.0.1:1" }, fetcher, noKeychain);
+      const auth = report.checks.find((c) => c.name === "auth:jira")!;
+      expect(auth.blocked).toEqual({ reason: "missing_credentials" });
+      expect(called).toBe(false);
+    });
+
+    it("an injected keychain resolver IS honored — the point of isolation is a real substitute path, not a dead end", async () => {
+      let called = false;
+      const fetcher: Fetcher = async (url) => {
+        called = true;
+        expect(String(url)).toContain("/rest/api/2/myself");
+        return jsonOk({ name: "asha" });
+      };
+      const injectedKeychain = (account: string) =>
+        account === "EIL_JIRA_TOKEN" ? "keychain-supplied-token" : null;
+      const report = await runDoctor(
+        { EIL_JIRA_URL: "https://127.0.0.1:1" }, // no env token — must come from the injected keychain
+        fetcher,
+        injectedKeychain,
+      );
+      const auth = report.checks.find((c) => c.name === "auth:jira")!;
+      expect(auth.ok).toBe(true);
+      expect(called).toBe(true);
+    });
   });
 });
 

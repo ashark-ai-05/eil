@@ -7,14 +7,31 @@
  * this is that section made executable.
  */
 
+import { type DcClient, type Fetcher, makeClient } from "./connectors/auth.js";
+import { doctorProbe as bitbucketDoctorProbe } from "./connectors/bitbucket.js";
+import { doctorProbe as confluenceDoctorProbe } from "./connectors/confluence.js";
+import { doctorProbe as elkDoctorProbe } from "./connectors/elk.js";
 import { scopedFetch } from "./connectors/httpclient.js";
-import { SOURCES, keychainBackend, resolvedSource } from "./connectors/keychain.js";
+import { HttpRequestError } from "./connectors/httperror.js";
+import { doctorProbe as jiraDoctorProbe } from "./connectors/jira.js";
+import { SOURCES, getSecret, keychainBackend, resolvedSource } from "./connectors/keychain.js";
+import { redactUrl, scrubSecrets } from "./connectors/redact.js";
 import { connect, dsn, pendingMigrations, safeDsn } from "./db.js";
+
+// Re-exported for backward compatibility — these lived inline in this file
+// before being extracted to connectors/redact.ts so the HTTP client's own
+// structured errors could redact through the same code.
+export { redactUrl, scrubSecrets };
 
 export interface DoctorCheck {
   name: string;
   ok: boolean;
   detail: string;
+  /** Present only when a check was skipped rather than attempted — e.g. an
+   *  authenticated probe that never made a network call because no
+   *  credentials were found. Additive: absent on every check that predates
+   *  this field, so existing consumers of the JSON report are unaffected. */
+  blocked?: { reason: string };
 }
 
 export interface DoctorReport {
@@ -53,55 +70,6 @@ export function proxyEnvCheck(env: NodeJS.ProcessEnv): DoctorCheck {
     noProxy ? `NO_PROXY=${noProxy}` : "NO_PROXY not set",
   ].filter(Boolean);
   return { name: "proxy-env", ok: true, detail: parts.join(", ") };
-}
-
-/**
- * Query parameter names that commonly carry a credential. Matched
- * case-insensitively; separators (-, _) are optional so `api_key`,
- * `api-key` and `apikey` all match.
- */
-const CREDENTIAL_QUERY_KEY_RE =
-  /^(token|api[-_]?key|access[-_]?token|password|secret|auth|pat|client[-_]?secret)$/i;
-
-/**
- * Redacts a URL for safe logging: masks all userinfo (not just user:pass —
- * a username-only form like `https://AKIA...@host` is exactly as sensitive)
- * and any credential-shaped query parameter, preserving host/path context.
- * Input that isn't a parseable URL gets a safe placeholder rather than
- * being echoed verbatim, since a malformed string can still contain a raw
- * credential a regex alone might miss the shape of.
- */
-export function redactUrl(input: string): string {
-  let url: URL;
-  try {
-    url = new URL(input);
-  } catch {
-    return "<unparseable-url>";
-  }
-  if (url.username || url.password) {
-    url.username = "***";
-    url.password = "";
-  }
-  for (const key of url.searchParams.keys()) {
-    if (CREDENTIAL_QUERY_KEY_RE.test(key)) url.searchParams.set(key, "***");
-  }
-  return url.toString();
-}
-
-/**
- * Textual scrub for free-form error messages, which — unlike a single
- * `EIL_<PREFIX>_URL` value — aren't guaranteed to be one parseable URL; a
- * driver or fetch error can embed a credential-bearing URL inside prose.
- * Same masking rules as redactUrl, applied by pattern rather than by
- * parsing, since there is no single URL to construct a URL object from.
- */
-export function scrubSecrets(text: string): string {
-  return text
-    .replace(/:\/\/[^\s/@]+(:[^\s/@]*)?@/g, "://***@")
-    .replace(
-      /([?&](?:token|api[-_]?key|access[-_]?token|password|secret|auth|pat|client[-_]?secret)=)[^&\s]*/gi,
-      "$1***",
-    );
 }
 
 async function dbCheck(): Promise<DoctorCheck> {
@@ -200,7 +168,121 @@ async function connectivityChecks(env: NodeJS.ProcessEnv): Promise<DoctorCheck[]
   return out;
 }
 
-export async function runDoctor(env: NodeJS.ProcessEnv = process.env): Promise<DoctorReport> {
+/**
+ * Minimal, read-only authenticated request per connector — proves the token
+ * actually works, not just that it exists (see `connectorCredentialChecks`)
+ * or that the host is reachable (see `connectivityChecks`). Each probe
+ * takes the doctor-isolated `env` too, for the rare probe (ELK) that needs
+ * additional configured scope (the index to search) beyond the client
+ * itself — reading that from ambient `process.env` instead would reopen
+ * exactly the isolation gap fixed below for credentials.
+ *
+ * Each is chosen to be identity- or scope-bound, not instance-wide
+ * metadata: an endpoint a misconfigured or anonymous-access instance could
+ * satisfy without a valid token would let this check report success for a
+ * token that doesn't actually work.
+ */
+const AUTH_PROBES: Record<string, (client: DcClient, env: NodeJS.ProcessEnv) => Promise<void>> = {
+  confluence: confluenceDoctorProbe,
+  jira: jiraDoctorProbe,
+  bitbucket: bitbucketDoctorProbe,
+  elk: elkDoctorProbe,
+};
+
+/**
+ * Classifies a failed authenticated probe. Distinct from `classifyFetchError`
+ * (bare reachability): a `HttpRequestError` here means the connection and
+ * TLS handshake succeeded and a real API response came back, so a 401/403
+ * is reported as a credential problem specifically, not folded into the
+ * generic transport-failure bucket.
+ */
+function classifyAuthError(err: unknown): string {
+  if (err instanceof HttpRequestError) {
+    const { status } = err.info;
+    if (status === 401 || status === 403) {
+      return `authentication rejected (${status}) — the token was reached but not accepted; it may be expired, revoked, or lack the required permission`;
+    }
+    return `request failed (${status ?? err.info.code})`;
+  }
+  return classifyFetchError(err);
+}
+
+/**
+ * Every check here uses `makeClient()` — the same production client
+ * construction connectors use for a real sync — not a parallel simplified
+ * probe, per the "consuming the same production configuration paths"
+ * requirement. This DOES query the OS keychain when no env token is set,
+ * unlike `connectorCredentialChecks` above: an authenticated readiness
+ * check that refuses to look at the one place a keychain-only setup keeps
+ * its token would just be a worse reachability check.
+ * `connectorCredentialChecks` stays side-effect-free by design; this is
+ * the deliberately more thorough companion.
+ *
+ * `env` and `keychain` are both passed to `makeClient()` as an explicit
+ * `CredentialSource` — never left to `makeClient`'s own real-`process.env`/
+ * real-keychain default. A caller (a test) that supplies an `env` missing a
+ * token must see exactly that: `makeClient` must not silently recover the
+ * token from the REAL ambient environment or the REAL keychain underneath
+ * an injected `env` — that would defeat the entire point of injecting one.
+ * The production call (`runDoctor()` with no arguments) passes real
+ * `process.env` and the real `getSecret`, so production behavior — do
+ * consult the keychain — is unchanged.
+ *
+ * A configured URL with no credentials anywhere (in the given `env` or via
+ * the given `keychain`) is reported as `blocked`, not as an authentication
+ * failure — no network call is made, since there is nothing to
+ * authenticate with yet.
+ */
+async function authReadinessChecks(
+  env: NodeJS.ProcessEnv,
+  keychain: (account: string) => string | null,
+  fetcher?: Fetcher,
+): Promise<DoctorCheck[]> {
+  const out: DoctorCheck[] = [];
+  for (const source of Object.keys(SOURCES)) {
+    const urlVar = `EIL_${source.toUpperCase()}_URL`;
+    const url = env[urlVar];
+    if (!url) continue; // not configured — nothing to authenticate
+    const probe = AUTH_PROBES[source];
+    if (!probe) continue; // no probe defined for this source yet
+
+    const tokenVar = SOURCES[source]!;
+    let client: DcClient;
+    try {
+      client = makeClient(source.toUpperCase(), url, undefined, fetcher, { env, keychain });
+    } catch {
+      out.push({
+        name: `auth:${source}`,
+        ok: false,
+        blocked: { reason: "missing_credentials" },
+        detail: `no credentials found in environment or keychain for ${urlVar} — run \`eil auth login ${source}\` or set ${tokenVar}`,
+      });
+      continue;
+    }
+
+    try {
+      await probe(client, env);
+      out.push({ name: `auth:${source}`, ok: true, detail: "authenticated request succeeded" });
+    } catch (err) {
+      out.push({ name: `auth:${source}`, ok: false, detail: classifyAuthError(err) });
+    }
+  }
+  return out;
+}
+
+/**
+ * `fetcher` and `keychain` are injectable seams for `authReadinessChecks`
+ * alone (defaults reproduce real production behavior — `scopedFetch` and
+ * the real OS keychain) — tests use them to prove doctor's authenticated
+ * probes without a live Confluence/Jira/Bitbucket/ELK instance and without
+ * a real credential anywhere in reach, the same injected-fetcher pattern
+ * every connector test in this repo already uses.
+ */
+export async function runDoctor(
+  env: NodeJS.ProcessEnv = process.env,
+  fetcher?: Fetcher,
+  keychain: (account: string) => string | null = getSecret,
+): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [
     nodeVersionCheck(),
     proxyEnvCheck(env),
@@ -208,6 +290,7 @@ export async function runDoctor(env: NodeJS.ProcessEnv = process.env): Promise<D
     keychainCheck(),
     ...connectorCredentialChecks(env),
     ...(await connectivityChecks(env)),
+    ...(await authReadinessChecks(env, keychain, fetcher)),
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

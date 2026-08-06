@@ -2,10 +2,13 @@
  * verified without org access. */
 
 import { describe, expect, it } from "vitest";
-import type { Fetcher } from "../connectors/auth.js";
-import { BitbucketSearchClient } from "../connectors/bitbucket.js";
+import { type Fetcher, makeClient } from "../connectors/auth.js";
+import {
+  BitbucketSearchClient,
+  doctorProbe as bitbucketDoctorProbe,
+} from "../connectors/bitbucket.js";
 import { ConfluenceClient, PAGE_SIZE, cqlTs } from "../connectors/confluence.js";
-import { ElkClient } from "../connectors/elk.js";
+import { ElkClient, doctorProbe as elkDoctorProbe } from "../connectors/elk.js";
 import { JiraClient } from "../connectors/jira.js";
 import { normalize as normalizePage } from "../ingest/confluence.js";
 import { normalize as normalizeIssue } from "../ingest/jira.js";
@@ -362,6 +365,39 @@ describe("bitbucket", () => {
     expect(tooLong.error).toBeDefined();
     expect(tooLong.results).toEqual([]);
   });
+
+  // searchCode's postJson call declares idempotency: "query" — a mutation to
+  // "none" would make this fail (the first 503 would surface immediately
+  // instead of being retried), so this test is the regression Codex's design
+  // review asked for: proof the retry-safety choice is actually load-bearing,
+  // not just a call site that happens to work either way.
+  it("retries a transient search failure (proves the 'query' idempotency choice is exercised, not incidental)", async () => {
+    let calls = 0;
+    const fetcher: Fetcher = async () => {
+      calls++;
+      if (calls === 1) return new Response("rate limited", { status: 429 });
+      return jsonResponse({ code: { count: 0, values: [] } });
+    };
+    const client = new BitbucketSearchClient("https://bitbucket.example.com", "pat", fetcher);
+    const result: any = await client.searchCode("handle_retry");
+    expect(result.count).toBe(0);
+    expect(calls).toBe(2);
+  });
+
+  it("doctorProbe checks the identity-scoped recent-repos endpoint, not instance metadata a public endpoint could satisfy anonymously", async () => {
+    const fetcher: Fetcher = async (url) => {
+      const u = String(url);
+      // Instance metadata succeeds even for an invalid/no token on some
+      // configurations — proves nothing about this specific credential.
+      if (u.includes("/application-properties")) return jsonResponse({ version: "8.9.0" });
+      if (u.includes("/profile/recent/repos")) return new Response("unauthorized", { status: 401 });
+      throw new Error(`unexpected doctorProbe call: ${u}`);
+    };
+    const client = makeClient("BITBUCKET", "https://bitbucket.example.com", "pat", fetcher);
+    // The real probe hits the identity-scoped endpoint and correctly fails,
+    // never the metadata endpoint that would have reported false success.
+    await expect(bitbucketDoctorProbe(client)).rejects.toThrow();
+  });
 });
 
 describe("elk", () => {
@@ -414,6 +450,69 @@ describe("elk", () => {
     };
     const client = new ElkClient("https://elk.example.com", "pat", fetcher);
     await client.fetchLogs("q", undefined, 60, 500);
+  });
+
+  // Same regression as bitbucket's above: fetchLogs's postJson call declares
+  // idempotency: "query" (an ES _search is a read) — mutating that to "none"
+  // would make this fail.
+  it("retries a transient search failure (proves the 'query' idempotency choice is exercised)", async () => {
+    let calls = 0;
+    const fetcher: Fetcher = async () => {
+      calls++;
+      if (calls === 1) return new Response("service unavailable", { status: 503 });
+      return jsonResponse({ hits: { total: { value: 0 }, hits: [] } });
+    };
+    const client = new ElkClient("https://elk.example.com", "pat", fetcher);
+    const out: any = await client.fetchLogs("q");
+    expect(out.total).toBe(0);
+    expect(calls).toBe(2);
+  });
+
+  it("doctorProbe searches the configured index rather than checking cluster health — works even when cluster-monitor would be forbidden", async () => {
+    const fetcher: Fetcher = async (url) => {
+      const u = String(url);
+      // An index-scoped credential need not have cluster-monitor privileges
+      // — if the probe used /_cluster/health, this would fail a token the
+      // real EIL search path can use just fine.
+      if (u.includes("/_cluster/health")) return new Response("forbidden", { status: 403 });
+      if (u.includes("/logs-custom-*/_search")) {
+        return jsonResponse({ hits: { total: { value: 0 }, hits: [] } });
+      }
+      throw new Error(`unexpected doctorProbe call: ${u}`);
+    };
+    const client = makeClient("ELK", "https://elk.example.com", "pat", fetcher);
+    await expect(
+      elkDoctorProbe(client, { EIL_ELK_INDEX: "logs-custom-*" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("doctorProbe falls back to logs-* when no index is configured, matching fetchLogs' own default", async () => {
+    const fetcher: Fetcher = async (url) => {
+      expect(String(url)).toContain("/logs-*/_search");
+      return jsonResponse({ hits: { total: { value: 0 }, hits: [] } });
+    };
+    const client = makeClient("ELK", "https://elk.example.com", "pat", fetcher);
+    await elkDoctorProbe(client, {});
+  });
+});
+
+describe("getJson retry mechanics", () => {
+  it("gives each retry attempt its own fresh AbortSignal, never a reused/already-aborted one", async () => {
+    let calls = 0;
+    const seenSignals: AbortSignal[] = [];
+    const fetcher: Fetcher = async (_url, init) => {
+      calls++;
+      const signal = init?.signal as AbortSignal;
+      seenSignals.push(signal);
+      expect(signal.aborted).toBe(false); // never handed an already-aborted signal
+      if (calls < 3) return new Response("rate limited", { status: 429 });
+      return jsonResponse({ id: "777", title: "t", version: {}, body: { storage: { value: "" } } });
+    };
+    await new ConfluenceClient("https://c.example.com", "pat", fetcher).getPage("777");
+    expect(calls).toBe(3);
+    // Each attempt got a distinct AbortSignal object, not the same one reused
+    // (and therefore already-fired) across retries.
+    expect(new Set(seenSignals).size).toBe(3);
   });
 });
 
