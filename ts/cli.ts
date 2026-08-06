@@ -159,9 +159,23 @@ ingest
   .command("obsidian")
   .description("Ingest an Obsidian vault (markdown files; curated quality tier)")
   .requiredOption("--vault <dir>", "Vault root directory")
+  .option("--acl-group <g...>", "groups granted read; omit for owner-only (fail-closed)")
+  .option("--follow-symlinks", "follow symlinks that stay inside --vault (default: skip them)")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
     await dispatch("obsidian", opts);
+  });
+
+ingest
+  .command("files")
+  .description("Ingest a directory tree of markdown files (identified by --collection)")
+  .requiredOption("--root <dir>", "Directory to walk")
+  .requiredOption("--collection <name>", "Stable collection name; part of every document id")
+  .option("--acl-group <g...>", "groups granted read; omit for owner-only (fail-closed)")
+  .option("--follow-symlinks", "follow symlinks that stay inside --root (default: skip them)")
+  .option("--tenant <tenant>", "tenant", "default")
+  .action(async (opts) => {
+    await dispatch("filesystem", opts);
   });
 
 ingest
@@ -1293,6 +1307,8 @@ schedule
   .command("obsidian")
   .description("Schedule an Obsidian vault sync")
   .requiredOption("--vault <dir>", "Vault root directory")
+  .option("--acl-group <g...>", "groups granted read; omit for owner-only (fail-closed)")
+  .option("--follow-symlinks", "follow symlinks that stay inside --vault (default: skip them)")
   .option("--tenant <tenant>", "tenant", "default")
   .option("--window-ms <ms>", "dedupe window for repeated schedule calls", String(60 * 60 * 1000))
   .action(async (opts) => {

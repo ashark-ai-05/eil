@@ -297,22 +297,109 @@ export const jiraSpec: TimestampSource<JiraIssue> = {
  * unconditional for the same reason — a full listing every run means a deletion
  * is detectable every run.
  */
+/**
+ * Run a filesystem-shaped source: walk, ingest, and reconcile only when the
+ * snapshot is whole.
+ *
+ * Shared by both profiles because the sequencing — and specifically the
+ * completeness coupling — is identical, and it is the part that is dangerous to
+ * get wrong twice.
+ */
+async function runFsProfile(
+  spec: ListingSource,
+  profile: import("./filesystem.js").FsProfile,
+  root: string,
+  opts: RunOptions,
+): Promise<void> {
+  const { walkTree } = await import("./filesystem.js");
+  const { setCursor } = await import("../store.js");
+  const snapshot = walkTree(root, profile, {
+    tenant: opts.tenant,
+    followSymlinks: opts.followSymlinks === true,
+    aclGroups: (opts.aclGroup as string[] | undefined) ?? [],
+  });
+
+  for (const f of snapshot.failures) console.log(`  ! ${f.path}: ${f.reason}`);
+  if (snapshot.unresolvedLinks > 0)
+    console.log(`  ${snapshot.unresolvedLinks} link(s) could not be resolved unambiguously`);
+
+  await ingestDocs(
+    spec.name,
+    snapshot.docs.map((d) => assertSourceMatches(spec, d)),
+    undefined,
+    opts.tenant,
+  );
+
+  // A cursorless source still has to record a run outcome, or coverage has
+  // nothing to disclose: no watermark does not mean no health. The cursor value
+  // stays null — there is no resumable position — while success state and the
+  // item-failure count are persisted exactly as they are for every other source.
+  // "Safe to reconcile" and "healthy run" are DIFFERENT questions, and conflating
+  // them was the defect here. An unresolved link means an edge that should exist
+  // does not — the run is not healthy — but it says nothing about whether the
+  // listing saw every file, so it must not block deletion detection.
+  //
+  // So: health counts resolution debt, reconcile does not.
+  const unhealthy = snapshot.failures.length + snapshot.unresolvedLinks;
+  const outcomeDb = await connect();
+  try {
+    await setCursor(outcomeDb, spec.name, null, opts.tenant, {
+      succeeded: unhealthy === 0,
+      itemFailures: unhealthy,
+    });
+  } finally {
+    await outcomeDb.end();
+  }
+
+  // Reconcile ONLY on a whole snapshot. A partial walk is missing documents it
+  // failed to read, not documents that were deleted, and tombstoning from it
+  // removes live corpus. Documents that DID read are still updated above.
+  if (!snapshot.complete) {
+    console.log(
+      `  reconcile skipped: ${snapshot.failures.length} failure(s) make this listing incomplete`,
+    );
+    return;
+  }
+  await runReconcile(
+    spec.name,
+    async () => ({ ids: snapshot.docs.map((d) => d.id), complete: true }),
+    opts.tenant,
+  );
+}
+
 export const obsidianSpec: ListingSource = {
   name: "obsidian",
   description: "An Obsidian vault of markdown files on local disk",
   cursor: "none",
   requiresEnv: [],
   run: async (opts) => {
-    const { walkVault } = await import("./obsidian.js");
-    const docs = walkVault(opts.vault as string, opts.tenant).map((d) =>
-      assertSourceMatches(obsidianSpec, d),
-    );
-    await ingestDocs(obsidianSpec.name, docs, undefined, opts.tenant);
-    await runReconcile(
-      obsidianSpec.name,
-      async () => ({ ids: docs.map((d) => d.id), complete: true }),
-      opts.tenant,
-    );
+    const { obsidianProfile } = await import("./filesystem.js");
+    await runFsProfile(obsidianSpec, obsidianProfile, opts.vault as string, opts);
+  },
+};
+
+/**
+ * A general directory tree.
+ *
+ * `collection` is required and is part of every id: two roots in one tenant
+ * that both contain `README.md` would otherwise collapse into one document.
+ */
+export const filesystemSpec: ListingSource = {
+  name: "filesystem",
+  description: "A directory tree of markdown files, identified by collection",
+  cursor: "none",
+  requiresEnv: [],
+  run: async (opts) => {
+    const { filesystemProfile } = await import("./filesystem.js");
+    const collection = String(opts.collection ?? "");
+    // Dot-only names are rejected explicitly: `.` and `..` match the portable
+    // alphabet but are path segments, not stable identifiers, and an id
+    // containing one is a trap for anything that later treats it as a path.
+    if (!/^[A-Za-z0-9._-]+$/.test(collection) || /^\.+$/.test(collection))
+      throw new Error(
+        `filesystem: --collection must be a portable name ([A-Za-z0-9._-]+), got ${JSON.stringify(collection)}`,
+      );
+    await runFsProfile(filesystemSpec, filesystemProfile(collection), opts.root as string, opts);
   },
 };
 
@@ -348,7 +435,7 @@ export const codeSpec: RevisionSource = {
 };
 
 export const REGISTRY: Record<string, SourceSpec> = Object.fromEntries(
-  [confluenceSpec, jiraSpec, obsidianSpec, codeSpec].map((s) => [s.name, s]),
+  [confluenceSpec, jiraSpec, obsidianSpec, filesystemSpec, codeSpec].map((s) => [s.name, s]),
 );
 
 /** Sources whose ingest runs through the generic scope path. Narrowed by the

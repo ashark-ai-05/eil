@@ -376,13 +376,37 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
   }
   for (const c of fresh) {
     const h = chunkHash(c);
-    if (priorBySeq.get(c.seq) === h) continue; // identical text — keep the row and its vector
+    if (priorBySeq.get(c.seq) === h) {
+      // Identical TEXT, so the vector is still correct and must be preserved.
+      // But text-independent metadata can still have moved: a file relocated
+      // with an unchanged body changes its locator, and chunks written before
+      // migration 0029 have none at all. Skipping the row entirely left those
+      // NULL forever — a locator that never backfills is the same silent
+      // absence this column was added to remove.
+      await client.query(
+        "UPDATE chunks SET heading_path = $1, source_path = $2, line_start = $3, line_end = $4" +
+          " WHERE tenant = $5 AND doc_id = $6 AND seq = $7",
+        [
+          c.headingPath,
+          c.sourcePath ?? null,
+          c.lineStart ?? null,
+          c.lineEnd ?? null,
+          doc.tenant,
+          c.docId,
+          c.seq,
+        ],
+      );
+      continue;
+    }
     await client.query(
-      "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash, code_tokens)" +
-        " VALUES ($1, $2, $3, $4, $5, $6, $7)" +
+      "INSERT INTO chunks (tenant, doc_id, seq, heading_path, text, content_hash, code_tokens," +
+        " source_path, line_start, line_end)" +
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)" +
         " ON CONFLICT (tenant, doc_id, seq) DO UPDATE SET" +
         "   heading_path = EXCLUDED.heading_path, text = EXCLUDED.text," +
         "   content_hash = EXCLUDED.content_hash, code_tokens = EXCLUDED.code_tokens," +
+        "   source_path = EXCLUDED.source_path, line_start = EXCLUDED.line_start," +
+        "   line_end = EXCLUDED.line_end," +
         // the text changed, so any stored vector is now for the wrong text —
         // these four columns are dead since migration 0020 (nothing reads them)
         // but are kept NULLed for a clean rollback to the pre-0020 read path
@@ -397,6 +421,9 @@ async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
         // Only code carries an expansion; prose is served by the english tsv.
         // tsv_code is GENERATED from this column, so the two cannot drift.
         doc.source === "code" ? codeTokens(doc.codePath ?? doc.title, c.text) : null,
+        c.sourcePath ?? null,
+        c.lineStart ?? null,
+        c.lineEnd ?? null,
       ],
     );
     // The REAL vectors live in chunk_vectors (migration 0020) and the NULLing
