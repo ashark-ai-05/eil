@@ -1404,6 +1404,81 @@ schedule
   });
 
 /**
+ * F6: operational database backup/restore drill. Explicitly NOT a tenant
+ * export tool, and NOT a substitute for a hosting provider's own managed
+ * snapshot policy (RDS/Neon/Supabase) — see ts/backup.ts's module comment.
+ * pg_dump/pg_restore act on a server catalog, so this refuses pglite:// the
+ * same way the worker/schedule commands do.
+ */
+function requireRealPostgresForBackup(): void {
+  if (dsn().startsWith("pglite://")) {
+    console.log(
+      "this command requires real Postgres (pg_dump/pg_restore act on a server catalog) — " +
+        "EIL_DATABASE_URL is pglite://, which is the local/zero-install tier and has no dump/restore tooling.",
+    );
+    process.exit(1);
+  }
+}
+
+const backup = program
+  .command("backup")
+  .description(
+    "Operational database backup/restore drill (F6) — not a tenant export, not a substitute for managed snapshots",
+  );
+
+backup
+  .command("create")
+  .description(
+    "Dump the operational catalog to a portable backup bundle directory (secrets schema excluded)",
+  )
+  .option("--output <path>", "backup bundle directory path", ".eil-backup")
+  .action(async (opts) => {
+    requireRealPostgresForBackup();
+    const { runBackup } = await import("./backup.js");
+    try {
+      const result = await runBackup({ outputPath: opts.output });
+      console.log(`backup written: ${result.backupPath}`);
+      console.log(`  archive:  ${result.archivePath}`);
+      console.log(`  metadata: ${result.metadataPath}`);
+      console.log(
+        `  eil ${result.metadata.eilVersion}, ${result.metadata.appliedMigrations.length} migrations applied (per the source database's own schema_migrations), ` +
+          `excluded schemas: ${result.metadata.excludedSchemas.join(", ")}`,
+      );
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
+  });
+
+backup
+  .command("restore")
+  .description("Restore a backup bundle into a NEW database — refuses to overwrite an existing one")
+  .requiredOption("--input <path>", "backup bundle directory to restore from")
+  .requiredOption("--target-db <name>", "database name to create and restore into")
+  .action(async (opts) => {
+    requireRealPostgresForBackup();
+    const { runRestore } = await import("./backup.js");
+    try {
+      const result = await runRestore({ backupPath: opts.input, targetDatabase: opts.targetDb });
+      console.log(`restored into:          ${result.targetDatabase}`);
+      console.log(`secrets schema present: ${result.verification.secretsSchemaPresent}`);
+      for (const [table, n] of Object.entries(result.verification.tableCounts)) {
+        console.log(`  ${table.padEnd(14)} ${n}`);
+      }
+      console.log(
+        "\nOperator recovery steps: point EIL_DATABASE_URL at the restored database, run " +
+          "'eil db migrate' to confirm the schema is current (the archive predates any migration " +
+          "applied after the backup was taken), spot-check application behavior against it, and only " +
+          "then promote it to serve traffic. Connector credentials are NOT restored — re-run " +
+          "'eil auth' for each connector this deployment needs before it can sync live sources.",
+      );
+    } catch (err: any) {
+      console.log(err.message);
+      process.exit(1);
+    }
+  });
+
+/**
  * The one place a failed command becomes something a person can act on.
  *
  * CatalogNotReady already carries a finished message, so it prints as-is with
