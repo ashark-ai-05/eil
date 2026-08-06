@@ -129,60 +129,30 @@ export interface JiraLike {
   getIssue(key: string): Promise<JiraIssue>;
 }
 
+/**
+ * These two are now thin adapters over the registry.
+ *
+ * They were the same thirty lines twice — same cursor read, same generator
+ * wrapper, same ingestDocs call — differing only in which normalizer they
+ * imported and which method fetched one item. The protocol lives once in
+ * `ingestScope`; the per-source differences live in the specs.
+ *
+ * Kept as named functions rather than deleted because they are the CLI's and
+ * the tests' entry points, and collapsing the duplication is a separate concern
+ * from renaming the callers.
+ */
 export async function ingestConfluenceScope(
   conf: ConfluenceLike,
   scope: Scope,
   tenant: string,
 ): Promise<void> {
-  const { normalize } = await import("./confluence.js");
-  if (scope.kind === "pages") {
-    const ids = scope.ids;
-    const withDesc = scope.withDescendants;
-    console.log(`scope confluence:pages [${ids.join(", ")}]${withDesc ? " +descendants" : ""}`);
-    const docs = (async function* () {
-      for (const id of ids) {
-        yield normalize(await conf.getPage(id), tenant);
-        if (withDesc) for await (const p of conf.descendants(id)) yield normalize(p, tenant);
-      }
-    })();
-    await ingestDocs("confluence", docs, undefined, tenant); // explicit fetch: no cursor
-    return;
-  }
-  const key = cursorKey("confluence", scope);
-  if (key === null) throw new Error(`unexpected non-cursor confluence scope: ${scope.kind}`);
-  const client = await connect();
-  const cursor = await getCursor(client, key, tenant);
-  await client.end();
-  console.log(`scope ${key} from cursor: ${cursor ?? "(beginning)"}`);
-  const pred = predicate(scope) ?? undefined;
-  const docs = (async function* () {
-    for await (const p of conf.updatedSince(cursor, pred)) yield normalize(p, tenant);
-  })();
-  await ingestDocs(key, docs, (d) => d.updatedAt ?? null, tenant);
+  const { confluenceSpec, ingestScope } = await import("./registry.js");
+  await ingestScope(confluenceSpec, conf as never, scope, tenant);
 }
 
 export async function ingestJiraScope(jira: JiraLike, scope: Scope, tenant: string): Promise<void> {
-  const { normalize } = await import("./jira.js");
-  if (scope.kind === "issues") {
-    const keys = scope.keys;
-    console.log(`scope jira:issues [${keys.join(", ")}]`);
-    const docs = (async function* () {
-      for (const k of keys) yield normalize(await jira.getIssue(k), tenant);
-    })();
-    await ingestDocs("jira", docs, undefined, tenant); // explicit fetch: no cursor
-    return;
-  }
-  const key = cursorKey("jira", scope);
-  if (key === null) throw new Error(`unexpected non-cursor jira scope: ${scope.kind}`);
-  const client = await connect();
-  const cursor = await getCursor(client, key, tenant);
-  await client.end();
-  console.log(`scope ${key} from cursor: ${cursor ?? "(beginning)"}`);
-  const pred = predicate(scope) ?? undefined;
-  const docs = (async function* () {
-    for await (const i of jira.updatedSince(cursor, pred)) yield normalize(i, tenant);
-  })();
-  await ingestDocs(key, docs, (d) => d.updatedAt ?? null, tenant);
+  const { jiraSpec, ingestScope } = await import("./registry.js");
+  await ingestScope(jiraSpec, jira as never, scope, tenant);
 }
 
 async function tombstone(client: Db, id: string, tenant: string): Promise<void> {

@@ -7,7 +7,6 @@ import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type pg from "pg";
 import { type Db, connect, dsn, migrate, provisionRuntimeRoles } from "./db.js";
-import { ingestDocs, runReconcile } from "./ingest/pipeline.js";
 import { promptHidden } from "./prompt.js";
 import type { Finding, ReqsBody } from "./reqs/schema.js";
 
@@ -82,18 +81,31 @@ db.command("embedded")
     await new Promise(() => {}); // foreground until signalled
   });
 
-function fixturePayloads(path: string): any[] {
-  const payloads = JSON.parse(readFileSync(path, "utf-8"));
-  return Array.isArray(payloads) ? payloads : [payloads];
-}
-
-/** Build a connector client with a clean one-line error when env is missing —
- * validated BEFORE any output, mirroring the original guard semantics. */
-function liveClient<T>(build: () => T, requiredEnv: string): T {
+/**
+ * The single ingest entry point: resolve a spec from the registry and run it.
+ *
+ * Every `eil ingest <source>` command routes through here, so the registry is
+ * the ONE inventory of what EIL can ingest rather than one list in the registry
+ * and a second implied by which commands happen to exist. Client construction,
+ * environment validation and reconcile all live in the spec; this function
+ * knows nothing about any particular source.
+ *
+ * Named sources are looked up rather than imported, so a command naming a
+ * source with no spec fails loudly here instead of silently doing nothing.
+ */
+async function dispatch(name: string, opts: Record<string, unknown>): Promise<void> {
+  const { REGISTRY, runSource } = await import("./ingest/registry.js");
+  const spec = REGISTRY[name];
+  if (!spec) {
+    console.log(
+      `unknown source "${name}" (registered: ${Object.keys(REGISTRY).sort().join(", ")})`,
+    );
+    process.exit(1);
+  }
   try {
-    return build();
+    await runSource(spec, { tenant: "default", ...opts } as never);
   } catch (err: any) {
-    console.log(`live sync needs ${requiredEnv} set (personal credentials); ${err.message}`);
+    console.log(err.message);
     process.exit(1);
   }
 }
@@ -119,27 +131,7 @@ ingest
       console.log(err.message);
       process.exit(1);
     }
-    const { normalize } = await import("./ingest/confluence.js");
-    if (opts.fixture) {
-      await ingestDocs(
-        "confluence",
-        fixturePayloads(opts.fixture).map((p) => normalize(p, opts.tenant)),
-      );
-      return;
-    }
-    const { ConfluenceClient } = await import("./connectors/confluence.js");
-    const { ingestConfluenceScope } = await import("./ingest/pipeline.js");
-    const conf = liveClient(
-      () => new ConfluenceClient(),
-      "EIL_CONFLUENCE_URL and EIL_CONFLUENCE_TOKEN",
-    );
-    for (const scope of scopes) await ingestConfluenceScope(conf, scope, opts.tenant);
-    if (opts.reconcile)
-      await runReconcile(
-        "confluence",
-        async () => ({ ids: await conf.listIds(), complete: true }),
-        opts.tenant,
-      );
+    await dispatch("confluence", { ...opts, scopes });
   });
 
 ingest
@@ -160,24 +152,7 @@ ingest
       console.log(err.message);
       process.exit(1);
     }
-    const { normalize } = await import("./ingest/jira.js");
-    if (opts.fixture) {
-      await ingestDocs(
-        "jira",
-        fixturePayloads(opts.fixture).map((p) => normalize(p, opts.tenant)),
-      );
-      return;
-    }
-    const { JiraClient } = await import("./connectors/jira.js");
-    const { ingestJiraScope } = await import("./ingest/pipeline.js");
-    const jira = liveClient(() => new JiraClient(), "EIL_JIRA_URL and EIL_JIRA_TOKEN");
-    for (const scope of scopes) await ingestJiraScope(jira, scope, opts.tenant);
-    if (opts.reconcile)
-      await runReconcile(
-        "jira",
-        async () => ({ ids: await jira.listIds(), complete: true }),
-        opts.tenant,
-      );
+    await dispatch("jira", { ...opts, scopes });
   });
 
 ingest
@@ -186,15 +161,7 @@ ingest
   .requiredOption("--vault <dir>", "Vault root directory")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
-    const { walkVault } = await import("./ingest/obsidian.js");
-    const docs = walkVault(opts.vault, opts.tenant);
-    await ingestDocs("obsidian", docs);
-    // The vault walk IS a full listing — reconcile deletions on every run.
-    await runReconcile(
-      "obsidian",
-      async () => ({ ids: docs.map((d) => d.id), complete: true }),
-      opts.tenant,
-    );
+    await dispatch("obsidian", opts);
   });
 
 ingest
@@ -212,29 +179,11 @@ ingest
   )
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (refs: string[], opts) => {
-    const { detectSource, repoKey } = await import("./ingest/code.js");
-    const { GitCloneSource, BitbucketApiSource } = await import("./connectors/reposource.js");
-    const { RepoFilter } = await import("./ingest/repofilter.js");
-    const { ingestRepo } = await import("./ingest/pipeline.js");
     if (opts.name && refs.length > 1) {
       console.log("--name cannot be used with multiple repos (it would collide their ids/cursors)");
       process.exit(1);
     }
-    const filter = new RepoFilter({ includes: opts.include, excludes: opts.exclude });
-    for (const ref of refs) {
-      const kind = opts.source ?? detectSource(ref);
-      const key = repoKey(ref, opts.name);
-      const cfg = { ref, branch: opts.branch, subpath: opts.subpath };
-      const source =
-        kind === "bitbucket"
-          ? liveClient(
-              () => new BitbucketApiSource(cfg),
-              "EIL_BITBUCKET_URL and EIL_BITBUCKET_TOKEN",
-            )
-          : new GitCloneSource(cfg);
-      console.log(`ingest ${kind} ${key} (${ref})`);
-      await ingestRepo(source, key, opts.subpath, filter, opts.tenant, opts.aclGroup ?? []);
-    }
+    await dispatch("code", { ...opts, refs });
   });
 
 program
