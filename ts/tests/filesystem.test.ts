@@ -679,9 +679,9 @@ describe("locator metadata backfills without disturbing vectors", () => {
       const seed = async (cols: string, vals: string) =>
         db
           .query(
-            `INSERT INTO documents (id, tenant, source, title, quality_tier, content_hash, body, ingested_by)` +
+            "INSERT INTO documents (id, tenant, source, title, quality_tier, content_hash, body, ingested_by)" +
               ` VALUES ('d1','default','filesystem','t','authored','h','b','me')` +
-              ` ON CONFLICT DO NOTHING`,
+              " ON CONFLICT DO NOTHING",
           )
           .then(() =>
             db.query(
