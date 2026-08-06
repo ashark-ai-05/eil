@@ -28,6 +28,61 @@ export interface Db {
   end(): Promise<void>;
 }
 
+/**
+ * A `Db` known to be inside an open transaction.
+ *
+ * Branded so transaction ownership is a TYPE fact rather than a convention.
+ * PostgreSQL transactions do not nest: a function that issues its own
+ * `BEGIN`/`COMMIT` on an arbitrary connection is safe alone and actively
+ * destructive when composed — the inner `BEGIN` is a no-op with a warning, the
+ * inner `COMMIT` commits the CALLER's entire transaction early, and the inner
+ * `ROLLBACK` discards unrelated work the caller had already done.
+ *
+ * Making the brand unforgeable outside `withTransaction` means an operation
+ * that mutates can require proof it is inside a transaction it does not own.
+ */
+declare const transactionBrand: unique symbol;
+export type Tx = Db & { readonly [transactionBrand]: true };
+
+/**
+ * A connection that is NOT already in a transaction.
+ *
+ * `Tx` structurally extends `Db`, so a parameter typed `Db` happily accepts one
+ * — which let `withTransaction(tx, ...)` compile and recreated the exact nested
+ * BEGIN/inner-COMMIT hazard the brand exists to rule out. Declaring the brand
+ * as optional-undefined here excludes `Tx`, whose brand is `true`, while a plain
+ * `Db` (which has no such property) still satisfies it.
+ */
+export type TxHost = Db & { readonly [transactionBrand]?: undefined };
+
+/**
+ * The ONE owner of `BEGIN`/`COMMIT`/`ROLLBACK`.
+ *
+ * Every transactional operation composes inside a single callback, so a
+ * connector can write a canonical document and its artifacts under one commit
+ * boundary — which is the whole point, and was impossible while each operation
+ * opened its own.
+ */
+export async function withTransaction<T>(db: TxHost, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  await db.query("BEGIN");
+  try {
+    const out = await fn(db as unknown as Tx);
+    await db.query("COMMIT");
+    return out;
+  } catch (err) {
+    // The ORIGINAL error is what the caller needs. A rollback that also fails —
+    // a dead connection, an aborted transaction — must not replace the cause
+    // with a message about cleanup, which would hide the actual defect behind
+    // its own side effect.
+    try {
+      await db.query("ROLLBACK");
+    } catch {
+      /* preserve the original failure */
+    }
+    throw err;
+  }
+}
+
 export type DatabasePurpose = "admin" | "api" | "worker";
 
 const DATABASE_ENV: Record<DatabasePurpose, string> = {

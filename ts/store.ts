@@ -7,7 +7,7 @@ import { userInfo } from "node:os";
 import { type CanonicalDoc, chunkHash, contentHash, sha256 } from "./contracts/models.js";
 import { chunk } from "./core/chunker.js";
 import { codeTokens } from "./core/tokenize.js";
-import type { Db } from "./db.js";
+import { type Db, type Tx, withTransaction } from "./db.js";
 import { extractCodeIndex } from "./ingest/codeindex.js";
 import { type SecretFinding, scanSecrets, unacceptedFindings } from "./ingest/secrets.js";
 
@@ -202,21 +202,32 @@ export async function reconcileCodeRepo(
 }
 
 /**
- * Insert or update a document and its chunks/links. Returns true if content
- * changed. Owns its transaction: FOR UPDATE only serializes concurrent
- * upserts if the lock survives past the SELECT, so the BEGIN/COMMIT lives
- * here rather than being an invisible caller obligation.
+ * Insert or update a document and its chunks/links inside a transaction the
+ * CALLER owns. Returns true if content changed.
+ *
+ * A document must be written transactionally — FOR UPDATE only serialises
+ * concurrent upserts if the lock survives past the SELECT — but owning the
+ * transaction here made the write impossible to COMPOSE. PostgreSQL
+ * transactions do not nest, so a connector writing a document and its
+ * attachments under one boundary had its transaction committed early by this
+ * function, and rolled back (losing unrelated work) when this function failed.
+ *
+ * The transaction-scoped form is therefore the primitive, and `upsertDocument`
+ * below is the standalone convenience built from it.
+ */
+export async function upsertDocumentInTx(tx: Tx, doc: CanonicalDoc): Promise<boolean> {
+  return upsertInTx(tx, doc);
+}
+
+/**
+ * Standalone upsert: opens and owns one transaction.
+ *
+ * Unchanged for every existing caller. Callers that need to write a document
+ * alongside other work in one commit boundary use
+ * `withTransaction(db, (tx) => upsertDocumentInTx(tx, doc))` instead.
  */
 export async function upsertDocument(client: Db, doc: CanonicalDoc): Promise<boolean> {
-  await client.query("BEGIN");
-  try {
-    const changed = await upsertInTx(client, doc);
-    await client.query("COMMIT");
-    return changed;
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  }
+  return withTransaction(client, (tx) => upsertDocumentInTx(tx, doc));
 }
 
 async function upsertInTx(client: Db, doc: CanonicalDoc): Promise<boolean> {
