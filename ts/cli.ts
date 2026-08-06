@@ -121,6 +121,7 @@ ingest
   .option("--with-descendants", "with --page: also ingest each page's subtree")
   .option("--query <cql>", "raw CQL predicate (advanced escape hatch)")
   .option("--reconcile", "after a FULL sync, delete catalog docs removed at the source")
+  .option("--attachments", "also store original attachment bytes (increases backup size)")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
     const { parseConfluenceScopes } = await import("./connectors/scope.js");
@@ -142,6 +143,7 @@ ingest
   .option("--issue <keys>", "one or more issue keys, comma-separated")
   .option("--query <jql>", "raw JQL predicate (advanced escape hatch)")
   .option("--reconcile", "after a FULL sync, delete catalog docs removed at the source")
+  .option("--attachments", "also store original attachment bytes (increases backup size)")
   .option("--tenant <tenant>", "tenant", "default")
   .action(async (opts) => {
     const { parseJiraScopes } = await import("./connectors/scope.js");
@@ -563,19 +565,19 @@ program
       // quarantine_until has been written and cleared since migration 0010 and
       // never READ, so a source-deleted document's body was retained forever —
       // a compliance regression against the hard delete it replaced.
-      const expired = await client.query(
-        "SELECT count(*)::int AS n FROM documents WHERE tombstoned_at IS NOT NULL" +
-          " AND quarantine_until IS NOT NULL AND quarantine_until < now()",
-      );
-      const n = Number(expired.rows[0]?.n ?? 0);
-      if (!opts.dryRun && n > 0)
-        await client.query(
-          "DELETE FROM documents WHERE tombstoned_at IS NOT NULL" +
-            " AND quarantine_until IS NOT NULL AND quarantine_until < now()",
+      //
+      // Delegated rather than inlined: attachments reference documents with
+      // ON DELETE RESTRICT, so removing a document now requires removing its
+      // evidence first, in one transaction, in that order.
+      const { purgeExpiredQuarantine } = await import("./purge.js");
+      const purged = await purgeExpiredQuarantine(client, { dryRun: Boolean(opts.dryRun) });
+      const verb = opts.dryRun ? "would purge" : "purged";
+      console.log(`  ${"quarantine expired".padEnd(22)} ${verb} ${purged.documents}`);
+      if (purged.artifactVersions > 0 || purged.artifactBlobs > 0)
+        console.log(
+          `  ${"  attachments".padEnd(22)} ${verb} ${purged.artifactVersions} reference(s), ` +
+            `${purged.artifactBlobs} blob(s)`,
         );
-      console.log(
-        `  ${"quarantine expired".padEnd(22)} ${opts.dryRun ? "would purge" : "purged"} ${n}`,
-      );
     } finally {
       await client.end();
     }

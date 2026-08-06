@@ -44,9 +44,25 @@ const FIELDS = [
 
 export class JiraClient {
   readonly client: DcClient;
+  /**
+   * Whether to ask Jira for the `attachment` field.
+   *
+   * Opt-in rather than always-on so that an issue fetched by a run WITHOUT
+   * attachments enabled comes back with the field genuinely absent. That
+   * absence is load-bearing: `listJiraAttachments` reads it as "not requested"
+   * and refuses to retire anything, where an empty array would mean "asked, and
+   * there are none" and would authorise deleting every stored attachment.
+   */
+  readonly wantAttachments: boolean;
 
-  constructor(baseUrl?: string, token?: string, fetcher?: Fetcher) {
+  constructor(
+    baseUrl?: string,
+    token?: string,
+    fetcher?: Fetcher,
+    opts: { attachments?: boolean } = {},
+  ) {
     this.client = makeClient("JIRA", baseUrl, token, fetcher);
+    this.wantAttachments = opts.attachments === true;
   }
 
   async *updatedSince(cursor: string | null, scope?: string): AsyncGenerator<JiraIssue> {
@@ -68,7 +84,7 @@ export class JiraClient {
   /** Fetch one issue live — the get_doc fresh=true pull-through (flow K5). */
   async getIssue(key: string): Promise<JiraIssue> {
     const data = await getJson(this.client, `/rest/api/2/issue/${encodeURIComponent(key)}`, {
-      fields: FIELDS,
+      fields: this.wantAttachments ? `${FIELDS},attachment` : FIELDS,
     });
     return this.toIssueDict(data);
   }
@@ -113,6 +129,10 @@ export class JiraClient {
       key: apiIssue.key,
       url: `${this.client.baseUrl}/browse/${apiIssue.key}`,
       fields: {
+        // Spread-conditional, NOT `attachment: f.attachment`: the difference
+        // between an absent key and a key holding undefined is exactly the
+        // requested/not-requested signal, and assigning undefined erases it.
+        ...("attachment" in f ? { attachment: f.attachment } : {}),
         summary: f.summary ?? "",
         status: f.status?.name ?? null,
         issuetype: f.issuetype?.name ?? null,

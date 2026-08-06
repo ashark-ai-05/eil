@@ -26,6 +26,7 @@
  *     catch at runtime — it is a spec that should not compile.
  */
 
+import type { DcClient } from "../connectors/auth.js";
 import type { Scope } from "../connectors/scope.js";
 import { cursorKey, predicate } from "../connectors/scope.js";
 import type { CanonicalDoc } from "../contracts/models.js";
@@ -36,7 +37,7 @@ import { normalize as normalizeConfluence } from "./confluence.js";
 import type { JiraIssue } from "./jira.js";
 import { normalize as normalizeJira } from "./jira.js";
 import type { ConfluenceLike, JiraLike } from "./pipeline.js";
-import { ingestDocs, runReconcile } from "./pipeline.js";
+import { type IngestItem, ingestDocs, runReconcile } from "./pipeline.js";
 
 /**
  * How a source resumes. The discriminant.
@@ -71,6 +72,8 @@ export interface RunOptions {
   scopes?: Scope[];
   /** Reconcile after a full sync: tombstone what the source no longer lists. */
   reconcile?: boolean;
+  /** Retain original attachment bytes. Off by default; see the acquisition hook. */
+  attachments?: boolean;
   /** Path to a JSON fixture (one payload or a list). Offline mode: the source's
    *  own normalizer is applied, no client is built and no cursor is written. */
   fixture?: string;
@@ -88,7 +91,7 @@ export interface RunOptions {
  */
 export interface TimestampSource<TRaw = unknown> extends SpecBase {
   cursor: "timestamp";
-  makeClient: () => Promise<unknown>;
+  makeClient: (opts: RunOptions) => Promise<unknown>;
   normalize: (raw: TRaw, tenant: string) => CanonicalDoc;
   updatedSince: (client: unknown, cursor: string | null, pred?: string) => AsyncGenerator<TRaw>;
   /** The named-items escape hatch: fetch exactly these, write no cursor. */
@@ -98,6 +101,20 @@ export interface TimestampSource<TRaw = unknown> extends SpecBase {
     fetch: (client: unknown, id: string, scope: Scope) => AsyncGenerator<TRaw>;
   };
   listIds: (client: unknown) => Promise<string[]>;
+  /**
+   * Optionally acquire related state for one document, BEFORE any transaction.
+   *
+   * Lives on the spec rather than in the runner because what is related is
+   * connector policy: the runner only knows that something must commit with the
+   * parent. Returns the debt incurred acquiring it and a closure that persists
+   * what was acquired inside the parent's transaction.
+   */
+  acquireRelated?: (
+    client: unknown,
+    raw: TRaw,
+    doc: CanonicalDoc,
+    opts: RunOptions,
+  ) => Promise<{ debt: number; persist: (tx: import("../db.js").Tx) => Promise<void> }>;
 }
 
 /**
@@ -149,15 +166,32 @@ export async function ingestScope<TRaw>(
   client: unknown,
   scope: Scope,
   tenant: string,
+  runOpts: RunOptions = { tenant },
 ): Promise<void> {
+  // ONE raw -> doc -> item path, shared by both dispatches below.
+  //
+  // It was two, and the explicit branch yielded bare documents — so
+  // `--attachments --page 123` silently acquired nothing while reporting a
+  // successful run. An option that does nothing on one of its two entry points
+  // is worse than an unimplemented one: it reads as coverage that was never
+  // attempted.
+  const toItem = async (raw: TRaw): Promise<CanonicalDoc | IngestItem> => {
+    const doc = assertSourceMatches(spec, spec.normalize(raw, tenant));
+    if (!spec.acquireRelated) return doc;
+    // Acquisition happens HERE, outside any transaction. A refusal becomes
+    // debt the runner records without pinning the cursor; only the persist
+    // closure runs inside the parent's commit.
+    const related = await spec.acquireRelated(client, raw, doc, runOpts);
+    return { doc, healthDebt: related.debt, persistRelated: related.persist };
+  };
+
   const explicit = spec.explicit;
   if (explicit && scope.kind === explicit.scopeKind) {
     const ids = explicit.idsOf(scope);
     console.log(`scope ${spec.name}:${scope.kind} [${ids.join(", ")}]`);
     const docs = (async function* () {
       for (const id of ids)
-        for await (const raw of explicit.fetch(client, id, scope))
-          yield assertSourceMatches(spec, spec.normalize(raw, tenant));
+        for await (const raw of explicit.fetch(client, id, scope)) yield await toItem(raw);
     })();
     // Explicit fetch writes no cursor: the caller named these items, so the run
     // says nothing about how far the source has been swept. Advancing a cursor
@@ -175,8 +209,7 @@ export async function ingestScope<TRaw>(
 
   const pred = predicate(scope) ?? undefined;
   const docs = (async function* () {
-    for await (const raw of spec.updatedSince(client, cursor, pred))
-      yield assertSourceMatches(spec, spec.normalize(raw, tenant));
+    for await (const raw of spec.updatedSince(client, cursor, pred)) yield await toItem(raw);
   })();
   // A per-document watermark is meaningful only for a timestamp source, which is
   // why this is the only runner that passes one.
@@ -233,14 +266,72 @@ export async function runSource(spec: SourceSpec, opts: RunOptions): Promise<voi
   }
 
   requireEnv();
-  const client = await spec.makeClient();
-  for (const scope of opts.scopes ?? []) await ingestScope(spec, client, scope, opts.tenant);
+  const client = await spec.makeClient(opts);
+  for (const scope of opts.scopes ?? []) await ingestScope(spec, client, scope, opts.tenant, opts);
   if (opts.reconcile)
     await runReconcile(
       spec.name,
       async () => ({ ids: await spec.listIds(client), complete: true }),
       opts.tenant,
     );
+}
+
+/**
+ * Attachment acquisition shared by both Atlassian specs.
+ *
+ * Off unless `--attachments` is passed. An attachment corpus can dwarf the prose
+ * it hangs off and every byte lands in `pg_dump` under the bytea default, so
+ * turning it on silently would multiply an existing deployment's backup on its
+ * next sync.
+ *
+ * A failure to LIST is different from a listing of zero: the first means the
+ * attachments may exist and were not seen, so nothing may be retired for that
+ * parent. That distinction is carried by `listingComplete` and is why a listing
+ * error becomes debt here rather than an exception.
+ */
+async function acquireAtlassianAttachments(
+  kind: "confluence" | "jira",
+  client: unknown,
+  raw: any,
+  doc: import("../contracts/models.js").CanonicalDoc,
+  opts: RunOptions,
+): Promise<{ debt: number; persist: (tx: import("../db.js").Tx) => Promise<void> }> {
+  const noop = { debt: 0, persist: async () => {} };
+  if (opts.attachments !== true) return noop;
+
+  const { acquireAttachments, listConfluenceAttachments, listJiraAttachments, persistAttachments } =
+    await import("./attachments.js");
+  const { getJson } = await import("../connectors/auth.js");
+  // The connector wrapper holds the authenticated transport; attachment paths
+  // are fetched through that same transport so the credential, retry funnel and
+  // byte ceiling are the ones the rest of the connector already uses.
+  const dc = ((client as { client?: unknown }).client ?? client) as DcClient;
+
+  let listing: import("./attachments.js").AttachmentListing;
+  try {
+    listing =
+      kind === "jira"
+        ? listJiraAttachments(raw?.fields, dc.baseUrl)
+        : await listConfluenceAttachments(dc, String(raw?.id), (path) => getJson(dc, path));
+  } catch (err) {
+    // Could not enumerate. Publish nothing, retire nothing, and say so.
+    console.log(`  ! ${doc.id}: attachment listing failed: ${(err as Error).message}`);
+    return { debt: 1, persist: async () => {} };
+  }
+
+  const acquisition = await acquireAttachments(dc, listing, (ref, reason) =>
+    console.log(`  ! ${doc.id}: attachment ${ref.nativeId} ${reason}`),
+  );
+  return {
+    debt: acquisition.debt,
+    persist: (tx) =>
+      persistAttachments(tx, {
+        tenant: opts.tenant,
+        source: kind,
+        docId: doc.id,
+        acquisition,
+      }),
+  };
 }
 
 export const confluenceSpec: TimestampSource<ConfluencePage> = {
@@ -268,6 +359,8 @@ export const confluenceSpec: TimestampSource<ConfluencePage> = {
     },
   },
   listIds: (client) => (client as { listIds(): Promise<string[]> }).listIds(),
+  acquireRelated: (client, raw, doc, opts) =>
+    acquireAtlassianAttachments("confluence", client, raw, doc, opts),
 };
 
 export const jiraSpec: TimestampSource<JiraIssue> = {
@@ -275,9 +368,14 @@ export const jiraSpec: TimestampSource<JiraIssue> = {
   description: "Jira issues via JQL, by project, issue key, or raw predicate",
   cursor: "timestamp",
   requiresEnv: ["EIL_JIRA_URL", "EIL_JIRA_TOKEN"],
-  makeClient: async () => {
+  makeClient: async (opts) => {
     const { JiraClient } = await import("../connectors/jira.js");
-    return new JiraClient();
+    // The attachment field is only REQUESTED when attachments are on, so an
+    // issue fetched without it reports "not requested" rather than "none" —
+    // the distinction that stops a sync from retiring every stored attachment.
+    return new JiraClient(undefined, undefined, undefined, {
+      attachments: opts.attachments === true,
+    });
   },
   normalize: (raw, tenant) => normalizeJira(raw, tenant),
   updatedSince: (client, cursor, pred) => (client as JiraLike).updatedSince(cursor, pred),
@@ -289,6 +387,8 @@ export const jiraSpec: TimestampSource<JiraIssue> = {
     },
   },
   listIds: (client) => (client as { listIds(): Promise<string[]> }).listIds(),
+  acquireRelated: (client, raw, doc, opts) =>
+    acquireAtlassianAttachments("jira", client, raw, doc, opts),
 };
 
 /**

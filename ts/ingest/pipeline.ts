@@ -240,7 +240,11 @@ export async function ingestJiraScope(jira: JiraLike, scope: Scope, tenant: stri
 }
 
 async function tombstone(client: Db, id: string, tenant: string): Promise<void> {
-  await client.query("DELETE FROM documents WHERE id = $1 AND tenant = $2", [id, tenant]);
+  // Routed through the lifecycle helper rather than deleting directly, so the
+  // "code documents never carry artifacts" contract is enforced where it is
+  // relied on instead of being a comment that stops being true silently.
+  const { hardDeleteDocument } = await import("../purge.js");
+  await hardDeleteDocument(client, tenant, id);
 }
 
 export async function ingestRepo(

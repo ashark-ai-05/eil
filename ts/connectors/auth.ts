@@ -7,7 +7,7 @@
  */
 
 import { scopedFetch } from "./httpclient.js";
-import { httpError } from "./httperror.js";
+import { RedirectRefused, ResponseTooLarge, httpError } from "./httperror.js";
 import { getSecret } from "./keychain.js";
 import { parseRetryAfter, withRetry } from "./retry.js";
 
@@ -161,14 +161,37 @@ export async function getRaw(client: DcClient, path: string, maxBytes?: number):
   }, RETRY_OPTS);
 }
 
-async function readBoundedText(res: Response, maxBytes?: number): Promise<string> {
-  if (maxBytes === undefined) return res.text();
-  const declaredLength = Number(res.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+/**
+ * Read a response body as bytes, bounded three ways.
+ *
+ * Bytes rather than text is the point: `res.text()` decodes as UTF-8, which
+ * silently mangles any binary payload before it can be hashed. A digest taken
+ * over mangled bytes names content that never existed, so re-derivation — the
+ * whole reason artifacts are retained — would be worthless.
+ *
+ * All three checks are needed and none subsumes the others. `Content-Length` is
+ * a claim the server makes and may understate or omit; the streaming total
+ * catches that but only as bytes arrive; and the final accepted length is the
+ * only number that describes what would actually be stored.
+ */
+async function readBoundedBytes(res: Response, maxBytes?: number): Promise<Buffer> {
+  const declared = Number(res.headers.get("content-length"));
+  if (maxBytes !== undefined && Number.isFinite(declared) && declared > maxBytes) {
+    // Cancelled BEFORE a byte is consumed: refusing after buffering would
+    // defeat the ceiling it is enforcing.
     await res.body?.cancel().catch(() => {});
-    throw new Error(`response body exceeds ${maxBytes} bytes (Content-Length: ${declaredLength})`);
+    throw new ResponseTooLarge(maxBytes, declared, "content-length");
   }
-  if (!res.body) return res.text();
+  if (!res.body) {
+    // No stream to meter, but the accepted length still has to be checked: a
+    // body-less response is not a size-less one, and returning it unchecked
+    // would let the ceiling be bypassed by whichever runtime path produced it.
+    const whole = Buffer.from(await res.arrayBuffer());
+    if (maxBytes !== undefined && whole.length > maxBytes)
+      throw new ResponseTooLarge(maxBytes, whole.length, "accepted");
+    return whole;
+  }
+
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -177,14 +200,96 @@ async function readBoundedText(res: Response, maxBytes?: number): Promise<string
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > maxBytes) {
+      if (maxBytes !== undefined && total > maxBytes) {
         await reader.cancel().catch(() => {});
-        throw new Error(`response body exceeds ${maxBytes} bytes while streaming`);
+        throw new ResponseTooLarge(maxBytes, total, "stream");
       }
       chunks.push(value);
     }
   } finally {
     reader.releaseLock();
   }
-  return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf-8");
+  const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+  // The accepted buffer, checked last. The two checks above are about what was
+  // promised and what arrived; this is about what would be stored.
+  if (maxBytes !== undefined && buf.length > maxBytes)
+    throw new ResponseTooLarge(maxBytes, buf.length, "accepted");
+  return buf;
+}
+
+async function readBoundedText(res: Response, maxBytes?: number): Promise<string> {
+  if (maxBytes === undefined) return res.text();
+  return (await readBoundedBytes(res, maxBytes)).toString("utf-8");
+}
+
+/** How many same-origin hops a download may take before we stop following. */
+export const MAX_REDIRECT_HOPS = 5;
+
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * Fetch, following redirects ONLY while they stay on the origin we authenticated
+ * to.
+ *
+ * The default `redirect: "follow"` is unsafe for an authenticated download: the
+ * runtime re-sends the request to whatever `Location` names, and `client.headers`
+ * carries the enterprise PAT. A page whose attachment link 302s to an external
+ * host would therefore hand that token to the external host, and nothing in the
+ * response would show it happened.
+ *
+ * So redirects are taken manually. Every hop is resolved and its origin compared
+ * to the origin we started from BEFORE any second request is made — a
+ * cross-origin hop is refused without ever being fetched, which is the property
+ * that matters: not "we discarded the response" but "we never sent the header".
+ */
+async function fetchSameOrigin(client: DcClient, start: URL): Promise<Response> {
+  const origin = new URL(client.baseUrl).origin;
+  let url = start;
+  for (let hop = 0; ; hop++) {
+    const res = await client.fetcher(url, {
+      headers: client.headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      redirect: "manual",
+    });
+    if (!REDIRECT_STATUS.has(res.status)) return res;
+
+    const location = res.headers.get("location");
+    await res.body?.cancel().catch(() => {});
+    if (location === null) throw new RedirectRefused(url.toString(), "(none)", "missing-location");
+
+    let next: URL;
+    try {
+      next = new URL(location, url);
+    } catch {
+      throw new RedirectRefused(url.toString(), location, "cross-origin");
+    }
+    if (next.origin !== origin)
+      throw new RedirectRefused(url.toString(), next.toString(), "cross-origin");
+    // Bounded AFTER the origin check so a same-origin loop is reported as a
+    // loop rather than as an escape attempt.
+    if (hop >= MAX_REDIRECT_HOPS)
+      throw new RedirectRefused(url.toString(), next.toString(), "hop-limit");
+    url = next;
+  }
+}
+
+/**
+ * Fetch a binary body through the shared timeout/retry funnel.
+ *
+ * A fresh `AbortSignal` per attempt, constructed inside the retried closure, so
+ * a retry never reuses an already-aborted signal. A size refusal is NOT
+ * retryable — the file will be the same size next time — so it propagates as
+ * `ResponseTooLarge` rather than being folded into the transport error the
+ * retry policy inspects.
+ */
+export async function getBytes(client: DcClient, path: string, maxBytes?: number): Promise<Buffer> {
+  const url = new URL(client.baseUrl + path);
+  return withRetry(async () => {
+    const res = await fetchSameOrigin(client, url);
+    // Status is inspected before any body byte is read, so a retryable failure
+    // never begins a stream it would have to abandon half-consumed.
+    if (!res.ok)
+      throw httpError("GET", url, res.status, parseRetryAfter(res.headers.get("retry-after")));
+    return readBoundedBytes(res, maxBytes);
+  }, RETRY_OPTS);
 }

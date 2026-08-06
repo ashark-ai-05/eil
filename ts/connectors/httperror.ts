@@ -73,3 +73,55 @@ export function httpError(
     code: "http_status",
   });
 }
+
+/**
+ * A response refused for exceeding its byte ceiling.
+ *
+ * A distinct type, not a generic connector error, because the two mean
+ * different things to coverage: "this artifact is too large to store" is a
+ * permanent, actionable property of the file, while a transport or auth failure
+ * is transient or a configuration problem. Collapsing them would make an
+ * operator retry something that can never succeed, and would hide a
+ * misconfigured ceiling behind what looks like a flaky network.
+ *
+ * Carries no body and no URL beyond what is already redacted upstream.
+ */
+export class ResponseTooLarge extends Error {
+  constructor(
+    readonly limit: number,
+    readonly observed: number,
+    /** Whether the refusal came from the declared length or from streaming. */
+    readonly source: "content-length" | "stream" | "accepted",
+  ) {
+    // Message wording is preserved verbatim from the untyped errors this
+    // replaces, so existing assertions keep their meaning. The TYPE is the new
+    // contract; the string is not the thing callers should branch on.
+    super(
+      source === "stream"
+        ? `response body exceeds ${limit} bytes while streaming`
+        : source === "content-length"
+          ? `response body exceeds ${limit} bytes (Content-Length: ${observed})`
+          : `response body exceeds ${limit} bytes (accepted: ${observed})`,
+    );
+    this.name = "ResponseTooLarge";
+  }
+}
+
+/**
+ * A redirect that was refused rather than followed.
+ *
+ * Distinct from a transport error because it is permanent and it is a SECURITY
+ * outcome: the connector's Authorization header would have been re-sent to the
+ * host the redirect named. Retrying cannot help, and folding it into a generic
+ * connector failure would hide an origin escape behind a flaky-network label.
+ */
+export class RedirectRefused extends Error {
+  constructor(
+    readonly from: string,
+    readonly to: string,
+    readonly reason: "cross-origin" | "hop-limit" | "missing-location",
+  ) {
+    super(`refusing redirect (${reason}): ${from} -> ${to}`);
+    this.name = "RedirectRefused";
+  }
+}
