@@ -5,6 +5,45 @@ Requirements everywhere: **Node 22+**, **pnpm 10+**, **PostgreSQL 16/17**, git.
 Everything runs on a laptop with no Docker. Components promote to Kubernetes
 per the pathway in the design docs, each behind its own gate.
 
+## Platform capability matrix
+
+The CLI itself is cross-platform, and every feature below except one runs
+everywhere Node 22+ does. The exception is called out because a bare
+"cross-platform" claim beside a Linux-only feature is how you end up planning
+around a capability your host will never have.
+
+| Capability | macOS | Windows | WSL2 | Linux |
+|---|---|---|---|---|
+| Ingest, search, retrieval, embeddings, MCP tools | yes | yes | yes | yes |
+| Credential storage | Keychain | Credential Manager | bridges to Windows CredMan | libsecret / env |
+| **Sandboxed PDF parsing** | **no** | **no** | only if the probe passes | only if the probe passes |
+
+Sandboxed parsing needs cgroup v2 and a working user systemd manager, so it is
+**Linux-only in this release**. WSL2 counts as Linux only when the probe
+actually passes — never inferred from a version string or from `systemd=true`
+in `/etc/wsl.conf`, because configuration records what was *requested* and the
+probe records what *works*.
+
+Ask your own host rather than reading this table:
+
+```sh
+eil isolation:probe     # exits non-zero when parsing cannot be sandboxed
+eil doctor              # same state, alongside every other readiness check
+```
+
+Three outcomes, which mean different things:
+
+| State | Meaning | What to do |
+|---|---|---|
+| `platform_unsupported` | no sandbox backend exists for this OS | nothing — use Linux, or wait for a backend |
+| `isolation_unavailable` | Linux, but prerequisites are missing | enable a user manager and cgroup delegation, e.g. `loginctl enable-linger $USER` |
+| `isolation_broken` | prerequisites look present and the probe still failed | investigate — this is the one that matters, because the host *appears* capable |
+
+`platform_unsupported` and `isolation_unavailable` do not fail `eil doctor`:
+sandboxed parsing is opt-in, and a laptop that never uses it should not report
+a failure. `isolation_broken` does fail, because a memory limit that silently
+did not apply is a misconfiguration, not a platform limitation.
+
 ## Install Postgres
 
 ### macOS

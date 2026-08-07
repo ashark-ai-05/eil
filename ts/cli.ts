@@ -583,6 +583,33 @@ program
     }
   });
 
+/**
+ * Exit status for an isolation refusal.
+ *
+ * Documented and distinct because loudness and command success are separate
+ * axes: `platform_unsupported` is merely informational in `doctor`, but a
+ * command that was explicitly ASKED to verify isolation and could not must not
+ * exit zero. A zero exit with nothing done is indistinguishable from success.
+ */
+const EXIT_ISOLATION_UNAVAILABLE = 4;
+
+program
+  .command("isolation:probe")
+  .description("Rehearse the parser sandbox end to end and report the exact capability state")
+  .action(async () => {
+    const { probeIsolation } = await import("./isolation/index.js");
+    const result = await probeIsolation();
+    console.log(JSON.stringify(result, null, 2));
+    if (result.ok) {
+      console.log(`\nok  ${result.backend} — sandboxed extraction is available on this host`);
+      return;
+    }
+    // Never reaches a parser on any of these paths; the refusal happens here.
+    console.log(`\n${result.reason}: ${result.detail}`);
+    if (result.fix) console.log(`  -> ${result.fix}`);
+    process.exitCode = EXIT_ISOLATION_UNAVAILABLE;
+  });
+
 program
   .command("demo:preflight")
   .description("Check everything the demo needs BEFORE you are standing in front of people")
@@ -1134,7 +1161,7 @@ embed
 program
   .command("doctor")
   .description(
-    "Preflight: Node version, proxy/TLS route, database reachability, connector credentials and keychain",
+    "Preflight: Node version, proxy/TLS route, database reachability, connector credentials, keychain and parser isolation",
   )
   .action(async () => {
     const { runDoctor } = await import("./doctor.js");

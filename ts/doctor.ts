@@ -278,6 +278,35 @@ async function authReadinessChecks(
  * a real credential anywhere in reach, the same injected-fetcher pattern
  * every connector test in this repo already uses.
  */
+/**
+ * Can this host sandbox a hostile parser?
+ *
+ * Mapped onto `DoctorCheck`'s single boolean with the three states preserved in
+ * `blocked.reason`, because they warrant different responses:
+ *
+ *  - `platform_unsupported` and `isolation_unavailable` are **not** failures.
+ *    Sandboxed extraction is opt-in, so a macOS laptop or a Linux host that has
+ *    never enabled delegation should not fail `eil doctor` over a feature it is
+ *    not using. The reason and the fix are still reported.
+ *  - `isolation_broken` IS a failure. The host looks capable and is not — a
+ *    memory limit that silently did not apply, or a channel that returns
+ *    nothing. That is the only one an operator must act on, and the only one
+ *    that would otherwise be mistaken for a platform limitation.
+ */
+export async function isolationCheck(): Promise<DoctorCheck> {
+  const { probeIsolation } = await import("./isolation/index.js");
+  const result = await probeIsolation();
+  if (result.ok)
+    return { name: "isolation", ok: true, detail: `${result.backend}: ${result.detail}` };
+  const detail = result.fix ? `${result.detail} — ${result.fix}` : result.detail;
+  return {
+    name: "isolation",
+    ok: result.reason !== "isolation_broken",
+    detail,
+    blocked: { reason: result.reason },
+  };
+}
+
 export async function runDoctor(
   env: NodeJS.ProcessEnv = process.env,
   fetcher?: Fetcher,
@@ -291,6 +320,7 @@ export async function runDoctor(
     ...connectorCredentialChecks(env),
     ...(await connectivityChecks(env)),
     ...(await authReadinessChecks(env, keychain, fetcher)),
+    await isolationCheck(),
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }
